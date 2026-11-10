@@ -1,1 +1,1 @@
-# WantNote V0: minify off for the first playtest package.
+# WantNote 0.2.0: minify off for the playtest package.

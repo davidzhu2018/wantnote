@@ -32,9 +32,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.davidzhu.wantnote.data.Note
+import com.davidzhu.wantnote.data.SearchText
 import com.davidzhu.wantnote.ui.LocalNotes
-import com.davidzhu.wantnote.ui.theme.InkMuted
-import com.davidzhu.wantnote.ui.theme.Paper
 import kotlinx.coroutines.flow.flowOf
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,7 +50,7 @@ fun SearchScreen(
     val results by resultsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
 
     Scaffold(
-        containerColor = Paper,
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = { Text("搜索") },
@@ -60,7 +59,9 @@ fun SearchScreen(
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Paper),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                ),
             )
         },
     ) { padding ->
@@ -82,21 +83,20 @@ fun SearchScreen(
             if (query.isBlank()) {
                 Text(
                     text = "输入关键字搜索标题或正文。",
-                    color = InkMuted,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
                 )
             } else if (results.isEmpty()) {
                 Text(
                     text = "没有找到匹配的笔记。",
-                    color = InkMuted,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
                 )
             } else {
                 LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
                     items(results, key = { it.id }) { note ->
-                        val title = note.title.trim().ifBlank {
-                            note.body.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() } ?: "无标题"
-                        }
+                        val title = SearchText.displayTitle(note)
+                        val preview = SearchText.preview(note)
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -109,11 +109,11 @@ fun SearchScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            if (note.body.isNotBlank()) {
+                            if (preview.isNotBlank()) {
                                 Text(
-                                    text = note.body.trim(),
+                                    text = preview,
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = InkMuted,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
