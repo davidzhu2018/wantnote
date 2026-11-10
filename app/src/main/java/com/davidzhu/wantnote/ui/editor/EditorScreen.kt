@@ -11,6 +11,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,6 +39,7 @@ import androidx.compose.material.icons.outlined.Highlight
 import androidx.compose.material.icons.outlined.HorizontalRule
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.StrikethroughS
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -48,6 +51,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -90,9 +94,14 @@ import com.davidzhu.wantnote.data.BlockFontSize
 import com.davidzhu.wantnote.data.BlockType
 import com.davidzhu.wantnote.data.Markup
 import com.davidzhu.wantnote.data.NoteBlock
+import com.davidzhu.wantnote.data.NoteRepository
+import com.davidzhu.wantnote.data.Tag
+import com.davidzhu.wantnote.ui.LocalAi
 import com.davidzhu.wantnote.ui.LocalMedia
 import com.davidzhu.wantnote.ui.LocalNotes
 import com.davidzhu.wantnote.ui.LocalSettings
+import com.davidzhu.wantnote.ui.components.TagChip
+import com.davidzhu.wantnote.ui.components.TagColorPicker
 import com.davidzhu.wantnote.ui.theme.LocalFontScale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.debounce
@@ -110,6 +119,7 @@ fun EditorScreen(
     val repository = LocalNotes.current
     val settingsRepo = LocalSettings.current
     val media = LocalMedia.current
+    val ai = LocalAi.current
     val settings by settingsRepo.observe().collectAsStateWithLifecycle(initialValue = AppSettings.DEFAULT)
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -119,6 +129,10 @@ fun EditorScreen(
     var title by remember { mutableStateOf("") }
     var blocks by remember { mutableStateOf(listOf<NoteBlock>()) }
     var focusedId by remember { mutableStateOf<String?>(null) }
+    var noteTags by remember { mutableStateOf(listOf<Tag>()) }
+    var newTagPath by remember { mutableStateOf("") }
+    var newTagColor by remember { mutableStateOf(Tag.defaultColor()) }
+    var generating by remember { mutableStateOf(false) }
     val fields = remember { mutableStateMapOf<String, TextFieldValue>() }
     val requesters = remember { mutableMapOf<String, FocusRequester>() }
 
@@ -319,6 +333,7 @@ fun EditorScreen(
                 fields[block.id] = TextFieldValue(block.text, TextRange(block.text.length))
             }
             blocks = next
+            noteTags = repository.getTagsForNote(noteId)
             focusedId = next.firstOrNull { !it.isMedia && it.blockType != BlockType.DIVIDER }?.id ?: next.firstOrNull()?.id
         }
         ready = true
@@ -341,11 +356,46 @@ fun EditorScreen(
         runCatching { requester.requestFocus() }
     }
 
+    val charCount = remember(blocks) { NoteRepository.bodyCharCount(blocks) }
+
     fun leave() {
         scope.launch {
             repository.save(noteId, titleState.value, blocksState.value)
-            repository.deleteIfBlank(noteId)
+            val removed = repository.deleteIfBlank(noteId)
+            if (!removed) {
+                ai.enqueueAutoTitleTags(noteId, force = false)
+            }
             onBack()
+        }
+    }
+
+    fun generateTitleTags() {
+        if (generating) return
+        generating = true
+        scope.launch {
+            repository.save(noteId, titleState.value, blocksState.value)
+            val result = ai.runAutoTitleTags(noteId, force = true)
+            result.onSuccess { suggestion ->
+                if (suggestion.title.isNotBlank()) {
+                    title = suggestion.title
+                }
+                noteTags = repository.getTagsForNote(noteId)
+                snackbar.showSnackbar("已生成标题和标签")
+            }.onFailure { error ->
+                snackbar.showSnackbar(error.message ?: "生成失败，已保留当前内容")
+            }
+            generating = false
+        }
+    }
+
+    suspend fun addTagFromInput() {
+        val path = Tag.normalizePath(newTagPath)
+        if (path.isEmpty()) return
+        val tag = repository.addTagToNote(noteId, path, newTagColor) ?: return
+        noteTags = repository.getTagsForNote(noteId)
+        newTagPath = ""
+        if (tag.path == path) {
+            // keep the selected color for the next tag
         }
     }
 
@@ -395,10 +445,15 @@ fun EditorScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text("大纲") },
+                title = { Text("$charCount 字") },
                 navigationIcon = {
                     IconButton(onClick = { leave() }) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { generateTitleTags() }, enabled = !generating) {
+                        Icon(Icons.Outlined.AutoAwesome, contentDescription = "生成标题和标签")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -456,6 +511,20 @@ fun EditorScreen(
             HorizontalDivider(
                 modifier = Modifier.padding(vertical = 12.dp),
                 color = MaterialTheme.colorScheme.outline,
+            )
+            EditorTagBar(
+                tags = noteTags,
+                newPath = newTagPath,
+                newColor = newTagColor,
+                onPathChange = { newTagPath = it },
+                onColorChange = { newTagColor = it },
+                onAdd = { scope.launch { addTagFromInput() } },
+                onRemove = { tag ->
+                    scope.launch {
+                        repository.removeTagFromNote(noteId, tag.id)
+                        noteTags = repository.getTagsForNote(noteId)
+                    }
+                },
             )
             LazyColumn(
                 modifier = Modifier
@@ -721,5 +790,53 @@ private fun ToolButton(label: String, icon: ImageVector, onClick: () -> Unit) {
             Icon(icon, contentDescription = label, modifier = Modifier.size(20.dp))
             Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
         }
+    }
+}
+
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EditorTagBar(
+    tags: List<Tag>,
+    newPath: String,
+    newColor: Long,
+    onPathChange: (String) -> Unit,
+    onColorChange: (Long) -> Unit,
+    onAdd: () -> Unit,
+    onRemove: (Tag) -> Unit,
+) {
+    Column(modifier = Modifier.padding(bottom = 8.dp)) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            tags.forEach { tag ->
+                TagChip(tag = tag, onRemove = { onRemove(tag) })
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = newPath,
+                onValueChange = onPathChange,
+                modifier = Modifier.weight(1f),
+                label = { Text("添加标签（可用斜杠表示层级）") },
+                placeholder = { Text("工作/项目") },
+                singleLine = true,
+            )
+            TextButton(onClick = onAdd, enabled = Tag.normalizePath(newPath).isNotEmpty()) {
+                Text("添加")
+            }
+        }
+        TagColorPicker(
+            selected = newColor,
+            onSelect = onColorChange,
+            modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
+        )
     }
 }

@@ -1,6 +1,7 @@
 package com.davidzhu.wantnote
 
 import android.app.Application
+import com.davidzhu.wantnote.ai.AiService
 import com.davidzhu.wantnote.data.MediaStorage
 import com.davidzhu.wantnote.data.NoteDatabase
 import com.davidzhu.wantnote.data.NoteRepository
@@ -17,6 +18,13 @@ class WantNoteApplication : Application() {
     val repository by lazy { NoteRepository(database) }
     val settingsRepository by lazy { SettingsRepository(database.settingsDao()) }
     val mediaStorage by lazy { MediaStorage(this) }
+    val aiService by lazy {
+        AiService(
+            providerDao = database.aiProviderDao(),
+            settingsRepository = settingsRepository,
+            notes = repository,
+        )
+    }
 
     override fun onCreate() {
         super.onCreate()

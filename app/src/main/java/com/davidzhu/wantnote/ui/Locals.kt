@@ -1,6 +1,7 @@
 package com.davidzhu.wantnote.ui
 
 import androidx.compose.runtime.staticCompositionLocalOf
+import com.davidzhu.wantnote.ai.AiService
 import com.davidzhu.wantnote.data.MediaStorage
 import com.davidzhu.wantnote.data.NoteRepository
 import com.davidzhu.wantnote.data.SettingsRepository
@@ -15,4 +16,8 @@ val LocalSettings = staticCompositionLocalOf<SettingsRepository> {
 
 val LocalMedia = staticCompositionLocalOf<MediaStorage> {
     error("MediaStorage not provided")
+}
+
+val LocalAi = staticCompositionLocalOf<AiService> {
+    error("AiService not provided")
 }

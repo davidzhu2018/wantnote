@@ -11,39 +11,57 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.davidzhu.wantnote.data.AppSettings
 import com.davidzhu.wantnote.data.Dates
 import com.davidzhu.wantnote.data.LocalInsights
 import com.davidzhu.wantnote.data.SearchText
+import com.davidzhu.wantnote.ui.LocalAi
 import com.davidzhu.wantnote.ui.LocalNotes
+import com.davidzhu.wantnote.ui.LocalSettings
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun InsightsScreen(onOpenNote: (String) -> Unit) {
+fun InsightsScreen(onOpenNote: (String) -> Unit, onOpenAiSettings: () -> Unit = {}) {
     val repository = LocalNotes.current
+    val settingsRepo = LocalSettings.current
+    val ai = LocalAi.current
     val items by repository.observeAllWithBlocks().collectAsStateWithLifecycle(initialValue = emptyList())
+    val settings by settingsRepo.observe().collectAsStateWithLifecycle(initialValue = AppSettings.DEFAULT)
     val summary = remember(items) { LocalInsights.summarize(items) }
     val weekStart = remember { Dates.startOfWeek() }
+    val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarHostState() }
+    var running by remember { mutableStateOf(false) }
     val reviewNotes = remember(items, weekStart) {
         items.filter { it.note.updatedAt >= weekStart || it.note.createdAt >= weekStart }
     }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = { Text("洞察") },
@@ -116,11 +134,83 @@ fun InsightsScreen(onOpenNote: (String) -> Unit) {
             Spacer(modifier = Modifier.height(8.dp))
             Text("提炼总结", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Text(
-                text = "根据已有笔记在本机统计和摘录，不连接外部模型。",
+                text = if (settings.aiSummaryModelId.isBlank()) {
+                    "配置 AI 模型后，可以用所选模型生成本页提炼。未配置时仍显示本机统计。"
+                } else {
+                    "使用已选择的模型生成本页提炼。本机统计始终保留在下方。"
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
+                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
             )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = {
+                        if (settings.aiSummaryProviderId.isBlank() || settings.aiSummaryModelId.isBlank()) {
+                            onOpenAiSettings()
+                            return@Button
+                        }
+                        if (running) return@Button
+                        running = true
+                        scope.launch {
+                            val corpus = items.take(40).joinToString("\n\n") { item ->
+                                val title = SearchText.displayTitle(item.note)
+                                val body = item.note.body.take(800)
+                                "《$title》\n$body"
+                            }
+                            val result = ai.generateSummary(corpus)
+                            result.onSuccess { text ->
+                                settingsRepo.update {
+                                    it.copy(aiSummaryText = text, aiSummaryUpdatedAt = System.currentTimeMillis())
+                                }
+                            }.onFailure { error ->
+                                snackbar.showSnackbar(error.message ?: "提炼失败，已保留本机统计")
+                            }
+                            running = false
+                        }
+                    },
+                    enabled = !running,
+                ) {
+                    Text(if (running) "正在提炼…" else if (settings.aiSummaryModelId.isBlank()) "去配置 AI" else "用 AI 提炼")
+                }
+                if (settings.aiSummaryText.isNotBlank()) {
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                settingsRepo.update { it.copy(aiSummaryText = "", aiSummaryUpdatedAt = 0L) }
+                            }
+                        },
+                    ) { Text("清除 AI 总结") }
+                }
+            }
+            if (settings.aiSummaryText.isNotBlank()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("AI 提炼", style = MaterialTheme.typography.titleSmall)
+                        if (settings.aiSummaryUpdatedAt > 0L) {
+                            Text(
+                                Dates.formatTimestamp(settings.aiSummaryUpdatedAt),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            text = settings.aiSummaryText,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                }
+            }
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.medium,

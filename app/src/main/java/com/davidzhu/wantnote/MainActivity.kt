@@ -8,6 +8,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.davidzhu.wantnote.data.AppSettings
+import com.davidzhu.wantnote.ui.LocalAi
 import com.davidzhu.wantnote.ui.LocalMedia
 import com.davidzhu.wantnote.ui.LocalNotes
 import com.davidzhu.wantnote.ui.LocalSettings
@@ -27,6 +28,7 @@ class MainActivity : ComponentActivity() {
                     LocalNotes provides app.repository,
                     LocalSettings provides app.settingsRepository,
                     LocalMedia provides app.mediaStorage,
+                    LocalAi provides app.aiService,
                 ) {
                     WantNoteApp()
                 }

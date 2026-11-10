@@ -4,7 +4,9 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.util.LruCache
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
 import java.io.FileOutputStream
@@ -13,6 +15,8 @@ import java.util.UUID
 class MediaStorage(private val context: Context) {
     private val mediaDir: File
         get() = File(context.filesDir, "media").apply { mkdirs() }
+
+    private val previewCache = LruCache<String, Bitmap>(32)
 
     fun fileFor(relativePath: String): File {
         return File(context.filesDir, relativePath)
@@ -95,6 +99,36 @@ class MediaStorage(private val context: Context) {
         val sample = Integer.highestOneBit((longest / maxSide).coerceAtLeast(1))
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }
         return BitmapFactory.decodeFile(file.absolutePath, opts)
+    }
+
+    fun decodeThumbnail(relativePath: String, isVideo: Boolean, maxSide: Int = 360): Bitmap? {
+        val key = "$relativePath|$isVideo|$maxSide"
+        previewCache.get(key)?.let { return it }
+        val decoded = if (isVideo) {
+            decodeVideoThumbnail(relativePath, maxSide)
+        } else {
+            decodePreview(relativePath, maxSide)
+        }
+        if (decoded != null) {
+            previewCache.put(key, decoded)
+        }
+        return decoded
+    }
+
+    fun decodeVideoThumbnail(relativePath: String, maxSide: Int = 360): Bitmap? {
+        val file = fileFor(relativePath)
+        if (!file.exists()) return null
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            val frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: retriever.frameAtTime
+            if (frame == null) null else scaleDown(frame, maxSide)
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
     }
 
     private fun guessExtension(uri: Uri, fallback: String): String {

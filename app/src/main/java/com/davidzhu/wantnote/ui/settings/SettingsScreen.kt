@@ -46,7 +46,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(onOpenAiSettings: () -> Unit = {}) {
     val settingsRepo = LocalSettings.current
     val settings by settingsRepo.observe().collectAsStateWithLifecycle(initialValue = AppSettings.DEFAULT)
     val scope = rememberCoroutineScope()
@@ -163,6 +163,18 @@ fun SettingsScreen() {
                         scope.launch { settingsRepo.update { it.copy(compressImages = checked) } }
                     },
                 )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+            SectionTitle("AI 设置")
+            Text(
+                "配置 DeepSeek、智谱、Kimi、阿里云百炼、千问或自定义接口。填入 key 后可一键获取模型，再选择用于提炼和自动标题/标签的模型。密钥只保存在本机。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            Button(onClick = onOpenAiSettings) {
+                Text("打开 AI 设置")
             }
 
             Spacer(modifier = Modifier.height(24.dp))

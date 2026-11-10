@@ -75,6 +75,12 @@ data class AppSettings(
     val s3AccessKey: String = "",
     val s3SecretKey: String = "",
     val s3Prefix: String = "",
+    val aiSummaryProviderId: String = "",
+    val aiSummaryModelId: String = "",
+    val aiTitleTagProviderId: String = "",
+    val aiTitleTagModelId: String = "",
+    val aiSummaryText: String = "",
+    val aiSummaryUpdatedAt: Long = 0L,
 ) {
     val palette: ThemePalette get() = ThemePalette.fromStorage(themeName)
     val fontScaleOption: FontScaleOption get() = FontScaleOption.fromStorage(fontScale)

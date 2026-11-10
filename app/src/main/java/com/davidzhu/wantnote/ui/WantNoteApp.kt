@@ -41,6 +41,7 @@ import com.davidzhu.wantnote.ui.editor.EditorScreen
 import com.davidzhu.wantnote.ui.home.HomeScreen
 import com.davidzhu.wantnote.ui.insights.InsightsScreen
 import com.davidzhu.wantnote.ui.search.SearchScreen
+import com.davidzhu.wantnote.ui.settings.AiSettingsScreen
 import com.davidzhu.wantnote.ui.settings.SettingsScreen
 import kotlinx.coroutines.launch
 
@@ -112,10 +113,16 @@ fun WantNoteApp() {
                 CalendarScreen(onOpenNote = { openEditor(it) })
             }
             composable("insights") {
-                InsightsScreen(onOpenNote = { openEditor(it) })
+                InsightsScreen(
+                    onOpenNote = { openEditor(it) },
+                    onOpenAiSettings = { nav.navigate("ai-settings") },
+                )
             }
             composable("settings") {
-                SettingsScreen()
+                SettingsScreen(onOpenAiSettings = { nav.navigate("ai-settings") })
+            }
+            composable("ai-settings") {
+                AiSettingsScreen(onBack = { nav.popBackStack() })
             }
             composable(
                 route = "editor/{noteId}",
