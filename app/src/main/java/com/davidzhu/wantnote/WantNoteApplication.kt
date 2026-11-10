@@ -6,6 +6,7 @@ import com.davidzhu.wantnote.data.MediaStorage
 import com.davidzhu.wantnote.data.NoteDatabase
 import com.davidzhu.wantnote.data.NoteRepository
 import com.davidzhu.wantnote.data.SettingsRepository
+import com.davidzhu.wantnote.sync.CloudSyncService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,6 +24,13 @@ class WantNoteApplication : Application() {
             providerDao = database.aiProviderDao(),
             settingsRepository = settingsRepository,
             notes = repository,
+        )
+    }
+    val cloudSync by lazy {
+        CloudSyncService(
+            notes = repository,
+            settingsRepository = settingsRepository,
+            media = mediaStorage,
         )
     }
 

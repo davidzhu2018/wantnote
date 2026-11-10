@@ -13,6 +13,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.davidzhu.wantnote.data.AppSettings
@@ -107,6 +108,7 @@ private val Palettes = mapOf(
 @Composable
 fun WantNoteTheme(
     settings: AppSettings = AppSettings.DEFAULT,
+    fontFamily: FontFamily = FontFamily.Default,
     content: @Composable () -> Unit,
 ) {
     val palette = Palettes[settings.palette] ?: Palettes.getValue(ThemePalette.PAPER)
@@ -163,18 +165,20 @@ fun WantNoteTheme(
     CompositionLocalProvider(
         LocalWantNoteColors provides WantNoteColors(highlight = palette.highlight),
         LocalFontScale provides scale,
+        LocalEditorFontFamily provides fontFamily,
     ) {
         MaterialTheme(
             colorScheme = scheme,
-            typography = scaledTypography(scale),
+            typography = scaledTypography(scale, fontFamily),
             content = content,
         )
     }
 }
 
-private fun scaledTypography(scale: Float): Typography {
+private fun scaledTypography(scale: Float, fontFamily: FontFamily): Typography {
     val base = Typography()
     fun androidx.compose.ui.text.TextStyle.scaled() = copy(
+        fontFamily = fontFamily,
         fontSize = (fontSize.value * scale).sp,
         lineHeight = (lineHeight.value * scale).sp,
     )

@@ -58,6 +58,34 @@ enum class HomeViewMode(val label: String) {
     }
 }
 
+enum class SyncMethod(val label: String) {
+    WEBDAV("WebDAV"),
+    S3("S3"),
+    ;
+
+    companion object {
+        fun fromStorage(value: String?): SyncMethod {
+            return entries.firstOrNull { it.name == value } ?: WEBDAV
+        }
+    }
+}
+
+enum class EditorFontOption(val id: String, val label: String, val assetPath: String?) {
+    SYSTEM("SYSTEM", "系统默认", null),
+    NOTO_SANS_SC("NOTO_SANS_SC", "Noto Sans SC", "fonts/NotoSansSC-Regular.ttf"),
+    NOTO_SERIF_SC("NOTO_SERIF_SC", "Noto Serif SC", "fonts/NotoSerifSC-Regular.ttf"),
+    INTER("INTER", "Inter", "fonts/Inter-Regular.ttf"),
+    JETBRAINS_MONO("JETBRAINS_MONO", "JetBrains Mono", "fonts/JetBrainsMono-Regular.ttf"),
+    CUSTOM("CUSTOM", "自定义字体", null),
+    ;
+
+    companion object {
+        fun fromStorage(value: String?): EditorFontOption {
+            return entries.firstOrNull { it.id == value || it.name == value } ?: SYSTEM
+        }
+    }
+}
+
 @Entity(tableName = "settings")
 data class AppSettings(
     @PrimaryKey val id: Int = 1,
@@ -81,11 +109,17 @@ data class AppSettings(
     val aiTitleTagModelId: String = "",
     val aiSummaryText: String = "",
     val aiSummaryUpdatedAt: Long = 0L,
+    val compressVideos: Boolean = false,
+    val editorFontId: String = EditorFontOption.SYSTEM.id,
+    val customFontPath: String = "",
+    val syncMethod: String = SyncMethod.WEBDAV.name,
 ) {
     val palette: ThemePalette get() = ThemePalette.fromStorage(themeName)
     val fontScaleOption: FontScaleOption get() = FontScaleOption.fromStorage(fontScale)
     val dayNightMode: DayNightMode get() = DayNightMode.fromStorage(dayNight)
     val homeViewMode: HomeViewMode get() = HomeViewMode.fromStorage(homeView)
+    val editorFont: EditorFontOption get() = EditorFontOption.fromStorage(editorFontId)
+    val syncMethodOption: SyncMethod get() = SyncMethod.fromStorage(syncMethod)
 
     companion object {
         val DEFAULT = AppSettings()

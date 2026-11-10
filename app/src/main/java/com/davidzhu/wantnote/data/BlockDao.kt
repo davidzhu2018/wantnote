@@ -20,6 +20,12 @@ interface BlockDao {
     @Query("SELECT * FROM note_blocks WHERE type = 'TASK'")
     suspend fun getAllTasks(): List<NoteBlock>
 
+    @Query("SELECT * FROM note_blocks")
+    suspend fun getAll(): List<NoteBlock>
+
+    @Query("SELECT * FROM note_blocks WHERE mediaPath != ''")
+    suspend fun getAllWithMedia(): List<NoteBlock>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(blocks: List<NoteBlock>)
 

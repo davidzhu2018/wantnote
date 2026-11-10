@@ -41,8 +41,14 @@ import com.davidzhu.wantnote.ui.editor.EditorScreen
 import com.davidzhu.wantnote.ui.home.HomeScreen
 import com.davidzhu.wantnote.ui.insights.InsightsScreen
 import com.davidzhu.wantnote.ui.search.SearchScreen
+import com.davidzhu.wantnote.ui.settings.AboutScreen
 import com.davidzhu.wantnote.ui.settings.AiSettingsScreen
+import com.davidzhu.wantnote.ui.settings.AttachmentSettingsScreen
+import com.davidzhu.wantnote.ui.settings.CloudSyncScreen
+import com.davidzhu.wantnote.ui.settings.EditorSettingsScreen
+import com.davidzhu.wantnote.ui.settings.GeneralSettingsScreen
 import com.davidzhu.wantnote.ui.settings.SettingsScreen
+import com.davidzhu.wantnote.ui.settings.TagManagementScreen
 import kotlinx.coroutines.launch
 
 private enum class MainTab(
@@ -115,14 +121,32 @@ fun WantNoteApp() {
             composable("insights") {
                 InsightsScreen(
                     onOpenNote = { openEditor(it) },
-                    onOpenAiSettings = { nav.navigate("ai-settings") },
+                    onOpenAiSettings = { nav.navigate("settings/ai") },
                 )
             }
             composable("settings") {
-                SettingsScreen(onOpenAiSettings = { nav.navigate("ai-settings") })
+                SettingsScreen(onOpen = { nav.navigate(it) })
             }
-            composable("ai-settings") {
+            composable("settings/general") {
+                GeneralSettingsScreen(onBack = { nav.popBackStack() })
+            }
+            composable("settings/editor") {
+                EditorSettingsScreen(onBack = { nav.popBackStack() })
+            }
+            composable("settings/tags") {
+                TagManagementScreen(onBack = { nav.popBackStack() })
+            }
+            composable("settings/attachments") {
+                AttachmentSettingsScreen(onBack = { nav.popBackStack() })
+            }
+            composable("settings/sync") {
+                CloudSyncScreen(onBack = { nav.popBackStack() })
+            }
+            composable("settings/ai") {
                 AiSettingsScreen(onBack = { nav.popBackStack() })
+            }
+            composable("settings/about") {
+                AboutScreen(onBack = { nav.popBackStack() })
             }
             composable(
                 route = "editor/{noteId}",

@@ -58,6 +58,9 @@ interface NoteDao {
     @Query("SELECT * FROM notes WHERE id = :id")
     suspend fun getById(id: String): Note?
 
+    @Query("SELECT * FROM notes ORDER BY updatedAt DESC")
+    suspend fun getAll(): List<Note>
+
     @Query(
         """
         SELECT * FROM notes
@@ -69,6 +72,9 @@ interface NoteDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(note: Note)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(notes: List<Note>)
 
     @Query("DELETE FROM notes WHERE id = :id")
     suspend fun delete(id: String)

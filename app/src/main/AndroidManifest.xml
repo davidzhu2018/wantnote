@@ -7,7 +7,7 @@
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
-            <data android:mimeType="video/*" />
+            <data android:mimeType="*/*" />
         </intent>
     </queries>
 

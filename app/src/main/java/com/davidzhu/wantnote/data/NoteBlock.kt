@@ -13,6 +13,7 @@ enum class BlockType {
     DIVIDER,
     IMAGE,
     VIDEO,
+    FILE,
 }
 
 enum class BlockFontSize(val label: String, val sp: Int) {
@@ -66,9 +67,12 @@ data class NoteBlock(
     val isMedia: Boolean
         get() = blockType == BlockType.IMAGE || blockType == BlockType.VIDEO
 
+    val isAttachment: Boolean
+        get() = isMedia || blockType == BlockType.FILE
+
     fun isBlank(): Boolean {
         return when (blockType) {
-            BlockType.DIVIDER, BlockType.IMAGE, BlockType.VIDEO -> false
+            BlockType.DIVIDER, BlockType.IMAGE, BlockType.VIDEO, BlockType.FILE -> false
             BlockType.TASK -> text.isBlank() && !checked
             else -> text.isBlank()
         }

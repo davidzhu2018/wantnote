@@ -203,6 +203,129 @@ class NoteRepository(private val db: NoteDatabase) {
         tags.removeNoteTag(noteId, tagId)
     }
 
+
+    suspend fun getAllNotes(): List<Note> = notes.getAll()
+
+    suspend fun getAllBlocks(): List<NoteBlock> = blocks.getAll()
+
+    suspend fun getAllMediaBlocks(): List<NoteBlock> = blocks.getAllWithMedia()
+
+    suspend fun getAllCrossRefs(): List<NoteTagCrossRef> = tags.getAllCrossRefs()
+
+    suspend fun upsertNoteDirect(note: Note) {
+        notes.upsert(note)
+    }
+
+    suspend fun replaceNoteBlocks(noteId: String, blockList: List<NoteBlock>) {
+        val normalized = blockList.mapIndexed { index, block ->
+            block.copy(noteId = noteId, indent = block.indent.coerceIn(0, 8), sortOrder = index)
+        }
+        db.withTransaction {
+            blocks.deleteByNoteId(noteId)
+            if (normalized.isNotEmpty()) {
+                blocks.upsertAll(normalized)
+            }
+        }
+    }
+
+    class TagPathConflict(val path: String) : Exception("标签路径已存在：$path")
+
+    suspend fun renameTag(tagId: String, newPath: String): Tag? {
+        val normalized = Tag.normalizePath(newPath)
+        if (normalized.isEmpty()) return null
+        val existing = tags.getById(tagId) ?: return null
+        if (existing.path == normalized) return existing
+        val collision = tags.getByPath(normalized)
+        if (collision != null && collision.id != tagId) {
+            throw TagPathConflict(normalized)
+        }
+        val oldPath = existing.path
+        val prefix = "$oldPath/"
+        val all = tags.getAll()
+        db.withTransaction {
+            tags.upsert(existing.copy(path = normalized))
+            all.filter { it.id != tagId && it.path.startsWith(prefix) }.forEach { child ->
+                val suffix = child.path.removePrefix(prefix)
+                val nextPath = "$normalized/$suffix"
+                val other = tags.getByPath(nextPath)
+                if (other != null && other.id != child.id) {
+                    throw TagPathConflict(nextPath)
+                }
+                tags.upsert(child.copy(path = nextPath))
+            }
+        }
+        return tags.getById(tagId)
+    }
+
+    suspend fun addChildTag(parentId: String, childName: String, color: Long = Tag.defaultColor()): Tag? {
+        val parent = tags.getById(parentId) ?: return null
+        val leaf = childName.trim().trim('/')
+        if (leaf.isEmpty()) return null
+        return upsertTag("${parent.path}/$leaf", color)
+    }
+
+    /**
+     * Merge a remote note into the local database.
+     * Last-write wins by updatedAt; equal timestamps keep the local copy.
+     * Returns true if the local note was inserted or replaced by the remote.
+     */
+    suspend fun mergeRemoteNote(remote: Note, remoteBlocks: List<NoteBlock>): Boolean {
+        val local = notes.getById(remote.id)
+        if (local == null) {
+            db.withTransaction {
+                notes.upsert(remote)
+                if (remoteBlocks.isNotEmpty()) {
+                    blocks.upsertAll(remoteBlocks.mapIndexed { index, block ->
+                        block.copy(noteId = remote.id, sortOrder = index)
+                    })
+                }
+            }
+            return true
+        }
+        if (remote.updatedAt > local.updatedAt) {
+            db.withTransaction {
+                notes.upsert(remote)
+                blocks.deleteByNoteId(remote.id)
+                if (remoteBlocks.isNotEmpty()) {
+                    blocks.upsertAll(remoteBlocks.mapIndexed { index, block ->
+                        block.copy(noteId = remote.id, sortOrder = index)
+                    })
+                }
+            }
+            return true
+        }
+        return false
+    }
+
+    suspend fun mergeRemoteTag(remote: Tag): Tag {
+        val byId = tags.getById(remote.id)
+        val byPath = tags.getByPath(remote.path)
+        return when {
+            byId != null && byId.path == remote.path -> {
+                if (byId.color != remote.color) {
+                    val updated = byId.copy(color = remote.color)
+                    tags.upsert(updated)
+                    updated
+                } else {
+                    byId
+                }
+            }
+            byId != null && byPath == null -> {
+                tags.upsert(byId.copy(path = remote.path, color = remote.color))
+                tags.getById(remote.id) ?: byId
+            }
+            byPath != null && byPath.id != remote.id -> byPath
+            else -> {
+                tags.upsert(remote)
+                remote
+            }
+        }
+    }
+
+    suspend fun attachTag(noteId: String, tagId: String) {
+        tags.upsertCrossRef(NoteTagCrossRef(noteId, tagId))
+    }
+
     companion object {
         fun filterNotes(
             items: List<NoteWithDetails>,

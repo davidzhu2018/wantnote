@@ -39,10 +39,13 @@ import androidx.compose.material.icons.outlined.Highlight
 import androidx.compose.material.icons.outlined.HorizontalRule
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.StrikethroughS
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -51,7 +54,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -101,7 +103,7 @@ import com.davidzhu.wantnote.ui.LocalMedia
 import com.davidzhu.wantnote.ui.LocalNotes
 import com.davidzhu.wantnote.ui.LocalSettings
 import com.davidzhu.wantnote.ui.components.TagChip
-import com.davidzhu.wantnote.ui.components.TagColorPicker
+import com.davidzhu.wantnote.ui.theme.LocalEditorFontFamily
 import com.davidzhu.wantnote.ui.theme.LocalFontScale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.debounce
@@ -121,6 +123,8 @@ fun EditorScreen(
     val media = LocalMedia.current
     val ai = LocalAi.current
     val settings by settingsRepo.observe().collectAsStateWithLifecycle(initialValue = AppSettings.DEFAULT)
+    val allTags by repository.observeAllTags().collectAsStateWithLifecycle(initialValue = emptyList())
+    val editorFont = LocalEditorFontFamily.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -130,9 +134,9 @@ fun EditorScreen(
     var blocks by remember { mutableStateOf(listOf<NoteBlock>()) }
     var focusedId by remember { mutableStateOf<String?>(null) }
     var noteTags by remember { mutableStateOf(listOf<Tag>()) }
-    var newTagPath by remember { mutableStateOf("") }
-    var newTagColor by remember { mutableStateOf(Tag.defaultColor()) }
+    var showTagPicker by remember { mutableStateOf(false) }
     var generating by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
     val fields = remember { mutableStateMapOf<String, TextFieldValue>() }
     val requesters = remember { mutableMapOf<String, FocusRequester>() }
 
@@ -195,7 +199,7 @@ fun EditorScreen(
         val index = focusedIndex()
         val current = blocks[index]
         val convertible = current.blockType == BlockType.PARAGRAPH && current.text.isBlank() && current.mediaPath.isBlank()
-        if (convertible && type != BlockType.DIVIDER && type != BlockType.IMAGE && type != BlockType.VIDEO) {
+        if (convertible && type != BlockType.DIVIDER && type != BlockType.IMAGE && type != BlockType.VIDEO && type != BlockType.FILE) {
             updateBlocks(
                 blocks.mapIndexed { i, block ->
                     if (i == index) block.copy(type = type.name) else block
@@ -210,7 +214,7 @@ fun EditorScreen(
     fun wrapFocused(marker: String) {
         val id = focusedId ?: blocks.getOrNull(focusedIndex())?.id ?: return
         val block = blocks.firstOrNull { it.id == id } ?: return
-        if (block.blockType == BlockType.DIVIDER || block.isMedia) return
+        if (block.blockType == BlockType.DIVIDER || block.isAttachment) return
         val value = fieldOf(block)
         val (next, lo, hi) = Markup.wrap(value.text, value.selection.min, value.selection.max, marker)
         fields[id] = TextFieldValue(next, TextRange(lo, hi))
@@ -298,7 +302,7 @@ fun EditorScreen(
             fields[block.id] = TextFieldValue(left, TextRange(left.length))
             val created = newBlock(
                 type = when (block.blockType) {
-                    BlockType.IMAGE, BlockType.VIDEO, BlockType.DIVIDER -> BlockType.PARAGRAPH
+                    BlockType.IMAGE, BlockType.VIDEO, BlockType.FILE, BlockType.DIVIDER -> BlockType.PARAGRAPH
                     else -> block.blockType
                 },
                 indent = block.indent,
@@ -334,7 +338,7 @@ fun EditorScreen(
             }
             blocks = next
             noteTags = repository.getTagsForNote(noteId)
-            focusedId = next.firstOrNull { !it.isMedia && it.blockType != BlockType.DIVIDER }?.id ?: next.firstOrNull()?.id
+            focusedId = next.firstOrNull { !it.isAttachment && it.blockType != BlockType.DIVIDER }?.id ?: next.firstOrNull()?.id
         }
         ready = true
     }
@@ -361,11 +365,35 @@ fun EditorScreen(
     fun leave() {
         scope.launch {
             repository.save(noteId, titleState.value, blocksState.value)
-            val removed = repository.deleteIfBlank(noteId)
-            if (!removed) {
-                ai.enqueueAutoTitleTags(noteId, force = false)
-            }
+            repository.deleteIfBlank(noteId)
             onBack()
+        }
+    }
+
+    fun saveExplicit() {
+        if (saving) return
+        saving = true
+        scope.launch {
+            repository.save(noteId, titleState.value, blocksState.value)
+            val result = ai.runAutoTitleTags(noteId, force = false)
+            val latest = repository.getById(noteId)
+            if (latest != null && latest.title.isNotBlank()) {
+                title = latest.title
+            }
+            noteTags = repository.getTagsForNote(noteId)
+            result.onSuccess {
+                snackbar.showSnackbar("已保存")
+            }.onFailure { error ->
+                val msg = error.message.orEmpty()
+                if (msg.contains("请先在设置里") || msg.contains("还没有配置") || msg.contains("空笔记")) {
+                    snackbar.showSnackbar("已保存")
+                } else if (msg.contains("已有内容")) {
+                    snackbar.showSnackbar("已保存")
+                } else {
+                    snackbar.showSnackbar("已保存。自动标题/标签未完成：${error.message ?: "已保留当前内容"}")
+                }
+            }
+            saving = false
         }
     }
 
@@ -385,17 +413,6 @@ fun EditorScreen(
                 snackbar.showSnackbar(error.message ?: "生成失败，已保留当前内容")
             }
             generating = false
-        }
-    }
-
-    suspend fun addTagFromInput() {
-        val path = Tag.normalizePath(newTagPath)
-        if (path.isEmpty()) return
-        val tag = repository.addTagToNote(noteId, path, newTagColor) ?: return
-        noteTags = repository.getTagsForNote(noteId)
-        newTagPath = ""
-        if (tag.path == path) {
-            // keep the selected color for the next tag
         }
     }
 
@@ -423,7 +440,7 @@ fun EditorScreen(
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             runCatching {
-                withContext(Dispatchers.IO) { media.importVideo(uri) }
+                withContext(Dispatchers.IO) { media.importVideo(uri, settings.compressVideos) }
             }.onSuccess { path ->
                 val index = focusedIndex()
                 val indent = blocks.getOrNull(index)?.indent ?: 0
@@ -431,6 +448,25 @@ fun EditorScreen(
                 insertAfter(focusedIndex(), newBlock(BlockType.PARAGRAPH, indent = indent), focus = true)
             }.onFailure {
                 snackbar.showSnackbar("无法插入视频")
+            }
+        }
+    }
+
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { media.importFile(uri) }
+            }.onSuccess { path ->
+                val index = focusedIndex()
+                val indent = blocks.getOrNull(index)?.indent ?: 0
+                val name = path.substringAfterLast('/')
+                insertAfter(index, newBlock(BlockType.FILE, indent = indent, text = name, mediaPath = path))
+                insertAfter(focusedIndex(), newBlock(BlockType.PARAGRAPH, indent = indent), focus = true)
+            }.onFailure {
+                snackbar.showSnackbar("无法插入文件")
             }
         }
     }
@@ -452,8 +488,11 @@ fun EditorScreen(
                     }
                 },
                 actions = {
+                    TextButton(onClick = { saveExplicit() }, enabled = !saving) {
+                        Text("保存")
+                    }
                     IconButton(onClick = { generateTitleTags() }, enabled = !generating) {
-                        Icon(Icons.Outlined.AutoAwesome, contentDescription = "生成标题和标签")
+                        Icon(Icons.Outlined.AutoAwesome, contentDescription = "重新生成标题和标签")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -481,6 +520,9 @@ fun EditorScreen(
                 onVideo = {
                     videoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
                 },
+                onFile = {
+                    filePicker.launch(arrayOf("*/*"))
+                },
             )
         },
     ) { padding ->
@@ -493,7 +535,10 @@ fun EditorScreen(
             BasicTextField(
                 value = title,
                 onValueChange = { title = it },
-                textStyle = MaterialTheme.typography.titleLarge.copy(color = MaterialTheme.colorScheme.onBackground),
+                textStyle = MaterialTheme.typography.titleLarge.copy(
+                    color = MaterialTheme.colorScheme.onBackground,
+                    fontFamily = editorFont,
+                ),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.onBackground),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -514,11 +559,7 @@ fun EditorScreen(
             )
             EditorTagBar(
                 tags = noteTags,
-                newPath = newTagPath,
-                newColor = newTagColor,
-                onPathChange = { newTagPath = it },
-                onColorChange = { newTagColor = it },
-                onAdd = { scope.launch { addTagFromInput() } },
+                onPick = { showTagPicker = true },
                 onRemove = { tag ->
                     scope.launch {
                         repository.removeTagFromNote(noteId, tag.id)
@@ -546,6 +587,9 @@ fun EditorScreen(
                         onBackspaceEmpty = { mergeOrDelete(block.id) },
                         onOpenVideo = { path ->
                             val file = media.fileFor(path)
+                            val mime = context.contentResolver.getType(
+                                android.net.Uri.fromFile(file),
+                            ) ?: guessedMime(path)
                             runCatching {
                                 val uri = FileProvider.getUriForFile(
                                     context,
@@ -553,18 +597,74 @@ fun EditorScreen(
                                     file,
                                 )
                                 val intent = Intent(Intent.ACTION_VIEW).apply {
-                                    setDataAndType(uri, "video/*")
+                                    setDataAndType(uri, mime)
                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                 }
-                                context.startActivity(Intent.createChooser(intent, "打开视频"))
+                                context.startActivity(Intent.createChooser(intent, "打开附件"))
                             }.onFailure {
-                                scope.launch { snackbar.showSnackbar("无法打开视频") }
+                                scope.launch { snackbar.showSnackbar("无法打开附件") }
                             }
                         },
                     )
                 }
             }
         }
+    }
+
+    if (showTagPicker) {
+        AlertDialog(
+            onDismissRequest = { showTagPicker = false },
+            title = { Text("选择标签") },
+            text = {
+                val selected = noteTags.map { it.id }.toSet()
+                if (allTags.isEmpty()) {
+                    Text("还没有标签。请到设置 → 标签管理中创建。")
+                } else {
+                    androidx.compose.foundation.lazy.LazyColumn {
+                        items(allTags.size) { index ->
+                            val tag = allTags[index]
+                            val on = tag.id in selected
+                            FilterChip(
+                                selected = on,
+                                onClick = {
+                                    scope.launch {
+                                        if (on) {
+                                            repository.removeTagFromNote(noteId, tag.id)
+                                        } else {
+                                            repository.addTagToNote(noteId, tag.path, tag.color)
+                                        }
+                                        noteTags = repository.getTagsForNote(noteId)
+                                    }
+                                },
+                                label = { Text(tag.path) },
+                                modifier = Modifier.padding(end = 6.dp, bottom = 6.dp),
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTagPicker = false }) { Text("完成") }
+            },
+        )
+    }
+}
+
+
+internal fun guessedMime(path: String): String {
+    val ext = path.substringAfterLast('.', "").lowercase()
+    return when (ext) {
+        "jpg", "jpeg" -> "image/jpeg"
+        "png" -> "image/png"
+        "gif" -> "image/gif"
+        "webp" -> "image/webp"
+        "mp4" -> "video/mp4"
+        "webm" -> "video/webm"
+        "3gp" -> "video/3gpp"
+        "mkv" -> "video/x-matroska"
+        "pdf" -> "application/pdf"
+        "txt" -> "text/plain"
+        else -> "*/*"
     }
 }
 
@@ -599,6 +699,7 @@ private fun OutlineBlockRow(
     onOpenVideo: (String) -> Unit,
 ) {
     val scale = LocalFontScale.current
+    val fontFamily = LocalEditorFontFamily.current
     val fontSize = (block.blockFontSize.sp * scale).sp
     Row(
         modifier = Modifier
@@ -648,12 +749,16 @@ private fun OutlineBlockRow(
             BlockType.VIDEO -> {
                 LocalVideoBlock(path = block.mediaPath, onOpen = { onOpenVideo(block.mediaPath) })
             }
+            BlockType.FILE -> {
+                LocalFileBlock(path = block.mediaPath, label = block.text, onOpen = { onOpenVideo(block.mediaPath) })
+            }
             else -> {
                 BasicTextField(
                     value = value,
                     onValueChange = onValueChange,
                     textStyle = MaterialTheme.typography.bodyLarge.copy(
                         color = MaterialTheme.colorScheme.onBackground,
+                        fontFamily = fontFamily,
                         fontSize = fontSize,
                         lineHeight = (block.blockFontSize.sp * scale * 1.5f).sp,
                     ),
@@ -759,6 +864,7 @@ private fun OutlineToolbar(
     onOutdent: () -> Unit,
     onImage: () -> Unit,
     onVideo: () -> Unit,
+    onFile: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -780,6 +886,7 @@ private fun OutlineToolbar(
         ToolButton("反缩进", Icons.AutoMirrored.Outlined.FormatIndentDecrease, onOutdent)
         ToolButton("图片", Icons.Outlined.Image, onImage)
         ToolButton("视频", Icons.Outlined.Videocam, onVideo)
+        ToolButton("文件", Icons.Outlined.AttachFile, onFile)
     }
 }
 
@@ -798,11 +905,7 @@ private fun ToolButton(label: String, icon: ImageVector, onClick: () -> Unit) {
 @Composable
 private fun EditorTagBar(
     tags: List<Tag>,
-    newPath: String,
-    newColor: Long,
-    onPathChange: (String) -> Unit,
-    onColorChange: (Long) -> Unit,
-    onAdd: () -> Unit,
+    onPick: () -> Unit,
     onRemove: (Tag) -> Unit,
 ) {
     Column(modifier = Modifier.padding(bottom = 8.dp)) {
@@ -814,29 +917,35 @@ private fun EditorTagBar(
             tags.forEach { tag ->
                 TagChip(tag = tag, onRemove = { onRemove(tag) })
             }
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedTextField(
-                value = newPath,
-                onValueChange = onPathChange,
-                modifier = Modifier.weight(1f),
-                label = { Text("添加标签（可用斜杠表示层级）") },
-                placeholder = { Text("工作/项目") },
-                singleLine = true,
-            )
-            TextButton(onClick = onAdd, enabled = Tag.normalizePath(newPath).isNotEmpty()) {
-                Text("添加")
+            TextButton(onClick = onPick) {
+                Text("选择标签")
             }
         }
-        TagColorPicker(
-            selected = newColor,
-            onSelect = onColorChange,
-            modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
-        )
+    }
+}
+
+@Composable
+private fun LocalFileBlock(path: String, label: String, onOpen: () -> Unit) {
+    val media = LocalMedia.current
+    val file = media.fileFor(path)
+    Surface(
+        onClick = onOpen,
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(Icons.Outlined.AttachFile, contentDescription = null)
+            Column {
+                Text(label.ifBlank { if (file.exists()) file.name else "本地文件" }, style = MaterialTheme.typography.titleSmall)
+                Text("点击用系统应用打开", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }

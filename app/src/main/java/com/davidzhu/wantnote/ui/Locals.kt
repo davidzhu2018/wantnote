@@ -5,6 +5,7 @@ import com.davidzhu.wantnote.ai.AiService
 import com.davidzhu.wantnote.data.MediaStorage
 import com.davidzhu.wantnote.data.NoteRepository
 import com.davidzhu.wantnote.data.SettingsRepository
+import com.davidzhu.wantnote.sync.CloudSyncService
 
 val LocalNotes = staticCompositionLocalOf<NoteRepository> {
     error("NoteRepository not provided")
@@ -20,4 +21,8 @@ val LocalMedia = staticCompositionLocalOf<MediaStorage> {
 
 val LocalAi = staticCompositionLocalOf<AiService> {
     error("AiService not provided")
+}
+
+val LocalSync = staticCompositionLocalOf<CloudSyncService> {
+    error("CloudSyncService not provided")
 }

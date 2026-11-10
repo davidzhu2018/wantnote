@@ -10,6 +10,7 @@ import android.util.LruCache
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
 import java.io.FileOutputStream
+import java.security.MessageDigest
 import java.util.UUID
 
 class MediaStorage(private val context: Context) {
@@ -30,8 +31,14 @@ class MediaStorage(private val context: Context) {
         }
     }
 
-    fun importVideo(uri: Uri): String {
+    fun importVideo(uri: Uri, compress: Boolean = false): String {
+        // Full transcode is not implemented in this package; the flag is
+        // accepted so callers honor the setting. The source file is copied.
         return copyRaw(uri, guessExtension(uri, "mp4"))
+    }
+
+    fun importFile(uri: Uri): String {
+        return copyRaw(uri, guessExtension(uri, "bin"))
     }
 
     private fun copyRaw(uri: Uri, extension: String): String {
@@ -153,4 +160,83 @@ class MediaStorage(private val context: Context) {
         }
         return fallback
     }
+
+    fun fontsDir(): File = File(context.filesDir, "fonts").apply { mkdirs() }
+
+    fun importFont(uri: Uri): String {
+        val ext = guessExtension(uri, "ttf").lowercase()
+        val safeExt = if (ext in setOf("ttf", "otf", "ttc", "otc")) ext else "ttf"
+        val name = "${UUID.randomUUID()}.$safeExt"
+        val dest = File(fontsDir(), name)
+        context.contentResolver.openInputStream(uri).use { input ->
+            requireNotNull(input) { "无法读取所选字体" }
+            dest.outputStream().use { output -> input.copyTo(output) }
+        }
+        require(dest.length() > 0L) { "字体文件为空" }
+        return "fonts/$name"
+    }
+
+    fun listMediaFiles(): List<File> {
+        val dir = mediaDir
+        if (!dir.exists()) return emptyList()
+        return dir.listFiles()?.filter { it.isFile }?.sortedBy { it.name }.orEmpty()
+    }
+
+    fun relativePathOf(file: File): String {
+        val root = context.filesDir.absolutePath.trimEnd('/') + "/"
+        val absolute = file.absolutePath
+        return if (absolute.startsWith(root)) absolute.removePrefix(root) else "media/${file.name}"
+    }
+
+    fun deleteRelative(relativePath: String): Boolean {
+        val file = fileFor(relativePath)
+        return file.exists() && file.delete()
+    }
+
+    fun sha256(relativePath: String): String {
+        val file = fileFor(relativePath)
+        if (!file.exists()) return ""
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n <= 0) break
+                digest.update(buf, 0, n)
+            }
+        }
+        return digest.digest().joinToString("") { b -> "%02x".format(b) }
+    }
+
+    fun writeIncoming(relativePath: String, input: java.io.InputStream) {
+        val dest = fileFor(relativePath)
+        dest.parentFile?.mkdirs()
+        dest.outputStream().use { output -> input.copyTo(output) }
+    }
+
+    enum class AttachmentKind { FILE, IMAGE, VIDEO }
+
+    data class StoredAttachment(
+        val relativePath: String,
+        val file: File,
+        val kind: AttachmentKind,
+        val size: Long,
+        val referenced: Boolean,
+        val noteIds: List<String>,
+    )
+
+    companion object {
+        fun kindOf(relativePath: String, blockType: String? = null): AttachmentKind {
+            if (blockType == BlockType.IMAGE.name) return AttachmentKind.IMAGE
+            if (blockType == BlockType.VIDEO.name) return AttachmentKind.VIDEO
+            if (blockType == BlockType.FILE.name) return AttachmentKind.FILE
+            val ext = relativePath.substringAfterLast('.', "").lowercase()
+            return when (ext) {
+                "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif" -> AttachmentKind.IMAGE
+                "mp4", "webm", "3gp", "mkv", "mov", "avi", "m4v" -> AttachmentKind.VIDEO
+                else -> AttachmentKind.FILE
+            }
+        }
+    }
+
 }

@@ -17,7 +17,7 @@ import java.util.UUID
         NoteTagCrossRef::class,
         AiProvider::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class NoteDatabase : RoomDatabase() {
@@ -155,13 +155,22 @@ abstract class NoteDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE settings ADD COLUMN compressVideos INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE settings ADD COLUMN editorFontId TEXT NOT NULL DEFAULT 'SYSTEM'")
+                db.execSQL("ALTER TABLE settings ADD COLUMN customFontPath TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE settings ADD COLUMN syncMethod TEXT NOT NULL DEFAULT 'WEBDAV'")
+            }
+        }
+
         fun create(context: Context): NoteDatabase {
             return Room.databaseBuilder(
                 context.applicationContext,
                 NoteDatabase::class.java,
                 "wantnote.db",
             )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
         }
     }

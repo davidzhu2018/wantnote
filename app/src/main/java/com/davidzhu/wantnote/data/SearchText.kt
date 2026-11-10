@@ -11,6 +11,7 @@ object SearchText {
                 BlockType.DIVIDER -> "---"
                 BlockType.IMAGE -> "[图片]"
                 BlockType.VIDEO -> "[视频]"
+                BlockType.FILE -> "[文件] " + block.text
                 BlockType.ORDERED, BlockType.UNORDERED, BlockType.PARAGRAPH -> block.text
             }
         }
@@ -45,6 +46,7 @@ object SearchText {
             .removePrefix("[ ] ")
             .replace("[图片]", "")
             .replace("[视频]", "")
+            .replace("[文件]", "")
             .replace("---", "")
             .replace(Regex("""\*\*(.+?)\*\*"""), "$1")
             .replace(Regex("""(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)"""), "$1")
