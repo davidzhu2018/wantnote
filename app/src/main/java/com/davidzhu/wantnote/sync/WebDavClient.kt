@@ -21,6 +21,23 @@ internal class WebDavClient(
         propfind("", depth = 0)
     }
 
+    /**
+     * Short, user-facing failure reason for a failed PROPFIND (connection
+     * test). Never includes the server's raw response body (often an XML
+     * error document) — just the status code plus actionable Chinese hints,
+     * with special-casing for the two most common 坚果云 mistakes.
+     */
+    private fun propfindFailure(code: Int): String = when (code) {
+        401 -> "无法连接 WebDAV（HTTP 401）：用户名或密码不正确。" +
+            "坚果云需要使用网页端「账户信息 → 安全选项」里生成的「第三方应用密码」，而不是登录密码。"
+        403 -> "无法连接 WebDAV（HTTP 403）：服务器拒绝了请求。" +
+            "请检查服务器地址是否包含 /dav/（坚果云应填 https://dav.jianguoyun.com/dav/），" +
+            "并确认使用的是坚果云「第三方应用密码」而不是网页登录密码。"
+        404 -> "无法连接 WebDAV（HTTP 404）：地址不存在。请确认服务器地址和路径是否正确。"
+        in 500..599 -> "无法连接 WebDAV（HTTP $code）：服务器暂时出错，请稍后重试。"
+        else -> "无法连接 WebDAV（HTTP $code）"
+    }
+
     fun ensureFolder(relative: String) {
         val parts = relative.trim('/').split('/').filter { it.isNotEmpty() }
         var acc = ""
@@ -88,21 +105,33 @@ internal class WebDavClient(
     }
 
     fun exists(relative: String): Boolean {
-        val code = request("PROPFIND", relative, body = null, contentType = null, extraHeaders = mapOf("Depth" to "0")).code
+        val code = propfindCode(relative, depth = 0)
         return code in 200..299
     }
 
     private fun propfind(relative: String, depth: Int) {
-        val response = request(
+        val code = propfindCode(relative, depth)
+        if (code !in 200..299) {
+            throw SyncException(propfindFailure(code))
+        }
+    }
+
+    /**
+     * PROPFIND with a standard, explicit body (resourcetype etc.). Some
+     * servers — including 坚果云 — are picky about empty-body PROPFIND or
+     * non-canonical URLs, so the request always sends a well-formed XML
+     * payload and a proper Content-Type.
+     */
+    private fun propfindCode(relative: String, depth: Int): Int {
+        val body = PROPFIND_BODY.toByteArray(StandardCharsets.UTF_8)
+        return request(
             "PROPFIND",
             relative,
-            body = null,
-            contentType = "application/xml",
+            body = body.inputStream(),
+            contentType = "application/xml; charset=utf-8",
+            contentLength = body.size.toLong(),
             extraHeaders = mapOf("Depth" to depth.toString()),
-        )
-        if (response.code !in 200..299) {
-            throw SyncException("无法连接 WebDAV（HTTP ${response.code}）${suffix(response.body)}")
-        }
+        ).code
     }
 
     private data class Response(val code: Int, val body: String)
@@ -168,11 +197,15 @@ internal class WebDavClient(
 
     private fun join(relative: String): String {
         val rel = relative.trim().trimStart('/')
-        return if (rel.isEmpty()) root else "$root$rel"
+        val cleaned = rel.split('/').filter { it.isNotEmpty() && it != "." && it != ".." }.joinToString("/")
+        return if (cleaned.isEmpty()) root else "$root$cleaned"
     }
 
     private fun suffix(body: String): String {
-        val short = Redacting.message(Exception(body.trim().replace("\\s+".toRegex(), " ").take(160)), secrets)
+        val trimmed = body.trim()
+        // Never surface raw XML error documents to the user.
+        if (trimmed.isEmpty() || trimmed.startsWith("<") || trimmed.startsWith("<?xml")) return ""
+        val short = Redacting.message(Exception(trimmed.replace("\\s+".toRegex(), " ").take(160)), secrets)
         return if (short.isBlank()) "" else "：$short"
     }
 
@@ -182,12 +215,28 @@ internal class WebDavClient(
     }
 
     companion object {
+        private val PROPFIND_BODY =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+                "<d:propfind xmlns:d=\"DAV:\">" +
+                "<d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/></d:prop>" +
+                "</d:propfind>"
+
         fun normalizeBase(raw: String): String {
             var value = raw.trim()
             if (value.isEmpty()) throw SyncException("请填写 WebDAV 服务器地址")
             if (!value.contains("://")) value = "https://$value"
-            if (!value.endsWith("/")) value += "/"
-            return value
+            // Canonicalize the path part: collapse duplicate slashes, drop
+            // dot segments, and guarantee exactly one trailing slash so that
+            // https://dav.jianguoyun.com/dav (no slash) and
+            // https://dav.jianguoyun.com//dav/ both resolve identically.
+            val schemeEnd = value.indexOf("://") + 3
+            val head = value.substring(0, schemeEnd)
+            var tail = value.substring(schemeEnd).replace(Regex("/{2,}"), "/")
+            val segments = tail.split('/').filter { it.isNotEmpty() && it != "." }
+            if (segments.any { it == ".." }) throw SyncException("服务器地址包含不支持的路径")
+            tail = "/" + segments.joinToString("/")
+            if (!tail.endsWith("/")) tail += "/"
+            return head + tail
         }
     }
 }

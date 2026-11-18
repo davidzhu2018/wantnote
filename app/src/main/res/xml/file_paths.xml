@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
+    <!-- 0.6.0 起附件优先存放在 Documents/WantNote（卸载后可找回）。 -->
+    <external-path name="wantnote_documents" path="Documents/WantNote/" />
+    <!-- 兼容 0.5.0 及以前保存在应用私有目录里的旧附件。 -->
     <files-path name="media" path="media/" />
 </paths>

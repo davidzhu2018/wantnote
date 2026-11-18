@@ -70,11 +70,37 @@ interface NoteDao {
     )
     fun search(q: String): Flow<List<Note>>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(note: Note)
+    // NOTE: never use OnConflictStrategy.REPLACE for notes. REPLACE deletes the
+    // existing row before inserting; note_tags has ON DELETE CASCADE, so the
+    // note's tag associations would be silently wiped on every save. Insert
+    // with IGNORE first and UPDATE in place when the row already exists.
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(note: Note): Long
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAll(notes: List<Note>)
+    @Query(
+        """
+        UPDATE notes SET title = :title, body = :body,
+            createdAt = :createdAt, updatedAt = :updatedAt
+        WHERE id = :id
+        """,
+    )
+    suspend fun updateColumns(id: String, title: String, body: String, createdAt: Long, updatedAt: Long)
+
+    @Transaction
+    suspend fun upsert(note: Note) {
+        if (insertIfAbsent(note) == -1L) {
+            updateColumns(note.id, note.title, note.body, note.createdAt, note.updatedAt)
+        }
+    }
+
+    @Transaction
+    suspend fun upsertAll(notes: List<Note>) {
+        notes.forEach { note ->
+            if (insertIfAbsent(note) == -1L) {
+                updateColumns(note.id, note.title, note.body, note.createdAt, note.updatedAt)
+            }
+        }
+    }
 
     @Query("DELETE FROM notes WHERE id = :id")
     suspend fun delete(id: String)

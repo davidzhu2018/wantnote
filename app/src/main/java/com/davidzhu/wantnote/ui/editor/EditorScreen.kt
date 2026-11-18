@@ -111,6 +111,7 @@ import com.davidzhu.wantnote.ui.components.TagColorPicker
 import com.davidzhu.wantnote.ui.theme.LocalEditorFontFamily
 import com.davidzhu.wantnote.ui.theme.LocalFontScale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -368,11 +369,25 @@ fun EditorScreen(
 
     val charCount = remember(blocks) { NoteRepository.bodyCharCount(blocks) }
 
+    /**
+     * 顶栏返回与系统返回共用：先立刻把当前标题和正文同步落盘（不走
+     * 400ms debounce，也不依赖这次 composition 的生命周期），再退出。
+     * 保存放在 NonCancellable 里执行，即使返回导致 composition 被取消、
+     * rememberCoroutineScope 被清掉，这次保存也一定会写完；onBack 在
+     * 保存结束后才调用（保存失败也会退出，不让用户卡在编辑器）。
+     */
     fun leave() {
+        val titleNow = titleState.value
+        val blocksNow = blocksState.value
         scope.launch {
-            repository.save(noteId, titleState.value, blocksState.value)
-            repository.deleteIfBlank(noteId)
-            onBack()
+            try {
+                withContext(NonCancellable + Dispatchers.IO) {
+                    repository.save(noteId, titleNow, blocksNow)
+                    repository.deleteIfBlank(noteId)
+                }
+            } finally {
+                onBack()
+            }
         }
     }
 

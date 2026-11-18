@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -20,8 +21,21 @@ interface TagDao {
     @Query("SELECT * FROM tags WHERE path = :path LIMIT 1")
     suspend fun getByPath(path: String): Tag?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(tag: Tag)
+    // NOTE: never use OnConflictStrategy.REPLACE for tags. REPLACE deletes the
+    // existing row before inserting; note_tags has ON DELETE CASCADE, so
+    // renaming/recoloring a tag would silently detach it from every note.
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(tag: Tag): Long
+
+    @Query("UPDATE tags SET path = :path, color = :color WHERE id = :id")
+    suspend fun updateColumns(id: String, path: String, color: Long)
+
+    @Transaction
+    suspend fun upsert(tag: Tag) {
+        if (insertIfAbsent(tag) == -1L) {
+            updateColumns(tag.id, tag.path, tag.color)
+        }
+    }
 
     @Query("DELETE FROM tags WHERE id = :id")
     suspend fun delete(id: String)

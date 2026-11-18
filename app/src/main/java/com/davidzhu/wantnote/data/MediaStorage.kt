@@ -14,13 +14,16 @@ import java.security.MessageDigest
 import java.util.UUID
 
 class MediaStorage(private val context: Context) {
+    private val root: File
+        get() = AppStorage.baseDir(context)
+
     private val mediaDir: File
-        get() = File(context.filesDir, "media").apply { mkdirs() }
+        get() = File(root, "media").apply { mkdirs() }
 
     private val previewCache = LruCache<String, Bitmap>(32)
 
     fun fileFor(relativePath: String): File {
-        return File(context.filesDir, relativePath)
+        return File(root, relativePath)
     }
 
     fun importImage(uri: Uri, compress: Boolean): String {
@@ -161,7 +164,7 @@ class MediaStorage(private val context: Context) {
         return fallback
     }
 
-    fun fontsDir(): File = File(context.filesDir, "fonts").apply { mkdirs() }
+    fun fontsDir(): File = File(root, "fonts").apply { mkdirs() }
 
     fun importFont(uri: Uri): String {
         val ext = guessExtension(uri, "ttf").lowercase()
@@ -183,7 +186,7 @@ class MediaStorage(private val context: Context) {
     }
 
     fun relativePathOf(file: File): String {
-        val root = context.filesDir.absolutePath.trimEnd('/') + "/"
+        val root = AppStorage.relativeRoot(context)
         val absolute = file.absolutePath
         return if (absolute.startsWith(root)) absolute.removePrefix(root) else "media/${file.name}"
     }

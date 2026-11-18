@@ -7,6 +7,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import com.davidzhu.wantnote.data.AppSettings
 import com.davidzhu.wantnote.data.EditorFontOption
+import com.davidzhu.wantnote.data.AppStorage
 import java.io.File
 
 val LocalEditorFontFamily = staticCompositionLocalOf<FontFamily> { FontFamily.Default }
@@ -20,7 +21,7 @@ fun loadEditorFontFamily(context: Context, settings: AppSettings): FontFamily {
                 if (relative.isBlank()) {
                     FontFamily.Default
                 } else {
-                    val file = File(context.filesDir, relative)
+                    val file = File(AppStorage.baseDir(context), relative)
                     if (!file.exists()) FontFamily.Default else FontFamily(Font(file = file, weight = FontWeight.Normal))
                 }
             }

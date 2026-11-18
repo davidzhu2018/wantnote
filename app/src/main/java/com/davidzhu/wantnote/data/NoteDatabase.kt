@@ -171,10 +171,14 @@ abstract class NoteDatabase : RoomDatabase() {
         }
 
         fun create(context: Context): NoteDatabase {
+            // 0.6.0：数据库优先放在 Documents/WantNote（卸载后可找回），
+            // 未授权时回退到旧私有位置；首次启动由 AppStorage.prepare 迁移旧数据。
+            val dbFile = AppStorage.dbFile(context)
+            dbFile.parentFile?.mkdirs()
             return Room.databaseBuilder(
                 context.applicationContext,
                 NoteDatabase::class.java,
-                "wantnote.db",
+                dbFile.absolutePath,
             )
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()

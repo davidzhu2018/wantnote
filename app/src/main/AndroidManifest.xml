@@ -1,8 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- AI 提炼、自动标题/标签、拉取模型需要访问外部接口。密钥只存在本机。 -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      笔记数据（数据库 + 附件）保存在用户可见的 Documents/WantNote，卸载后仍能找回。
+      - Android 11+（R 及以上）：需要「所有文件访问」权限（MANAGE_EXTERNAL_STORAGE），
+        在系统设置里授予，应用内会给出中文说明并跳转。
+      - Android 10 及以下：WRITE_EXTERNAL_STORAGE 运行时权限，
+        Android 10 设备另需 requestLegacyExternalStorage。
+    -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
 
     <queries>
         <intent>
@@ -14,6 +29,7 @@
     <application
         android:name=".WantNoteApplication"
         android:allowBackup="true"
+        android:requestLegacyExternalStorage="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
