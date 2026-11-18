@@ -1,6 +1,9 @@
 package com.davidzhu.wantnote.ui.home
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -33,8 +36,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.davidzhu.wantnote.data.Dates
 import com.davidzhu.wantnote.data.HomeViewMode
+import com.davidzhu.wantnote.data.NoteLink
 import com.davidzhu.wantnote.data.NoteWithDetails
 import com.davidzhu.wantnote.data.SearchText
+import com.davidzhu.wantnote.ui.components.MarkdownText
 import com.davidzhu.wantnote.ui.components.NoteMediaThumb
 import com.davidzhu.wantnote.ui.components.TagChipRow
 
@@ -57,18 +62,20 @@ private fun Modifier.noteCardShadow(elevation: Int): Modifier {
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun NoteCard(
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     elevation: Int = 8,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Surface(
-        onClick = onClick,
         modifier = modifier
             .fillMaxWidth()
-            .noteCardShadow(elevation),
+            .noteCardShadow(elevation)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         shape = NoteCardShape,
         color = MaterialTheme.colorScheme.surfaceVariant,
         tonalElevation = 2.dp,
@@ -83,8 +90,10 @@ fun NoteCollection(
     items: List<NoteWithDetails>,
     viewMode: HomeViewMode,
     onOpenNote: (String) -> Unit,
+    onLongPressNote: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     emptyText: String? = null,
+    links: List<NoteLink> = emptyList(),
 ) {
     if (items.isEmpty()) {
         if (emptyText != null) {
@@ -97,15 +106,82 @@ fun NoteCollection(
         return
     }
     when (viewMode) {
-        HomeViewMode.CARD -> CardView(items, onOpenNote, modifier)
-        HomeViewMode.WATERFALL -> WaterfallView(items, onOpenNote, modifier)
-        HomeViewMode.MINIMAL -> MinimalView(items, onOpenNote, modifier)
-        HomeViewMode.TIMESTAMP -> TimestampView(items, onOpenNote, modifier)
+        HomeViewMode.CARD -> CardView(items, onOpenNote, onLongPressNote, links, modifier)
+        HomeViewMode.WATERFALL -> WaterfallView(items, onOpenNote, onLongPressNote, links, modifier)
+        HomeViewMode.MINIMAL -> MinimalView(items, onOpenNote, onLongPressNote, links, modifier)
+        HomeViewMode.TIMESTAMP -> TimestampView(items, onOpenNote, onLongPressNote, links, modifier)
+    }
+}
+
+/**
+ * Card footer showing this note's relations from the SAME ID-based
+ * `note_links` data the 图谱 tab uses. `→` marks outgoing links, `←`
+ * incoming ones; tapping navigates straight to the other note. Links whose
+ * other endpoint no longer resolves (deleted before the FK cascade ran) are
+ * skipped instead of crashing or navigating nowhere.
+ */
+@Composable
+private fun NoteLinkFooter(
+    noteId: String,
+    links: List<NoteLink>,
+    linkTitles: Map<String, String>,
+    onOpenNote: (String) -> Unit,
+) {
+    val outgoing = links.filter { it.sourceNoteId == noteId }
+    val incoming = links.filter { it.targetNoteId == noteId }
+    if (outgoing.isEmpty() && incoming.isEmpty()) return
+    Column(
+        modifier = Modifier.padding(top = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        outgoing.forEach { link ->
+            val title = linkTitles[link.targetNoteId] ?: return@forEach
+            FooterLink(arrow = "→", title = title) { onOpenNote(link.targetNoteId) }
+        }
+        incoming.forEach { link ->
+            val title = linkTitles[link.sourceNoteId] ?: return@forEach
+            FooterLink(arrow = "←", title = title) { onOpenNote(link.sourceNoteId) }
+        }
     }
 }
 
 @Composable
-private fun CardView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun FooterLink(arrow: String, title: String, onClick: () -> Unit) {
+    Text(
+        text = "$arrow $title",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.primary,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 2.dp),
+    )
+}
+
+
+@Composable
+private fun PreviewText(
+    text: String,
+    linkTitles: Map<String, String>,
+    maxLines: Int,
+    modifier: Modifier = Modifier,
+) {
+    if (text.isBlank()) return
+    MarkdownText(
+        text = text,
+        linkTitles = linkTitles,
+        maxLines = maxLines,
+        modifier = modifier,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun CardView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, modifier: Modifier = Modifier) {
+    val linkTitles = items.associate { it.note.id to SearchText.displayTitle(it.note) }
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
         modifier = modifier.fillMaxSize(),
@@ -114,7 +190,7 @@ private fun CardView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(items, key = { it.note.id }) { item ->
-            NoteCard(onClick = { onOpenNote(item.note.id) }, elevation = 8) {
+            NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 8) {
                 val media = item.firstMedia
                 if (media != null) {
                     NoteMediaThumb(
@@ -132,23 +208,25 @@ private fun CardView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    val preview = SearchText.preview(item.note)
-                    if (preview.isNotBlank()) {
-                        Text(
-                            text = preview,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 5,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 6.dp),
-                        )
-                    }
+                    val preview = SearchText.previewMarkdown(item.note)
+                    PreviewText(
+                        text = preview,
+                        linkTitles = linkTitles,
+                        maxLines = 5,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
                     TagChipRow(tags = item.tags, modifier = Modifier.padding(top = 8.dp), max = 3)
                     Text(
                         text = Dates.formatTime(item.note.updatedAt),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp),
+                    )
+                    NoteLinkFooter(
+                        noteId = item.note.id,
+                        links = links,
+                        linkTitles = linkTitles,
+                        onOpenNote = onOpenNote,
                     )
                 }
             }
@@ -157,7 +235,8 @@ private fun CardView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit,
 }
 
 @Composable
-private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, modifier: Modifier = Modifier) {
+    val linkTitles = items.associate { it.note.id to SearchText.displayTitle(it.note) }
     LazyVerticalStaggeredGrid(
         columns = StaggeredGridCells.Fixed(2),
         modifier = modifier.fillMaxSize(),
@@ -166,14 +245,14 @@ private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
         verticalItemSpacing = 12.dp,
     ) {
         items(items, key = { it.note.id }) { item ->
-            val preview = SearchText.preview(item.note)
+            val preview = SearchText.previewMarkdown(item.note)
             val maxLines = when {
                 preview.length > 120 -> 8
                 preview.length > 60 -> 5
                 preview.length > 20 -> 3
                 else -> 2
             }
-            NoteCard(onClick = { onOpenNote(item.note.id) }, elevation = 8) {
+            NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 8) {
                 val media = item.firstMedia
                 if (media != null) {
                     val ratio = if (media.blockType.name == "VIDEO") 16f / 9f else 1f
@@ -193,22 +272,24 @@ private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    if (preview.isNotBlank()) {
-                        Text(
-                            text = preview,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = maxLines,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 6.dp),
-                        )
-                    }
+                    PreviewText(
+                        text = preview,
+                        linkTitles = linkTitles,
+                        maxLines = maxLines,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
                     TagChipRow(tags = item.tags, modifier = Modifier.padding(top = 8.dp), max = 3)
                     Text(
                         text = Dates.formatTime(item.note.updatedAt),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp),
+                    )
+                    NoteLinkFooter(
+                        noteId = item.note.id,
+                        links = links,
+                        linkTitles = linkTitles,
+                        onOpenNote = onOpenNote,
                     )
                 }
             }
@@ -217,14 +298,15 @@ private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
 }
 
 @Composable
-private fun MinimalView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun MinimalView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, modifier: Modifier = Modifier) {
+    val linkTitles = items.associate { it.note.id to SearchText.displayTitle(it.note) }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         items(items, key = { it.note.id }) { item ->
-            NoteCard(onClick = { onOpenNote(item.note.id) }, elevation = 5) {
+            NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 5) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -249,6 +331,12 @@ private fun MinimalView(items: List<NoteWithDetails>, onOpenNote: (String) -> Un
                             overflow = TextOverflow.Ellipsis,
                         )
                         TagChipRow(tags = item.tags, max = 2)
+                        NoteLinkFooter(
+                            noteId = item.note.id,
+                            links = links,
+                            linkTitles = linkTitles,
+                            onOpenNote = onOpenNote,
+                        )
                     }
                     Text(
                         text = Dates.formatTime(item.note.updatedAt),
@@ -263,7 +351,8 @@ private fun MinimalView(items: List<NoteWithDetails>, onOpenNote: (String) -> Un
 }
 
 @Composable
-private fun TimestampView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun TimestampView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, modifier: Modifier = Modifier) {
+    val linkTitles = items.associate { it.note.id to SearchText.displayTitle(it.note) }
     val grouped = items.groupBy { Dates.dayKey(it.note.updatedAt) }
     val keys = grouped.keys.toList()
     LazyColumn(
@@ -283,7 +372,7 @@ private fun TimestampView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
                 )
             }
             items(dayNotes, key = { it.note.id }) { item ->
-                NoteCard(onClick = { onOpenNote(item.note.id) }, elevation = 5) {
+                NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 5) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -314,17 +403,19 @@ private fun TimestampView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(top = 2.dp),
                             )
-                            val preview = SearchText.preview(item.note)
-                            if (preview.isNotBlank()) {
-                                Text(
-                                    text = preview,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
+                            val preview = SearchText.previewMarkdown(item.note)
+                            PreviewText(
+                                text = preview,
+                                linkTitles = linkTitles,
+                                maxLines = 2,
+                            )
                             TagChipRow(tags = item.tags, modifier = Modifier.padding(top = 6.dp), max = 3)
+                            NoteLinkFooter(
+                                noteId = item.note.id,
+                                links = links,
+                                linkTitles = linkTitles,
+                                onOpenNote = onOpenNote,
+                            )
                         }
                     }
                 }

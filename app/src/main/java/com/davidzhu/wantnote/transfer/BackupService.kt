@@ -9,6 +9,8 @@ import com.davidzhu.wantnote.data.MediaStorage
 import com.davidzhu.wantnote.data.Note
 import com.davidzhu.wantnote.data.NoteBlock
 import com.davidzhu.wantnote.data.NoteDatabase
+import com.davidzhu.wantnote.data.NoteLink
+import com.davidzhu.wantnote.data.NoteLinkCodec
 import com.davidzhu.wantnote.data.NoteRepository
 import com.davidzhu.wantnote.data.NoteTagCrossRef
 import com.davidzhu.wantnote.data.Tag
@@ -71,6 +73,7 @@ class BackupService(
             val allBlocks = notes.getAllBlocks()
             val allTags = notes.getAllTags()
             val refs = notes.getAllCrossRefs()
+            val allLinks = notes.getAllLinks()
 
             val files = LinkedHashMap<String, File>()
             val included = LinkedHashSet<String>()
@@ -111,6 +114,7 @@ class BackupService(
                 blocks = allBlocks.size,
                 tags = allTags.size,
                 noteTags = refs.size,
+                links = allLinks.size,
                 attachments = included.size,
                 fonts = fontFiles.size,
             )
@@ -127,6 +131,7 @@ class BackupService(
                 putBytes("data/blocks.json", blocksToJson(allBlocks))
                 putBytes("data/tags.json", tagsToJson(allTags))
                 putBytes("data/note_tags.json", refsToJson(refs))
+                putBytes("data/note_links.json", linksToJson(allLinks))
                 putBytes("data/settings.json", settingsToJson(settings))
                 putBytes("data/ai_providers.json", providersToJson(providers))
 
@@ -205,6 +210,24 @@ class BackupService(
         val tagIds = tagList.map { it.id }.toSet()
         val validRefs = refList.filter { it.noteId in noteIds && it.tagId in tagIds }
 
+        // note_links.json is optional so backups made by 0.7.0 still restore.
+        val storedLinks = byName["data/note_links.json"]?.let { entry ->
+            parseLinks(readText(zip, entry))
+        }.orEmpty()
+        val validLinks = if (storedLinks.isNotEmpty()) {
+            storedLinks.filter { it.sourceNoteId in noteIds && it.targetNoteId in noteIds }
+        } else {
+            // Derive relations from block markers when restoring an old backup.
+            val now = System.currentTimeMillis()
+            validBlocks.flatMap { block ->
+                NoteLinkCodec.targetIds(block.text)
+                    .filter { it != block.noteId && it in noteIds }
+                    .map { target ->
+                        NoteLink(block.noteId, target, now)
+                    }
+            }.distinctBy { it.sourceNoteId to it.targetNoteId }
+        }
+
         // 先写附件/字体，再做数据库事务。缺失的附件只跳过并计数。
         var attachmentCount = 0
         var fontCount = 0
@@ -241,6 +264,7 @@ class BackupService(
         onProgress("正在写回笔记与设置")
         db.withTransaction {
             db.tagDao().deleteAllCrossRefs()
+            db.noteLinkDao().deleteAll()
             db.blockDao().deleteAll()
             db.noteDao().deleteAll()
             db.tagDao().deleteAll()
@@ -254,6 +278,7 @@ class BackupService(
                     },
                 )
             }
+            if (validLinks.isNotEmpty()) db.noteLinkDao().insertAll(validLinks)
             tagList.forEach { db.tagDao().upsert(it) }
             if (validRefs.isNotEmpty()) db.tagDao().upsertCrossRefs(validRefs)
             providers.forEach { db.aiProviderDao().upsert(it) }
@@ -314,7 +339,8 @@ class BackupService(
                     .put("checked", block.checked)
                     .put("fontSize", block.fontSize)
                     .put("mediaPath", block.mediaPath)
-                    .put("sortOrder", block.sortOrder),
+                    .put("sortOrder", block.sortOrder)
+                    .put("headingLevel", block.headingLevel),
             )
         }
     }.toString()
@@ -334,6 +360,17 @@ class BackupService(
     private fun refsToJson(items: List<NoteTagCrossRef>): String = JSONArray().also { arr ->
         items.forEach { ref ->
             arr.put(JSONObject().put("noteId", ref.noteId).put("tagId", ref.tagId))
+        }
+    }.toString()
+
+    private fun linksToJson(items: List<NoteLink>): String = JSONArray().also { arr ->
+        items.forEach { link ->
+            arr.put(
+                JSONObject()
+                    .put("sourceNoteId", link.sourceNoteId)
+                    .put("targetNoteId", link.targetNoteId)
+                    .put("createdAt", link.createdAt),
+            )
         }
     }.toString()
 
@@ -407,6 +444,7 @@ class BackupService(
                 fontSize = obj.optString("fontSize", "NORMAL"),
                 mediaPath = obj.optString("mediaPath"),
                 sortOrder = obj.optInt("sortOrder"),
+                headingLevel = obj.optInt("headingLevel"),
             )
         }
 
@@ -425,6 +463,15 @@ class BackupService(
             NoteTagCrossRef(
                 noteId = obj.getString("noteId"),
                 tagId = obj.getString("tagId"),
+            )
+        }
+
+    private fun parseLinks(text: String): List<NoteLink> =
+        JSONArray(text).objects { obj ->
+            NoteLink(
+                sourceNoteId = obj.getString("sourceNoteId"),
+                targetNoteId = obj.getString("targetNoteId"),
+                createdAt = obj.optLong("createdAt"),
             )
         }
 

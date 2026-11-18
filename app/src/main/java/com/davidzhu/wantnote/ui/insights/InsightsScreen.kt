@@ -66,6 +66,7 @@ fun InsightsScreen(onOpenNote: (String) -> Unit, onOpenAiSettings: () -> Unit = 
     val settingsRepo = LocalSettings.current
     val ai = LocalAi.current
     val items by repository.observeAllWithDetails().collectAsStateWithLifecycle(initialValue = emptyList())
+    val allLinks by repository.observeAllLinks().collectAsStateWithLifecycle(initialValue = emptyList())
     val settings by settingsRepo.observe().collectAsStateWithLifecycle(initialValue = AppSettings.DEFAULT)
     val allTags by repository.observeAllTags().collectAsStateWithLifecycle(initialValue = emptyList())
     val scope = rememberCoroutineScope()
@@ -92,11 +93,18 @@ fun InsightsScreen(onOpenNote: (String) -> Unit, onOpenAiSettings: () -> Unit = 
             TabRow(selectedTabIndex = tabIndex) {
                 Tab(selected = tabIndex == 0, onClick = { tabIndex = 0 }, text = { Text("回顾") })
                 Tab(selected = tabIndex == 1, onClick = { tabIndex = 1 }, text = { Text("总结") })
+                Tab(selected = tabIndex == 2, onClick = { tabIndex = 2 }, text = { Text("图谱") })
             }
             when (tabIndex) {
                 0 -> ReviewTab(
                     items = items,
                     allTags = allTags,
+                    onOpenNote = onOpenNote,
+                    modifier = Modifier.weight(1f),
+                )
+                2 -> GraphTab(
+                    items = items,
+                    links = allLinks,
                     onOpenNote = onOpenNote,
                     modifier = Modifier.weight(1f),
                 )

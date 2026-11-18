@@ -197,6 +197,7 @@ class ImportExportService(
                     indent = block.indent,
                     checked = block.checked,
                     mediaPath = block.mediaPath,
+                    headingLevel = block.headingLevel,
                 )
             }
             val markdown = MarkdownCodec.render(
@@ -260,6 +261,7 @@ class ImportExportService(
                 fontSize = BlockFontSize.NORMAL.name,
                 mediaPath = parsedBlock.mediaPath,
                 sortOrder = index,
+                headingLevel = parsedBlock.headingLevel.coerceIn(0, 6),
             )
         }.ifEmpty {
             listOf(

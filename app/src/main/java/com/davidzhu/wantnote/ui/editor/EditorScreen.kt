@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
@@ -32,6 +34,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.FormatIndentDecrease
 import androidx.compose.material.icons.automirrored.outlined.FormatIndentIncrease
 import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
+import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.CheckBox
 import androidx.compose.material.icons.outlined.FormatBold
 import androidx.compose.material.icons.outlined.FormatItalic
@@ -79,6 +82,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -89,8 +93,12 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
@@ -98,14 +106,21 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.davidzhu.wantnote.data.AppSettings
 import com.davidzhu.wantnote.data.BlockFontSize
 import com.davidzhu.wantnote.data.BlockType
+import com.davidzhu.wantnote.data.Dates
 import com.davidzhu.wantnote.data.Markup
+import com.davidzhu.wantnote.data.Note
 import com.davidzhu.wantnote.data.NoteBlock
+import com.davidzhu.wantnote.data.NoteLinkCodec
+import com.davidzhu.wantnote.data.NoteMention
+import com.davidzhu.wantnote.data.NoteMentionParser
 import com.davidzhu.wantnote.data.NoteRepository
+import com.davidzhu.wantnote.data.SearchText
 import com.davidzhu.wantnote.data.Tag
 import com.davidzhu.wantnote.ui.LocalAi
 import com.davidzhu.wantnote.ui.LocalMedia
 import com.davidzhu.wantnote.ui.LocalNotes
 import com.davidzhu.wantnote.ui.LocalSettings
+import com.davidzhu.wantnote.ui.components.MarkdownVisual
 import com.davidzhu.wantnote.ui.components.TagChip
 import com.davidzhu.wantnote.ui.components.TagColorPicker
 import com.davidzhu.wantnote.ui.theme.LocalEditorFontFamily
@@ -146,6 +161,14 @@ fun EditorScreen(
     var saving by remember { mutableStateOf(false) }
     val fields = remember { mutableStateMapOf<String, TextFieldValue>() }
     val requesters = remember { mutableMapOf<String, FocusRequester>() }
+
+    // Note library for the @ picker, live mention search and link-title
+    // resolution. Ordered by updatedAt DESC, so "recent notes" is free.
+    val allNotes by repository.observeAll().collectAsStateWithLifecycle(initialValue = emptyList())
+    val linkTitles = remember(allNotes) { allNotes.associate { it.id to SearchText.displayTitle(it) } }
+    var showLinkPicker by remember { mutableStateOf(false) }
+    // Active `@` mention: which block + where the query starts/ends.
+    var mention by remember { mutableStateOf<EditorMention?>(null) }
 
     val titleState = rememberUpdatedState(title)
     val blocksState = rememberUpdatedState(blocks)
@@ -228,6 +251,62 @@ fun EditorScreen(
         updateBlocks(blocks.map { if (it.id == id) it.copy(text = next) else it })
     }
 
+    /**
+     * Toolbar 「@」 picker: insert the chosen note's stable-ID marker at the
+     * CURRENT caret of the CURRENT block, replacing the selection if one is
+     * active. Media/divider blocks have no caret, so the marker lands in a
+     * fresh paragraph right after them; on an empty note it opens block one.
+     */
+    fun insertNoteLinkAtCaret(targetId: String) {
+        val marker = NoteLinkCodec.marker(targetId)
+        val index = focusedIndex()
+        val current = blocks.getOrNull(index)
+        if (current == null) {
+            val created = newBlock(BlockType.PARAGRAPH, text = marker)
+            updateBlocks(listOf(created))
+            fields[created.id] = TextFieldValue(marker, TextRange(marker.length))
+            focusedId = created.id
+            return
+        }
+        if (current.isMedia || current.blockType == BlockType.DIVIDER) {
+            insertAfter(
+                index,
+                newBlock(
+                    BlockType.PARAGRAPH,
+                    indent = current.indent,
+                    text = marker,
+                    fontSize = current.blockFontSize,
+                ),
+            )
+            return
+        }
+        val value = fieldOf(current)
+        val lo = value.selection.min.coerceIn(0, value.text.length)
+        val hi = value.selection.max.coerceIn(lo, value.text.length)
+        val next = value.text.substring(0, lo) + marker + value.text.substring(hi)
+        fields[current.id] = TextFieldValue(next, TextRange(lo + marker.length))
+        updateBlocks(blocks.map { if (it.id == current.id) it.copy(text = next) else it })
+        focusedId = current.id
+    }
+
+    /**
+     * Live mention: replace the typed `@query` (from [mention]) with the
+     * chosen note's stable-ID marker, keeping the caret right after it.
+     */
+    fun applyMention(targetId: String) {
+        val active = mention ?: return
+        mention = null
+        val block = blocks.firstOrNull { it.id == active.blockId } ?: return
+        val value = fieldOf(block)
+        val m = active.mention
+        if (m.start < 0 || m.end > value.text.length || m.start >= m.end) return
+        val marker = NoteLinkCodec.marker(targetId)
+        val next = value.text.substring(0, m.start) + marker + value.text.substring(m.end)
+        fields[block.id] = TextFieldValue(next, TextRange(m.start + marker.length))
+        updateBlocks(blocks.map { if (it.id == block.id) it.copy(text = next) else it })
+        focusedId = block.id
+    }
+
     fun cycleFontSize() {
         if (blocks.isEmpty()) return
         val index = focusedIndex()
@@ -290,6 +369,7 @@ fun EditorScreen(
     fun onTextChanged(block: NoteBlock, incoming: TextFieldValue) {
         val newline = incoming.text.indexOf('\n')
         if (newline >= 0) {
+            mention = null
             val left = incoming.text.substring(0, newline)
             val right = incoming.text.substring(newline + 1).replace("\n", "")
             val index = blocks.indexOfFirst { it.id == block.id }
@@ -327,6 +407,12 @@ fun EditorScreen(
         } else {
             fields[block.id] = incoming
             updateBlocks(blocks.map { if (it.id == block.id) it.copy(text = incoming.text) else it })
+            // Typing or moving the caret right after an `@` re-derives the
+            // live mention; moving out of the query (or deleting the `@`)
+            // closes the search popup. This also fires on selection-only
+            // changes, which is exactly what we want.
+            val active = NoteMentionParser.activeMention(incoming.text, incoming.selection.min)
+            mention = active?.let { EditorMention(block.id, it) }
         }
     }
 
@@ -368,6 +454,26 @@ fun EditorScreen(
     }
 
     val charCount = remember(blocks) { NoteRepository.bodyCharCount(blocks) }
+
+    /**
+     * Live search over the note library for the active `@` mention. Blank
+     * query = recent notes (updatedAt DESC); otherwise title OR body match,
+     * case-insensitive. The note being edited is never a candidate (self
+     * links are meaningless and the repository drops them anyway).
+     */
+    val mentionCandidates = remember(mention, allNotes) {
+        val active = mention ?: return@remember emptyList<Note>()
+        val query = active.mention.query.trim()
+        val pool = allNotes.filter { it.id != active.blockId }
+        if (query.isEmpty()) {
+            pool
+        } else {
+            pool.filter { note ->
+                note.title.contains(query, ignoreCase = true) ||
+                    note.body.contains(query, ignoreCase = true)
+            }
+        }
+    }
 
     /**
      * 顶栏返回与系统返回共用：先立刻把当前标题和正文同步落盘（不走
@@ -579,6 +685,7 @@ fun EditorScreen(
             OutlineToolbar(
                 fontLabel = currentFontLabel,
                 onTags = { showTagPicker = true },
+                onAt = { showLinkPicker = true },
                 onAddTask = { addTypedBlock(BlockType.TASK) },
                 onOrdered = { addTypedBlock(BlockType.ORDERED) },
                 onUnordered = { addTypedBlock(BlockType.UNORDERED) },
@@ -602,89 +709,122 @@ fun EditorScreen(
             )
         },
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(padding),
         ) {
-            BasicTextField(
-                value = title,
-                onValueChange = { title = it },
-                textStyle = MaterialTheme.typography.titleLarge.copy(
-                    color = MaterialTheme.colorScheme.onBackground,
-                    fontFamily = editorFont,
-                ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.onBackground),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                decorationBox = { inner ->
-                    if (title.isEmpty()) {
-                        Text(
-                            "标题（可选）",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.titleLarge,
-                        )
-                    }
-                    inner()
-                },
-            )
-            HorizontalDivider(
-                modifier = Modifier.padding(vertical = 12.dp),
-                color = MaterialTheme.colorScheme.outline,
-            )
-            EditorTagBar(
-                tags = noteTags,
-                onPick = { showTagPicker = true },
-                onRemove = { tag ->
-                    scope.launch {
-                        repository.removeTagFromNote(noteId, tag.id)
-                        noteTags = repository.getTagsForNote(noteId)
-                    }
-                },
-            )
-            LazyColumn(
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
-                itemsIndexed(blocks, key = { _, block -> block.id }) { index, block ->
-                    OutlineBlockRow(
-                        block = block,
-                        number = orderedNumber(blocks, index),
-                        value = fieldOf(block),
-                        focusRequester = requesterOf(block.id),
-                        showPlaceholder = index == 0 && blocks.size == 1 && block.text.isEmpty() &&
-                            block.blockType == BlockType.PARAGRAPH,
-                        onFocus = { focusedId = block.id },
-                        onValueChange = { onTextChanged(block, it) },
-                        onCheckedChange = { setChecked(block.id, it) },
-                        onBackspaceEmpty = { mergeOrDelete(block.id) },
-                        onOpenVideo = { path ->
-                            val file = media.fileFor(path)
-                            val mime = context.contentResolver.getType(
-                                android.net.Uri.fromFile(file),
-                            ) ?: guessedMime(path)
-                            runCatching {
-                                val uri = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    file,
-                                )
-                                val intent = Intent(Intent.ACTION_VIEW).apply {
-                                    setDataAndType(uri, mime)
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                BasicTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    textStyle = MaterialTheme.typography.titleLarge.copy(
+                        color = MaterialTheme.colorScheme.onBackground,
+                        fontFamily = editorFont,
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.onBackground),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    decorationBox = { inner ->
+                        if (title.isEmpty()) {
+                            Text(
+                                "标题（可选）",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.titleLarge,
+                            )
+                        }
+                        inner()
+                    },
+                )
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 12.dp),
+                    color = MaterialTheme.colorScheme.outline,
+                )
+                EditorTagBar(
+                    tags = noteTags,
+                    onPick = { showTagPicker = true },
+                    onRemove = { tag ->
+                        scope.launch {
+                            repository.removeTagFromNote(noteId, tag.id)
+                            noteTags = repository.getTagsForNote(noteId)
+                        }
+                    },
+                )
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    itemsIndexed(blocks, key = { _, block -> block.id }) { index, block ->
+                        OutlineBlockRow(
+                            block = block,
+                            number = orderedNumber(blocks, index),
+                            value = fieldOf(block),
+                            focusRequester = requesterOf(block.id),
+                            showPlaceholder = index == 0 && blocks.size == 1 && block.text.isEmpty() &&
+                                block.blockType == BlockType.PARAGRAPH,
+                            linkTitles = linkTitles,
+                            onFocus = {
+                                focusedId = block.id
+                                if (mention?.blockId != block.id) mention = null
+                            },
+                            onValueChange = { onTextChanged(block, it) },
+                            onCheckedChange = { setChecked(block.id, it) },
+                            onBackspaceEmpty = { mergeOrDelete(block.id) },
+                            onOpenVideo = { path ->
+                                val file = media.fileFor(path)
+                                val mime = context.contentResolver.getType(
+                                    android.net.Uri.fromFile(file),
+                                ) ?: guessedMime(path)
+                                runCatching {
+                                    val uri = FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.fileprovider",
+                                        file,
+                                    )
+                                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                                        setDataAndType(uri, mime)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(intent, "打开附件"))
+                                }.onFailure {
+                                    scope.launch { snackbar.showSnackbar("无法打开附件") }
                                 }
-                                context.startActivity(Intent.createChooser(intent, "打开附件"))
-                            }.onFailure {
-                                scope.launch { snackbar.showSnackbar("无法打开附件") }
-                            }
-                        },
-                    )
+                            },
+                        )
+                    }
                 }
             }
+            // Live `@` mention search, docked just above the toolbar.
+            mention?.let { active ->
+                MentionListPopup(
+                    query = active.mention.query.trim(),
+                    candidates = mentionCandidates,
+                    highlightColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                    onPick = { targetId -> applyMention(targetId) },
+                    onDismiss = { mention = null },
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
         }
+    }
+
+    if (showLinkPicker) {
+        NoteLinkPickerDialog(
+            notes = allNotes,
+            currentNoteId = noteId,
+            highlightColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+            onPick = { targetId ->
+                showLinkPicker = false
+                insertNoteLinkAtCaret(targetId)
+            },
+            onDismiss = { showLinkPicker = false },
+        )
     }
 
     if (showTagPicker) {
@@ -885,6 +1025,7 @@ private fun OutlineBlockRow(
     value: TextFieldValue,
     focusRequester: FocusRequester,
     showPlaceholder: Boolean,
+    linkTitles: Map<String, String>,
     onFocus: () -> Unit,
     onValueChange: (TextFieldValue) -> Unit,
     onCheckedChange: (Boolean) -> Unit,
@@ -894,6 +1035,19 @@ private fun OutlineBlockRow(
     val scale = LocalFontScale.current
     val fontFamily = LocalEditorFontFamily.current
     val fontSize = (block.blockFontSize.sp * scale).sp
+    // Render inline Markdown (note links, emphasis, code, links) instead of
+    // the raw source, while the stored text stays exactly as typed. The
+    // transformation also fixes up caret mapping, so editing inside a
+    // collapsed `[[note:id]]` marker behaves correctly.
+    val linkColor = MaterialTheme.colorScheme.primary
+    val highlightBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.24f)
+    val inlineTransformation = remember(linkTitles, linkColor, highlightBg) {
+        MarkdownVisual.transformation(
+            highlightColor = highlightBg,
+            linkTitles = linkTitles,
+            linkColor = linkColor,
+        )
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -956,6 +1110,7 @@ private fun OutlineBlockRow(
                         lineHeight = (block.blockFontSize.sp * scale * 1.5f).sp,
                     ),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.onBackground),
+                    visualTransformation = inlineTransformation,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 6.dp)
@@ -1045,6 +1200,7 @@ private fun LocalVideoBlock(path: String, onOpen: () -> Unit) {
 private fun OutlineToolbar(
     fontLabel: String,
     onTags: () -> Unit,
+    onAt: () -> Unit,
     onAddTask: () -> Unit,
     onOrdered: () -> Unit,
     onUnordered: () -> Unit,
@@ -1068,6 +1224,7 @@ private fun OutlineToolbar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ToolButton("标签", Icons.Outlined.Tag, onTags)
+        ToolButton("@", Icons.Outlined.AlternateEmail, onAt)
         ToolButton("任务", Icons.Outlined.CheckBox, onAddTask)
         ToolButton("有序", Icons.Outlined.FormatListNumbered, onOrdered)
         ToolButton("无序", Icons.AutoMirrored.Outlined.FormatListBulleted, onUnordered)
@@ -1143,4 +1300,175 @@ private fun LocalFileBlock(path: String, label: String, onOpen: () -> Unit) {
             }
         }
     }
+}
+
+/** A live `@` mention tied to the block that contains it. */
+private data class EditorMention(
+    val blockId: String,
+    val mention: NoteMention,
+)
+
+/** Title text with the first [query] match highlighted, if any. */
+private fun highlightedTitle(title: String, query: String, highlightColor: Color): AnnotatedString {
+    if (query.isEmpty()) return AnnotatedString(title)
+    val index = title.indexOf(query, ignoreCase = true)
+    if (index < 0) return AnnotatedString(title)
+    return buildAnnotatedString {
+        append(title)
+        addStyle(SpanStyle(background = highlightColor), index, index + query.length)
+    }
+}
+
+/**
+ * Live search panel for a typed `@`: docked just above the editor toolbar,
+ * listing matching notes with the query highlighted in each title. Picking
+ * one replaces the `@query` text with a stable-ID link marker at the caret.
+ */
+@Composable
+private fun MentionListPopup(
+    query: String,
+    candidates: List<Note>,
+    highlightColor: Color,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(max = 232.dp),
+        shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp),
+        tonalElevation = 3.dp,
+        shadowElevation = 10.dp,
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (query.isEmpty()) "@" else "@$query",
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onDismiss) { Text("关闭") }
+            }
+            if (candidates.isEmpty()) {
+                Text(
+                    text = if (query.isEmpty()) "还没有其他笔记可以链接" else "没有匹配「$query」的笔记",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                    itemsIndexed(candidates) { _, note ->
+                        NoteCandidateRow(
+                            note = note,
+                            query = query,
+                            highlightColor = highlightColor,
+                            onClick = { onPick(note.id) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NoteCandidateRow(
+    note: Note,
+    query: String,
+    highlightColor: Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = highlightedTitle(SearchText.displayTitle(note), query, highlightColor),
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = Dates.formatTime(note.updatedAt),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * Toolbar 「@」 picker: recent notes first (updatedAt DESC), searchable by
+ * title or body. Choosing a note inserts its stable-ID link marker at the
+ * CURRENT caret of the CURRENT block.
+ */
+@Composable
+private fun NoteLinkPickerDialog(
+    notes: List<Note>,
+    currentNoteId: String,
+    highlightColor: Color,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    val trimmed = query.trim()
+    val candidates = remember(notes, trimmed, currentNoteId) {
+        val pool = notes.filter { it.id != currentNoteId }
+        if (trimmed.isEmpty()) {
+            pool
+        } else {
+            pool.filter { it.title.contains(trimmed, ignoreCase = true) || it.body.contains(trimmed, ignoreCase = true) }
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("@ 链接到笔记") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("搜索笔记") },
+                    placeholder = { Text("留空显示最近笔记") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                if (candidates.isEmpty()) {
+                    Text(
+                        text = if (trimmed.isEmpty()) "还没有其他笔记可以链接" else "没有匹配「$trimmed」的笔记",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 8.dp),
+                    )
+                } else {
+                    LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
+                        itemsIndexed(candidates) { _, note ->
+                            NoteCandidateRow(
+                                note = note,
+                                query = trimmed,
+                                highlightColor = highlightColor,
+                                onClick = { onPick(note.id) },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
 }

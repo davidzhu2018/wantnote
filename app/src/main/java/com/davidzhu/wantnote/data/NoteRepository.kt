@@ -13,8 +13,11 @@ class NoteRepository(private val db: NoteDatabase) {
     private val notes = db.noteDao()
     private val blocks = db.blockDao()
     private val tags = db.tagDao()
+    private val links = db.noteLinkDao()
 
     fun observeAll(): Flow<List<Note>> = notes.observeAll()
+
+    fun observeAllLinks(): Flow<List<NoteLink>> = links.observeAll()
 
     fun observeAllWithBlocks(): Flow<List<NoteWithBlocks>> = notes.observeAllWithBlocks()
 
@@ -89,6 +92,7 @@ class NoteRepository(private val db: NoteDatabase) {
             if (normalized.isNotEmpty()) {
                 blocks.upsertAll(normalized)
             }
+            syncOutgoingLinksLocked(id, normalized)
         }
         return updated
     }
@@ -118,6 +122,57 @@ class NoteRepository(private val db: NoteDatabase) {
             return true
         }
         return false
+    }
+
+    /**
+     * Permanently delete one note. Blocks, tag associations and both
+     * directions of note links are removed in the same transaction; the
+     * foreign keys also cascade, so no dangling relation can survive.
+     */
+    suspend fun deleteNote(id: String): Boolean {
+        if (notes.getById(id) == null) return false
+        db.withTransaction {
+            links.deleteOutgoing(id)
+            db.tagDao().clearNoteTags(id)
+            blocks.deleteByNoteId(id)
+            notes.delete(id)
+        }
+        return true
+    }
+
+    suspend fun getOutgoingLinks(noteId: String): List<NoteLink> = links.getOutgoing(noteId)
+
+    suspend fun getIncomingLinks(noteId: String): List<NoteLink> = links.getIncoming(noteId)
+
+    suspend fun getAllLinks(): List<NoteLink> = links.getAll()
+
+    /**
+     * Rebuild this note's outgoing relations from the link markers currently
+     * in [blockList]. Invalid/self/duplicate targets are ignored, so edits and
+     * removals in the editor are reflected immediately.
+     */
+    suspend fun syncOutgoingLinks(noteId: String, blockList: List<NoteBlock>) {
+        db.withTransaction { syncOutgoingLinksLocked(noteId, blockList) }
+    }
+
+    private suspend fun syncOutgoingLinksLocked(noteId: String, blockList: List<NoteBlock>) {
+        val requested = NoteLinkCodec.targetIds(blockList)
+            .filter { it != noteId }
+            .distinct()
+        val valid = if (requested.isEmpty()) {
+            emptySet()
+        } else {
+            notes.existingIds(requested).toSet()
+        }
+        links.deleteOutgoing(noteId)
+        if (valid.isNotEmpty()) {
+            val now = System.currentTimeMillis()
+            links.insertAll(
+                requested.filter { it in valid }.map { target ->
+                    NoteLink(sourceNoteId = noteId, targetNoteId = target, createdAt = now)
+                },
+            )
+        }
     }
 
     fun tasksOnDay(notesWithBlocks: List<NoteWithBlocks>, dayStart: Long): List<DayTask> {
@@ -266,6 +321,7 @@ class NoteRepository(private val db: NoteDatabase) {
             notes.upsert(note)
             blocks.deleteByNoteId(note.id)
             if (normalized.isNotEmpty()) blocks.upsertAll(normalized)
+            syncOutgoingLinksLocked(note.id, normalized)
         }
     }
 
@@ -278,6 +334,7 @@ class NoteRepository(private val db: NoteDatabase) {
             if (normalized.isNotEmpty()) {
                 blocks.upsertAll(normalized)
             }
+            syncOutgoingLinksLocked(noteId, normalized)
         }
     }
 
@@ -332,6 +389,7 @@ class NoteRepository(private val db: NoteDatabase) {
                         block.copy(noteId = remote.id, sortOrder = index)
                     })
                 }
+                syncOutgoingLinksLocked(remote.id, remoteBlocks)
             }
             return true
         }
@@ -344,6 +402,7 @@ class NoteRepository(private val db: NoteDatabase) {
                         block.copy(noteId = remote.id, sortOrder = index)
                     })
                 }
+                syncOutgoingLinksLocked(remote.id, remoteBlocks)
             }
             return true
         }

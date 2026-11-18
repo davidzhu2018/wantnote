@@ -15,11 +15,21 @@ class BackupManifestTest {
             blocks = 12,
             tags = 2,
             noteTags = 4,
+            links = 6,
             attachments = 5,
             fonts = 1,
         )
         val parsed = BackupManifest.fromText(manifest.toText())
         assertEquals(manifest, parsed)
+    }
+
+    @Test
+    fun linksCountIsOptionalForOlderBackups() {
+        val parsed = BackupManifest.fromText(
+            "format=${BackupManifest.FORMAT}\nversion=${BackupManifest.VERSION}\n" +
+                "createdAt=0\nnotes=1\nblocks=1\ntags=0\nnoteTags=0\n",
+        )
+        assertEquals(0, parsed.links)
     }
 
     @Test

@@ -17,6 +17,10 @@ class MarkdownCodecTest {
             MarkdownBlock(BlockType.TASK, "已完成的子任务", indent = 1, checked = true),
             MarkdownBlock(BlockType.ORDERED, "第一步"),
             MarkdownBlock(BlockType.UNORDERED, "项目", indent = 2),
+            MarkdownBlock(BlockType.HEADING, "二级标题", headingLevel = 2),
+            MarkdownBlock(BlockType.QUOTE, "引用的一句话", indent = 1),
+            MarkdownBlock(BlockType.CODE, "val x = 1"),
+            MarkdownBlock(BlockType.CODE, "val y = 2"),
             MarkdownBlock(BlockType.DIVIDER),
         )
 
@@ -26,6 +30,64 @@ class MarkdownCodecTest {
         assertEquals("读书笔记", parsed.title)
         assertEquals(blocks, parsed.blocks)
         assertTrue(parsed.missingMedia.isEmpty())
+    }
+
+    @Test
+    fun fenceContentIsNeverInterpreted() {
+        val parsed = MarkdownCodec.parseMarkdown(
+            """
+            # 代码笔记
+
+            ```
+            # 不是标题，是代码注释
+            - 不是列表
+            ```
+
+            正文
+            """.trimIndent(),
+            "代码笔记",
+        )
+        assertEquals("代码笔记", parsed.title)
+        assertEquals(
+            listOf(
+                MarkdownBlock(BlockType.CODE, "# 不是标题，是代码注释"),
+                MarkdownBlock(BlockType.CODE, "- 不是列表"),
+                MarkdownBlock(BlockType.PARAGRAPH, "正文"),
+            ),
+            parsed.blocks,
+        )
+    }
+
+    @Test
+    fun headingsBeyondFirstBecomeHeadingBlocksWithLevel() {
+        val parsed = MarkdownCodec.parseMarkdown(
+            "# 首个标题\n\n## 二级\n### 三级\n#### 四级",
+            "回退标题",
+        )
+        assertEquals("首个标题", parsed.title)
+        assertEquals(
+            listOf(
+                MarkdownBlock(BlockType.HEADING, "二级", headingLevel = 2),
+                MarkdownBlock(BlockType.HEADING, "三级", headingLevel = 3),
+                MarkdownBlock(BlockType.HEADING, "四级", headingLevel = 4),
+            ),
+            parsed.blocks,
+        )
+    }
+
+    @Test
+    fun remoteImagesStayRenderedAsMarkdown() {
+        val parsed = MarkdownCodec.parseMarkdown(
+            "# 远程图\n\n![截图](https://example.com/a.png)",
+            "远程图",
+            resolveMedia = { null },
+        )
+        assertEquals(
+            listOf(
+                MarkdownBlock(BlockType.PARAGRAPH, "![截图](https://example.com/a.png)"),
+            ),
+            parsed.blocks,
+        )
     }
 
     @Test
@@ -94,7 +156,8 @@ class MarkdownCodecTest {
 
     @Test
     fun indentationUsesTwoSpacesPerLevel() {
-        val parsed = MarkdownCodec.parseMarkdown("    - 缩进条目", "t")
-        assertEquals(1, parsed.blocks.first().indent)
+        val parsed = MarkdownCodec.parseMarkdown("  - 一级\n    - 二级", "t")
+        assertEquals(1, parsed.blocks[0].indent)
+        assertEquals(2, parsed.blocks[1].indent)
     }
 }

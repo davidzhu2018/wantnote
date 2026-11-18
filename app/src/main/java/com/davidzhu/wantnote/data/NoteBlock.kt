@@ -7,6 +7,9 @@ import androidx.room.PrimaryKey
 
 enum class BlockType {
     PARAGRAPH,
+    HEADING,
+    QUOTE,
+    CODE,
     TASK,
     ORDERED,
     UNORDERED,
@@ -57,6 +60,8 @@ data class NoteBlock(
     val fontSize: String,
     val mediaPath: String,
     val sortOrder: Int,
+    /** Markdown heading level 1..6 for [BlockType.HEADING]; 0 otherwise. */
+    val headingLevel: Int = 0,
 ) {
     val blockType: BlockType
         get() = BlockType.entries.firstOrNull { it.name == type } ?: BlockType.PARAGRAPH

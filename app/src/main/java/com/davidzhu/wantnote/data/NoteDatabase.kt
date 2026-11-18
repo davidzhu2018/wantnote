@@ -16,8 +16,9 @@ import java.util.UUID
         Tag::class,
         NoteTagCrossRef::class,
         AiProvider::class,
+        NoteLink::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class NoteDatabase : RoomDatabase() {
@@ -26,6 +27,7 @@ abstract class NoteDatabase : RoomDatabase() {
     abstract fun settingsDao(): SettingsDao
     abstract fun tagDao(): TagDao
     abstract fun aiProviderDao(): AiProviderDao
+    abstract fun noteLinkDao(): NoteLinkDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -170,6 +172,31 @@ abstract class NoteDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 0.8.0: structured Markdown headings and stable-ID note links.
+         * Only additive changes: existing notes/blocks/tags keep their IDs and
+         * content untouched, so a 0.7.0 database opens without a rewrite.
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE note_blocks ADD COLUMN headingLevel INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS note_links (
+                        sourceNoteId TEXT NOT NULL,
+                        targetNoteId TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        PRIMARY KEY(sourceNoteId, targetNoteId),
+                        FOREIGN KEY(sourceNoteId) REFERENCES notes(id) ON DELETE CASCADE,
+                        FOREIGN KEY(targetNoteId) REFERENCES notes(id) ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_note_links_sourceNoteId ON note_links(sourceNoteId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_note_links_targetNoteId ON note_links(targetNoteId)")
+            }
+        }
+
         fun create(context: Context): NoteDatabase {
             // 0.6.0：数据库优先放在 Documents/WantNote（卸载后可找回），
             // 未授权时回退到旧私有位置；首次启动由 AppStorage.prepare 迁移旧数据。
@@ -180,7 +207,7 @@ abstract class NoteDatabase : RoomDatabase() {
                 NoteDatabase::class.java,
                 dbFile.absolutePath,
             )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
         }
     }

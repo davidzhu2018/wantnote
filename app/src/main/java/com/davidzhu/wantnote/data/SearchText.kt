@@ -12,6 +12,7 @@ object SearchText {
                 BlockType.IMAGE -> "[图片]"
                 BlockType.VIDEO -> "[视频]"
                 BlockType.FILE -> "[文件] " + block.text
+                BlockType.HEADING, BlockType.QUOTE, BlockType.CODE,
                 BlockType.ORDERED, BlockType.UNORDERED, BlockType.PARAGRAPH -> block.text
             }
         }
@@ -32,6 +33,32 @@ object SearchText {
         return firstMeaningfulLine(body)
     }
 
+
+    /**
+     * Preview text that keeps inline Markdown markers intact so the home
+     * cards can render emphasis/links; only block prefixes are removed.
+     */
+    fun previewMarkdown(note: Note): String {
+        val lines = note.body.trim().lineSequence()
+            .filter { it.isNotBlank() }
+            .map { line ->
+                var text = line.trim()
+                text = text.removePrefix("[x] ").removePrefix("[ ] ")
+                text = text.replace(Regex("""^#{1,6}\s+"""), "")
+                text = text.replace(Regex("""^>\s?"""), "")
+                text = text.replace(Regex("""^```.*$"""), "")
+                text = text.replace(Regex("""^~~~.*$"""), "")
+                text = text.replace(Regex("""^[-*+]\s+"""), "")
+                text = text.replace(Regex("""^\d+[.)]\s+"""), "")
+                text = text.replace(Regex("""^---+$"""), "")
+                text
+            }
+            .filter { it.isNotBlank() }
+            .toList()
+        val selected = if (note.title.isBlank()) lines.drop(1) else lines
+        return selected.take(4).joinToString(" ")
+    }
+
     fun firstMeaningfulLine(body: String): String {
         return body.lineSequence()
             .map { stripDecor(it) }
@@ -39,20 +66,33 @@ object SearchText {
             .orEmpty()
     }
 
-    fun stripDecor(line: String): String {
-        return line
-            .trim()
-            .removePrefix("[x] ")
-            .removePrefix("[ ] ")
-            .replace("[图片]", "")
-            .replace("[视频]", "")
-            .replace("[文件]", "")
-            .replace("---", "")
-            .replace(Regex("""\*\*(.+?)\*\*"""), "$1")
-            .replace(Regex("""(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)"""), "$1")
-            .replace(Regex("""==(.+?)=="""), "$1")
-            .replace(Regex("""~~(.+?)~~"""), "$1")
-            .trim()
+    /**
+     * Turn one block/body line into display text. This never changes stored
+     * content; it only hides Markdown/link syntax in previews so imported
+     * notes do not leak raw `**`, `[]()` or `[[note:...]]` markers.
+     */
+    fun stripDecor(line: String, linkTitle: (String) -> String? = { null }): String {
+        var text = line.trim()
+        text = text.removePrefix("[x] ").removePrefix("[ ] ")
+        text = text.replace(Regex("""^#{1,6}\s+"""), "")
+        text = text.replace(Regex("""^>\s?"""), "")
+        text = text.replace(Regex("""^```.*$"""), "")
+        text = text.replace(Regex("""^~~~.*$"""), "")
+        text = text.replace("[图片]", "")
+        text = text.replace("[视频]", "")
+        text = text.replace("[文件]", "")
+        text = text.replace(Regex("""^[-*+]\s+"""), "")
+        text = text.replace(Regex("""^\d+[.)]\s+"""), "")
+        text = text.replace("---", "")
+        text = NoteLinkCodec.renderPlain(text, linkTitle, missingLabel = "笔记链接")
+        text = text.replace(Regex("""!\[([^\]]*)]\([^)]*\)"""), "$1")
+        text = text.replace(Regex("""\[([^\]]*)]\([^)]*\)"""), "$1")
+        text = text.replace(Regex("""`([^`]*)`"""), "$1")
+        text = text.replace(Regex("""\*\*(.+?)\*\*"""), "$1")
+        text = text.replace(Regex("""(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)"""), "$1")
+        text = text.replace(Regex("""==(.+?)==""", RegexOption.DOT_MATCHES_ALL), "$1")
+        text = text.replace(Regex("""~~(.+?)~~"""), "$1")
+        return text.trim()
     }
 
     fun extractHighlights(text: String): List<String> {

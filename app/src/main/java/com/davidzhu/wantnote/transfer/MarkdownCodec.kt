@@ -13,6 +13,7 @@ data class MarkdownBlock(
     val indent: Int = 0,
     val checked: Boolean = false,
     val mediaPath: String = "",
+    val headingLevel: Int = 0,
 )
 
 data class MarkdownNote(
@@ -25,7 +26,9 @@ data class MarkdownNote(
  * Markdown / HTML ⇄ 块模型。
  *
  * 约定（导出后能原样导入回来）：
- * - `# 标题`：首个 heading 作为笔记标题；其余 heading 变成段落。
+ * - `# 标题`：首个 heading 作为笔记标题；其余 heading 变成 HEADING 块。
+ * - `>` 引用：QUOTE。
+ * - ``` / ~~~ 围栏代码：CODE（逐行保留，编辑器可直接编辑）。
  * - `- [ ]` / `- [x]`：TASK。
  * - `1.` / `1)`：ORDERED；`-` / `*` / `+`：UNORDERED。
  * - `---` / `***` / `___`：DIVIDER。
@@ -38,6 +41,8 @@ data class MarkdownNote(
  */
 object MarkdownCodec {
     private val headingRegex = Regex("""^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$""")
+    private val quoteRegex = Regex("""^ {0,3}>[ \t]?(.*)$""")
+    private val fenceRegex = Regex("""^ {0,3}(`{3,}|~{3,})(.*)$""")
     private val dividerRegex = Regex("""^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$""")
     private val taskRegex = Regex("""^([ \t]*)(?:[-*+]|\d+[.)])[ \t]+\[([ xX])\][ \t]*(.*)$""")
     private val orderedRegex = Regex("""^([ \t]*)\d+[.)][ \t]+(.*)$""")
@@ -76,19 +81,58 @@ object MarkdownCodec {
         val blocks = ArrayList<MarkdownBlock>()
         val missing = ArrayList<String>()
         var title: String? = null
+        var inFence = false
+        var fenceIndent = 0
 
         normalized.split('\n').forEach { rawLine ->
             val line = rawLine.trimEnd()
+            val fence = fenceRegex.matchEntire(line)
+            if (fence != null) {
+                if (!inFence) {
+                    inFence = true
+                    fenceIndent = indentOf(fence.groupValues[1].takeWhile { it.isWhitespace() })
+                } else {
+                    inFence = false
+                }
+                return@forEach
+            }
+            if (inFence) {
+                blocks += MarkdownBlock(
+                    type = BlockType.CODE,
+                    text = rawLine,
+                    indent = fenceIndent,
+                )
+                return@forEach
+            }
             if (line.isBlank()) return@forEach
             val heading = headingRegex.matchEntire(line)
             if (heading != null) {
-                val text = stripInlineMarkup(heading.groupValues[2]).trim()
+                val level = heading.groupValues[1].length.coerceIn(1, 6)
+                val rawText = heading.groupValues[2].trim()
+                val text = stripInlineMarkup(rawText).trim()
                 if (title == null && text.isNotEmpty()) {
                     title = text
                     return@forEach
                 }
+                if (rawText.isNotEmpty()) {
+                    blocks += MarkdownBlock(
+                        type = BlockType.HEADING,
+                        text = rawText,
+                        indent = 0,
+                        headingLevel = level,
+                    )
+                }
+                return@forEach
+            }
+            val quote = quoteRegex.matchEntire(line)
+            if (quote != null) {
+                val text = quote.groupValues[1].trim()
                 if (text.isNotEmpty()) {
-                    blocks += MarkdownBlock(BlockType.PARAGRAPH, text, indentOf(line.takeWhile { it.isWhitespace() }))
+                    blocks += MarkdownBlock(
+                        type = BlockType.QUOTE,
+                        text = text,
+                        indent = indentOf(line.takeWhile { it.isWhitespace() }),
+                    )
                 }
                 return@forEach
             }
@@ -109,6 +153,16 @@ object MarkdownCodec {
             val image = imageRegex.matchEntire(line)
             if (image != null) {
                 val ref = image.groupValues[3]
+                if (isRemoteLink(ref)) {
+                    // Remote images are kept as rendered Markdown instead of
+                    // being dropped (there is no local file to resolve).
+                    blocks += MarkdownBlock(
+                        type = BlockType.PARAGRAPH,
+                        text = line.trim(),
+                        indent = indentOf(image.groupValues[1]),
+                    )
+                    return@forEach
+                }
                 val resolved = resolveMedia(ref)
                 if (resolved == null) {
                     missing += ref
@@ -125,6 +179,14 @@ object MarkdownCodec {
             val video = videoRegex.matchEntire(line)
             if (video != null) {
                 val ref = video.groupValues[2]
+                if (isRemoteLink(ref)) {
+                    blocks += MarkdownBlock(
+                        type = BlockType.PARAGRAPH,
+                        text = line.trim(),
+                        indent = indentOf(video.groupValues[1]),
+                    )
+                    return@forEach
+                }
                 val resolved = resolveMedia(ref)
                 if (resolved == null) {
                     missing += ref
@@ -140,6 +202,14 @@ object MarkdownCodec {
             val file = fileRegex.matchEntire(line)
             if (file != null) {
                 val ref = file.groupValues[3]
+                if (isRemoteLink(ref)) {
+                    blocks += MarkdownBlock(
+                        type = BlockType.PARAGRAPH,
+                        text = line.trim(),
+                        indent = indentOf(file.groupValues[1]),
+                    )
+                    return@forEach
+                }
                 val resolved = resolveMedia(ref)
                 if (resolved == null) {
                     missing += ref
@@ -221,33 +291,77 @@ object MarkdownCodec {
             out.append("# ").append(cleanTitle).append("\n\n")
         }
         blocks.forEachIndexed { index, block ->
-            if (index > 0) out.append('\n')
             val prefix = "  ".repeat(block.indent.coerceIn(0, 8))
             val text = block.text.replace('\n', ' ').trim()
             when (block.type) {
-                BlockType.DIVIDER -> out.append(prefix).append("---")
-                BlockType.TASK -> out.append(prefix)
-                    .append(if (block.checked) "- [x] " else "- [ ] ")
-                    .append(text)
-                BlockType.ORDERED -> out.append(prefix).append("1. ").append(text)
-                BlockType.UNORDERED -> out.append(prefix).append("- ").append(text)
-                BlockType.IMAGE -> out.append(prefix)
-                    .append("![")
-                    .append(text.ifBlank { "图片" })
-                    .append("](")
-                    .append(mediaRef(block.mediaPath))
-                    .append(")")
-                BlockType.VIDEO -> out.append(prefix)
-                    .append("[视频](")
-                    .append(mediaRef(block.mediaPath))
-                    .append(")")
-                BlockType.FILE -> out.append(prefix)
-                    .append("[文件: ")
-                    .append(text.ifBlank { "附件" })
-                    .append("](")
-                    .append(mediaRef(block.mediaPath))
-                    .append(")")
-                BlockType.PARAGRAPH -> out.append(prefix).append(text)
+                BlockType.CODE -> {
+                    val previousCode = index > 0 && blocks[index - 1].type == BlockType.CODE
+                    val nextCode = index + 1 < blocks.size && blocks[index + 1].type == BlockType.CODE
+                    if (!previousCode) {
+                        if (index > 0) out.append('\n')
+                        out.append("```\n")
+                    } else {
+                        out.append('\n')
+                    }
+                    out.append(block.text.trimEnd('\n'))
+                    if (!nextCode) out.append("\n```")
+                }
+                BlockType.HEADING -> {
+                    if (index > 0) out.append('\n')
+                    val level = block.headingLevel.coerceIn(1, 6)
+                    out.append("#".repeat(level)).append(' ').append(text)
+                }
+                BlockType.QUOTE -> {
+                    if (index > 0) out.append('\n')
+                    out.append(prefix).append("> ").append(text)
+                }
+                BlockType.DIVIDER -> {
+                    if (index > 0) out.append('\n')
+                    out.append(prefix).append("---")
+                }
+                BlockType.TASK -> {
+                    if (index > 0) out.append('\n')
+                    out.append(prefix)
+                        .append(if (block.checked) "- [x] " else "- [ ] ")
+                        .append(text)
+                }
+                BlockType.ORDERED -> {
+                    if (index > 0) out.append('\n')
+                    out.append(prefix).append("1. ").append(text)
+                }
+                BlockType.UNORDERED -> {
+                    if (index > 0) out.append('\n')
+                    out.append(prefix).append("- ").append(text)
+                }
+                BlockType.IMAGE -> {
+                    if (index > 0) out.append('\n')
+                    out.append(prefix)
+                        .append("![")
+                        .append(text.ifBlank { "图片" })
+                        .append("](")
+                        .append(mediaRef(block.mediaPath))
+                        .append(")")
+                }
+                BlockType.VIDEO -> {
+                    if (index > 0) out.append('\n')
+                    out.append(prefix)
+                        .append("[视频](")
+                        .append(mediaRef(block.mediaPath))
+                        .append(")")
+                }
+                BlockType.FILE -> {
+                    if (index > 0) out.append('\n')
+                    out.append(prefix)
+                        .append("[文件: ")
+                        .append(text.ifBlank { "附件" })
+                        .append("](")
+                        .append(mediaRef(block.mediaPath))
+                        .append(")")
+                }
+                BlockType.PARAGRAPH -> {
+                    if (index > 0) out.append('\n')
+                    out.append(prefix).append(text)
+                }
             }
         }
         return out.toString().trimEnd('\n') + "\n"
@@ -278,6 +392,17 @@ object MarkdownCodec {
                 "\n" + "#".repeat(level) + " " + stripTags(match.groupValues[1]).trim() + "\n"
             }
         }
+        text = text.replace(Regex("(?is)<pre[^>]*>(.*?)</pre\\s*>")) { match ->
+            val code = stripTags(match.groupValues[1]).trim('\n')
+            "\n```\n" + code + "\n```\n"
+        }
+        text = text.replace(Regex("(?is)<blockquote[^>]*>(.*?)</blockquote\\s*>")) { match ->
+            val inner = stripTags(match.groupValues[1])
+                .replace(Regex("\\r\\n?"), "\n")
+                .lineSequence()
+                .joinToString("\n") { line -> if (line.isBlank()) ">" else "> " + line.trim() }
+            "\n$inner\n"
+        }
         text = text.replace(Regex("(?is)<br\\s*/?>"), "\n")
         text = text.replace(Regex("(?is)<hr\\s*/?>"), "\n---\n")
         text = text.replace(Regex("(?is)<img[^>]*src\\s*=\\s*[\"']([^\"']+)[\"'][^>]*>")) { match ->
@@ -286,11 +411,13 @@ object MarkdownCodec {
         text = text.replace(Regex("(?is)<a[^>]*href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*>(.*?)</a\\s*>")) { match ->
             "[${stripTags(match.groupValues[2]).trim()}](${match.groupValues[1]})"
         }
-        text = text.replace(Regex("(?is)<(strong|b)[^>]*>"), "**")
+        // Word boundaries so <body>/<br> are not treated as <b>, and
+        // <img>/<input>/<iframe> are not treated as <i>.
+        text = text.replace(Regex("(?is)<(strong|b)\\b[^>]*>"), "**")
             .replace(Regex("(?is)</(strong|b)\\s*>"), "**")
-            .replace(Regex("(?is)<(em|i)[^>]*>"), "*")
+            .replace(Regex("(?is)<(em|i)\\b[^>]*>"), "*")
             .replace(Regex("(?is)</(em|i)\\s*>"), "*")
-            .replace(Regex("(?is)<(del|s|strike)[^>]*>"), "~~")
+            .replace(Regex("(?is)<(del|s|strike)\\b[^>]*>"), "~~")
             .replace(Regex("(?is)</(del|s|strike)\\s*>"), "~~")
             .replace(Regex("(?is)<mark[^>]*>"), "==")
             .replace(Regex("(?is)</mark\\s*>"), "==")
