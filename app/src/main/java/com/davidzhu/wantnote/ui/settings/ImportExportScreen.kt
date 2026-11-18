@@ -40,12 +40,42 @@ import kotlinx.coroutines.withContext
 
 private val TransferTabs = listOf("导入", "导出")
 
+/** 「数据管理」外层 Tab：导入&导出 / 生态互联（Dinox 等第三方同步）。 */
+private val DataTabs = listOf("导入&导出", "生态互联")
+
 @Composable
 fun ImportExportScreen(onBack: () -> Unit) {
+    var dataTabState by remember { mutableIntStateOf(0) }
+    val snackbar = remember { SnackbarHostState() }
+    SettingsSubScaffold(title = "数据管理", onBack = onBack, snackbar = snackbar) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+            TabRow(selectedTabIndex = dataTabState) {
+                DataTabs.forEachIndexed { index, label ->
+                    Tab(
+                        selected = dataTabState == index,
+                        onClick = { dataTabState = index },
+                        text = { Text(label) },
+                    )
+                }
+            }
+            if (dataTabState == 1) {
+                EcosystemTab(snackbar = snackbar)
+                return@Column
+            }
+            ImportExportTab(snackbar = snackbar)
+        }
+    }
+}
+
+@Composable
+private fun ImportExportTab(snackbar: SnackbarHostState) {
     val transfer = LocalTransfer.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val snackbar = remember { SnackbarHostState() }
     var tab by remember { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf(false) }
     var done by remember { mutableIntStateOf(0) }
@@ -172,27 +202,22 @@ fun ImportExportScreen(onBack: () -> Unit) {
         }
     }
 
-    SettingsSubScaffold(title = "导入与导出", onBack = onBack, snackbar = snackbar) { padding ->
+    Column(modifier = Modifier.fillMaxSize()) {
+        TabRow(selectedTabIndex = tab) {
+            TransferTabs.forEachIndexed { index, label ->
+                Tab(
+                    selected = tab == index,
+                    onClick = { tab = index },
+                    text = { Text(label) },
+                )
+            }
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
-            TabRow(selectedTabIndex = tab) {
-                TransferTabs.forEachIndexed { index, label ->
-                    Tab(
-                        selected = tab == index,
-                        onClick = { tab = index },
-                        text = { Text(label) },
-                    )
-                }
-            }
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-            ) {
                 if (tab == 0) {
                     Text(
                         "支持单个或多个 .md / .markdown / .html / .htm，也支持把这些文件打成的 .zip。每个文件生成一篇笔记；zip 里的图片/附件若被引用，会一并拷入媒体库。",
@@ -275,7 +300,6 @@ fun ImportExportScreen(onBack: () -> Unit) {
                         )
                     }
                 }
-            }
         }
     }
 

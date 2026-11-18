@@ -4,7 +4,6 @@ import com.davidzhu.wantnote.data.AiModelInfo
 import com.davidzhu.wantnote.data.AiProvider
 import com.davidzhu.wantnote.data.AiProviderDao
 import com.davidzhu.wantnote.data.NoteRepository
-import com.davidzhu.wantnote.data.SearchText
 import com.davidzhu.wantnote.data.SettingsRepository
 import com.davidzhu.wantnote.data.Tag
 import kotlinx.coroutines.CoroutineScope
@@ -189,7 +188,7 @@ class AiService(
     suspend fun runAutoTitleTags(noteId: String): Result<TitleTagSuggestion> {
         val note = notes.getById(noteId) ?: return Result.failure(AiException("笔记不存在"))
         val existingTags = notes.getTagsForNote(noteId)
-        val body = SearchText.fromBlocks(notes.getBlocks(noteId))
+        val body = notes.loadContent(note)
         if (body.isBlank() && note.title.isBlank()) {
             return Result.failure(AiException("空笔记不会生成标题和标签"))
         }
@@ -222,7 +221,7 @@ class AiService(
      */
     suspend fun runOverwriteTitleTags(noteId: String): Result<TitleTagSuggestion> {
         val note = notes.getById(noteId) ?: return Result.failure(AiException("笔记不存在"))
-        val body = SearchText.fromBlocks(notes.getBlocks(noteId))
+        val body = notes.loadContent(note)
         if (body.isBlank() && note.title.isBlank()) {
             return Result.failure(AiException("空笔记不会生成标题和标签"))
         }
@@ -251,7 +250,7 @@ class AiService(
      */
     suspend fun suggestFillTitleTags(noteId: String): Result<TitleTagSuggestion> {
         val note = notes.getById(noteId) ?: return Result.failure(AiException("笔记不存在"))
-        val body = SearchText.fromBlocks(notes.getBlocks(noteId))
+        val body = notes.loadContent(note)
         if (body.isBlank() && note.title.isBlank()) {
             return Result.failure(AiException("空笔记不会生成标题和标签"))
         }

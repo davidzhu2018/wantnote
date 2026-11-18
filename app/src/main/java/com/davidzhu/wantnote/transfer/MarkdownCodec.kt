@@ -36,6 +36,8 @@ data class MarkdownNote(
  * - `[视频](media/x)`：VIDEO。
  * - `[文件: 名称](media/x)`：FILE。
  * - 缩进按 2 个空格一级（导入时 tab 记作 2 个空格）。
+ * - GFM 管道表格（`| a | b |` + `| --- | --- |` 分隔行）：TABLE 块，
+ *   原始竖线行整体保存，导出时逐行还原。
  * - 行内 `**粗体**`、`*斜体*`、`==高亮==`、`~~删除线~~` 原样保留在
  *   块文本里，与编辑器 Markup 一致。
  */
@@ -52,6 +54,91 @@ object MarkdownCodec {
     private val fileRegex = Regex("""^([ \t]*)\[文件[:：]?[ \t]*([^\]]*)\]\(([^)\s]+)(?:[ \t]+"[^"]*")?\)[ \t]*$""")
     private val linkRegex = Regex("""^([ \t]*)\[([^\]]*)\]\(([^)\s]+)(?:[ \t]+"[^"]*")?\)[ \t]*$""")
 
+    /** GFM 表头分隔行：`| --- | :---: |`，也接受无首尾管道的 `--- | ---`。 */
+    private val tableSeparatorRegex = Regex("""^[ \t]*\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$""")
+
+    /** 解析后的表格：表头、每列对齐方式（0 左 / 1 中 / 2 右）与数据行。 */
+    data class TableGrid(
+        val header: List<String>,
+        val alignments: List<Int>,
+        val rows: List<List<String>>,
+    )
+
+    /** 行内是否含竖线（长度 >1 的竖线才算潜在表格行）。 */
+    fun lineHasPipe(line: String): Boolean {
+        val trimmed = line.trim()
+        return trimmed.length > 1 && trimmed.contains('|')
+    }
+
+    /** 该行是否是 GFM 表头分隔行（`--- | :---: |` 样式，只允许连字符与冒号）。 */
+    fun isTableSeparatorLine(line: String): Boolean {
+        return tableSeparatorRegex.matches(line.trimEnd())
+    }
+
+    /**
+     * 把一个 TABLE 块的原始文本解析成 [TableGrid]，供预览渲染。
+     * 第一行是表头，第二行是分隔行（决定列对齐），其余是数据行。
+     * 单元格内 `\|` 转义为字面竖线。解析失败返回 null（按段落显示）。
+     */
+    fun parseTable(text: String): TableGrid? {
+        val lines = text.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
+        if (lines.size < 2) return null
+        if (!isTableSeparatorLine(lines[1])) return null
+        val header = splitTableRow(lines[0])
+        val separator = splitTableRow(lines[1])
+        if (header.isEmpty()) return null
+        val alignments = separator.map { cell ->
+            val clean = cell.trim().lowercase()
+            val leading = clean.startsWith(":")
+            val trailing = clean.endsWith(":")
+            when {
+                leading && trailing -> 1
+                trailing -> 2
+                else -> 0
+            }
+        }
+        val rows = lines.drop(2).map { splitTableRow(it) }
+        return TableGrid(header, alignments, rows)
+    }
+
+    /** 按竖线切分一行表格，处理 `\|` 转义，返回去掉首尾管道后的单元格。 */
+    private fun splitTableRow(row: String): List<String> {
+        var body = row.trim()
+        if (body.startsWith("|")) body = body.substring(1)
+        if (body.endsWith("|") && !body.endsWith("\\|")) body = body.substring(0, body.length - 1)
+        val cells = ArrayList<String>()
+        val current = StringBuilder()
+        var escaped = false
+        body.forEach { char ->
+            when {
+                escaped -> {
+                    if (char != '|') current.append('\\')
+                    current.append(char)
+                    escaped = false
+                }
+                char == '\\' -> escaped = true
+                char == '|' -> {
+                    cells += current.toString().trim()
+                    current.setLength(0)
+                }
+                else -> current.append(char)
+            }
+        }
+        if (escaped) current.append('\\')
+        cells += current.toString().trim()
+        return cells
+    }
+
+    /** 由块列表生成表格的原始 Markdown 行（编辑器插入模板用）。 */
+    fun tableTemplate(indent: Int = 0): String {
+        val prefix = "  ".repeat(indent.coerceIn(0, 8))
+        return listOf(
+            "${prefix}| 列一 | 列二 |",
+            "${prefix}| --- | --- |",
+            "${prefix}| 内容 | 内容 |",
+        ).joinToString("\n")
+    }
+
     private val videoExtensions = setOf(
         "mp4", "webm", "3gp", "mkv", "mov", "avi", "m4v",
     )
@@ -66,12 +153,13 @@ object MarkdownCodec {
         resolveMedia: (String) -> String? = { null },
     ): MarkdownNote {
         val source = if (isHtml || looksLikeHtml(text)) htmlToMarkdown(text) else text
-        return parseMarkdown(source, fallbackTitle, resolveMedia)
+        return parseMarkdown(source, fallbackTitle, resolveMedia = resolveMedia)
     }
 
     fun parseMarkdown(
         markdown: String,
         fallbackTitle: String,
+        consumeLeadingTitle: Boolean = true,
         resolveMedia: (String) -> String? = { null },
     ): MarkdownNote {
         val normalized = markdown
@@ -84,7 +172,10 @@ object MarkdownCodec {
         var inFence = false
         var fenceIndent = 0
 
-        normalized.split('\n').forEach { rawLine ->
+        val lines = normalized.split('\n')
+        var index = 0
+        while (index < lines.size) {
+            val rawLine = lines[index]
             val line = rawLine.trimEnd()
             val fence = fenceRegex.matchEntire(line)
             if (fence != null) {
@@ -94,7 +185,8 @@ object MarkdownCodec {
                 } else {
                     inFence = false
                 }
-                return@forEach
+                index += 1
+                continue
             }
             if (inFence) {
                 blocks += MarkdownBlock(
@@ -102,17 +194,47 @@ object MarkdownCodec {
                     text = rawLine,
                     indent = fenceIndent,
                 )
-                return@forEach
+                index += 1
+                continue
             }
-            if (line.isBlank()) return@forEach
+            if (line.isBlank()) {
+                index += 1
+                continue
+            }
+            // GFM 管道表格：当前行含竖线且下一行是分隔行（| --- | --- |），
+            // 则把连续的行合并为一个 TABLE 块（原始竖线行原样保留，保证
+            // 导出后可以逐字还原）。
+            if (lineHasPipe(line) && index + 1 < lines.size &&
+                isTableSeparatorLine(lines[index + 1])
+            ) {
+                val indent = indentOf(line.takeWhile { it.isWhitespace() })
+                val rows = ArrayList<String>()
+                var cursor = index
+                while (cursor < lines.size) {
+                    val candidate = lines[cursor].trimEnd()
+                    if (candidate.isBlank() || !lineHasPipe(candidate)) break
+                    rows += candidate.trimStart()
+                    cursor += 1
+                }
+                blocks += MarkdownBlock(
+                    type = BlockType.TABLE,
+                    text = rows.joinToString("\n"),
+                    indent = indent,
+                )
+                index = cursor
+                continue
+            }
             val heading = headingRegex.matchEntire(line)
             if (heading != null) {
                 val level = heading.groupValues[1].length.coerceIn(1, 6)
                 val rawText = heading.groupValues[2].trim()
                 val text = stripInlineMarkup(rawText).trim()
-                if (title == null && text.isNotEmpty()) {
+                // 完整文档导入时，首个标题作为笔记标题、不进入正文块。
+                // 正文/预览解析必须关闭此行为，否则正文里的第一个标题会消失。
+                if (consumeLeadingTitle && title == null && text.isNotEmpty()) {
                     title = text
-                    return@forEach
+                    index += 1
+                    continue
                 }
                 if (rawText.isNotEmpty()) {
                     blocks += MarkdownBlock(
@@ -122,7 +244,8 @@ object MarkdownCodec {
                         headingLevel = level,
                     )
                 }
-                return@forEach
+                index += 1
+                continue
             }
             val quote = quoteRegex.matchEntire(line)
             if (quote != null) {
@@ -134,11 +257,13 @@ object MarkdownCodec {
                         indent = indentOf(line.takeWhile { it.isWhitespace() }),
                     )
                 }
-                return@forEach
+                index += 1
+                continue
             }
             if (dividerRegex.matches(line)) {
                 blocks += MarkdownBlock(BlockType.DIVIDER)
-                return@forEach
+                index += 1
+                continue
             }
             val task = taskRegex.matchEntire(line)
             if (task != null) {
@@ -148,7 +273,8 @@ object MarkdownCodec {
                     indent = indentOf(task.groupValues[1]),
                     checked = task.groupValues[2].equals("x", ignoreCase = true),
                 )
-                return@forEach
+                index += 1
+                continue
             }
             val image = imageRegex.matchEntire(line)
             if (image != null) {
@@ -161,7 +287,8 @@ object MarkdownCodec {
                         text = line.trim(),
                         indent = indentOf(image.groupValues[1]),
                     )
-                    return@forEach
+                    index += 1
+                continue
                 }
                 val resolved = resolveMedia(ref)
                 if (resolved == null) {
@@ -174,7 +301,8 @@ object MarkdownCodec {
                         mediaPath = resolved,
                     )
                 }
-                return@forEach
+                index += 1
+                continue
             }
             val video = videoRegex.matchEntire(line)
             if (video != null) {
@@ -185,7 +313,8 @@ object MarkdownCodec {
                         text = line.trim(),
                         indent = indentOf(video.groupValues[1]),
                     )
-                    return@forEach
+                    index += 1
+                continue
                 }
                 val resolved = resolveMedia(ref)
                 if (resolved == null) {
@@ -197,7 +326,8 @@ object MarkdownCodec {
                         mediaPath = resolved,
                     )
                 }
-                return@forEach
+                index += 1
+                continue
             }
             val file = fileRegex.matchEntire(line)
             if (file != null) {
@@ -208,7 +338,8 @@ object MarkdownCodec {
                         text = line.trim(),
                         indent = indentOf(file.groupValues[1]),
                     )
-                    return@forEach
+                    index += 1
+                continue
                 }
                 val resolved = resolveMedia(ref)
                 if (resolved == null) {
@@ -221,7 +352,8 @@ object MarkdownCodec {
                         mediaPath = resolved,
                     )
                 }
-                return@forEach
+                index += 1
+                continue
             }
             val ordered = orderedRegex.matchEntire(line)
             if (ordered != null) {
@@ -230,7 +362,8 @@ object MarkdownCodec {
                     text = ordered.groupValues[2].trim(),
                     indent = indentOf(ordered.groupValues[1]),
                 )
-                return@forEach
+                index += 1
+                continue
             }
             val unordered = unorderedRegex.matchEntire(line)
             if (unordered != null) {
@@ -239,7 +372,8 @@ object MarkdownCodec {
                     text = unordered.groupValues[2].trim(),
                     indent = indentOf(unordered.groupValues[1]),
                 )
-                return@forEach
+                index += 1
+                continue
             }
             val link = linkRegex.matchEntire(line)
             if (link != null) {
@@ -262,7 +396,8 @@ object MarkdownCodec {
                             mediaPath = resolved,
                         )
                     }
-                    return@forEach
+                    index += 1
+                continue
                 }
             }
             val indent = indentOf(line.takeWhile { it.isWhitespace() })
@@ -271,6 +406,7 @@ object MarkdownCodec {
                 text = line.trim(),
                 indent = indent,
             )
+            index += 1
         }
 
         return MarkdownNote(
@@ -341,6 +477,11 @@ object MarkdownCodec {
                         .append("](")
                         .append(mediaRef(block.mediaPath))
                         .append(")")
+                }
+                BlockType.TABLE -> {
+                    if (index > 0) out.append('\n')
+                    // 表格按原始竖线行逐行还原（text 是多行原文）。
+                    out.append(prefix).append(block.text.replace("\n", "\n$prefix"))
                 }
                 BlockType.VIDEO -> {
                     if (index > 0) out.append('\n')

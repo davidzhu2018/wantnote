@@ -17,6 +17,8 @@ enum class BlockType {
     IMAGE,
     VIDEO,
     FILE,
+    /** 0.9.0：GFM 管道表格，text 保存原始竖线行（多行，用 \n 分隔）。 */
+    TABLE,
 }
 
 enum class BlockFontSize(val label: String, val sp: Int) {

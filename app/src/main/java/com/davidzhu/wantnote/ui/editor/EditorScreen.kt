@@ -44,7 +44,9 @@ import androidx.compose.material.icons.outlined.Highlight
 import androidx.compose.material.icons.outlined.HorizontalRule
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.StrikethroughS
+import androidx.compose.material.icons.outlined.TableChart
 import androidx.compose.material.icons.outlined.Tag
+import androidx.compose.material.icons.outlined.Title
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Videocam
@@ -97,6 +99,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -107,6 +111,7 @@ import com.davidzhu.wantnote.data.AppSettings
 import com.davidzhu.wantnote.data.BlockFontSize
 import com.davidzhu.wantnote.data.BlockType
 import com.davidzhu.wantnote.data.Dates
+import com.davidzhu.wantnote.data.EditorMode
 import com.davidzhu.wantnote.data.Markup
 import com.davidzhu.wantnote.data.Note
 import com.davidzhu.wantnote.data.NoteBlock
@@ -116,10 +121,13 @@ import com.davidzhu.wantnote.data.NoteMentionParser
 import com.davidzhu.wantnote.data.NoteRepository
 import com.davidzhu.wantnote.data.SearchText
 import com.davidzhu.wantnote.data.Tag
+import com.davidzhu.wantnote.transfer.MarkdownBlock
+import com.davidzhu.wantnote.transfer.MarkdownCodec
 import com.davidzhu.wantnote.ui.LocalAi
 import com.davidzhu.wantnote.ui.LocalMedia
 import com.davidzhu.wantnote.ui.LocalNotes
 import com.davidzhu.wantnote.ui.LocalSettings
+import com.davidzhu.wantnote.ui.components.MarkdownPreview
 import com.davidzhu.wantnote.ui.components.MarkdownVisual
 import com.davidzhu.wantnote.ui.components.TagChip
 import com.davidzhu.wantnote.ui.components.TagColorPicker
@@ -153,6 +161,9 @@ fun EditorScreen(
     var ready by remember { mutableStateOf(false) }
     var title by remember { mutableStateOf("") }
     var blocks by remember { mutableStateOf(listOf<NoteBlock>()) }
+    // 0.9.0：编辑模式（所见即所得=块编辑 / 源码=整篇 Markdown + 预览面板）。
+    var mode by remember { mutableStateOf(settings.editorModeOption) }
+    var sourceText by remember { mutableStateOf(TextFieldValue("")) }
     var focusedId by remember { mutableStateOf<String?>(null) }
     var noteTags by remember { mutableStateOf(listOf<Tag>()) }
     var showTagPicker by remember { mutableStateOf(false) }
@@ -172,6 +183,8 @@ fun EditorScreen(
 
     val titleState = rememberUpdatedState(title)
     val blocksState = rememberUpdatedState(blocks)
+    val sourceState = rememberUpdatedState(sourceText)
+    val modeState = rememberUpdatedState(mode)
 
     fun requesterOf(id: String): FocusRequester = requesters.getOrPut(id) { FocusRequester() }
 
@@ -183,10 +196,69 @@ fun EditorScreen(
         blocks = next.mapIndexed { index, block -> block.copy(sortOrder = index, noteId = noteId) }
     }
 
+    /** 块列表 → 内容 Markdown（不含标题 H1；表格/代码围栏原样还原）。 */
+    fun blocksToMarkdown(blockList: List<NoteBlock>): String {
+        return MarkdownCodec.render(
+            title = "",
+            blocks = blockList.map { block ->
+                MarkdownBlock(
+                    type = block.blockType,
+                    text = block.text,
+                    indent = block.indent,
+                    checked = block.checked,
+                    mediaPath = block.mediaPath,
+                    headingLevel = block.headingLevel,
+                )
+            },
+        ).trimEnd('\n')
+    }
+
+    /** 当前编辑面上的正文 Markdown（两种模式共用，保存/防抖都走这里）。 */
+    fun currentContentMarkdown(): String {
+        return if (modeState.value == EditorMode.SOURCE) {
+            sourceState.value.text.replace("\r\n", "\n")
+        } else {
+            blocksToMarkdown(blocksState.value)
+        }
+    }
+
     fun focusedIndex(): Int {
         val id = focusedId
         val index = blocks.indexOfFirst { it.id == id }
         return if (index >= 0) index else blocks.lastIndex.coerceAtLeast(0)
+    }
+
+    /** 重建 WYSIWYG 的字段缓存（模式切换 / 初次载入用）。 */
+    fun syncFieldsFromBlocks() {
+        fields.clear()
+        blocks.forEach { block ->
+            fields[block.id] = TextFieldValue(block.text, TextRange(block.text.length))
+        }
+    }
+
+    /**
+     * 切换编辑模式：两种表示互转都走「内容 Markdown」，所以切换零损耗，
+     * 也不会产生额外保存。所选模式同时写进设置，作为下次的默认值。
+     */
+    fun switchMode(target: EditorMode) {
+        if (target == mode) return
+        if (target == EditorMode.SOURCE) {
+            val content = blocksToMarkdown(blocks)
+            sourceText = TextFieldValue(content, TextRange(content.length))
+        } else {
+            val content = sourceText.text
+            scope.launch {
+                blocks = repository.deriveBlocks(noteId, content)
+                syncFieldsFromBlocks()
+                focusedId = blocks.firstOrNull { !it.isAttachment && it.blockType != BlockType.DIVIDER }?.id
+                    ?: blocks.firstOrNull()?.id
+            }
+        }
+        mention = null
+        mode = target
+        scope.launch {
+            settingsRepo.update { it.copy(editorMode = target.name) }
+        }
     }
 
     fun insertAfter(index: Int, block: NoteBlock, focus: Boolean = true) {
@@ -204,6 +276,7 @@ fun EditorScreen(
         text: String = "",
         mediaPath: String = "",
         fontSize: BlockFontSize = BlockFontSize.NORMAL,
+        headingLevel: Int = 0,
     ): NoteBlock {
         return NoteBlock(
             id = UUID.randomUUID().toString(),
@@ -215,10 +288,32 @@ fun EditorScreen(
             fontSize = fontSize.name,
             mediaPath = mediaPath,
             sortOrder = 0,
+            headingLevel = when {
+                headingLevel in 1..6 -> headingLevel
+                type == BlockType.HEADING -> 1
+                else -> 0
+            },
         )
     }
 
     fun addTypedBlock(type: BlockType) {
+        if (type == BlockType.TABLE) {
+            val index = focusedIndex()
+            val current = blocks.getOrNull(index)
+            val table = newBlock(
+                BlockType.TABLE,
+                indent = current?.indent ?: 0,
+                text = MarkdownCodec.tableTemplate(indent = current?.indent ?: 0),
+            )
+            if (blocks.isEmpty()) {
+                updateBlocks(listOf(table))
+            } else {
+                insertAfter(index, table)
+            }
+            fields[table.id] = TextFieldValue(table.text, TextRange(table.text.length))
+            focusedId = table.id
+            return
+        }
         if (blocks.isEmpty()) {
             val starter = newBlock(type)
             updateBlocks(listOf(starter))
@@ -241,10 +336,47 @@ fun EditorScreen(
         }
     }
 
+    /** 标题按钮：聚焦块在 正文 → H1..H6 → 正文 之间循环。 */
+    fun cycleHeadingLevel() {
+        if (blocks.isEmpty()) return
+        val index = focusedIndex()
+        val current = blocks[index]
+        val next = when {
+            current.blockType != BlockType.HEADING -> 1
+            current.headingLevel < 6 -> current.headingLevel + 1
+            else -> 0
+        }
+        updateBlocks(
+            blocks.mapIndexed { i, block ->
+                if (i == index) {
+                    if (next == 0) {
+                        block.copy(type = BlockType.PARAGRAPH.name, headingLevel = 0)
+                    } else {
+                        block.copy(type = BlockType.HEADING.name, headingLevel = next)
+                    }
+                } else {
+                    block
+                }
+            },
+        )
+        fields[current.id] = TextFieldValue(fields[current.id]?.text.orEmpty(), fields[current.id]?.selection ?: TextRange.Zero)
+        focusedId = current.id
+    }
+
+    /**
+     * 行内标记包裹（粗体/斜体/删除线/高亮）。源码模式直接在整篇文本上
+     * 操作；所见即所得模式作用于聚焦块的文本。
+     */
     fun wrapFocused(marker: String) {
+        if (modeState.value == EditorMode.SOURCE) {
+            val value = sourceText
+            val (next, lo, hi) = Markup.wrap(value.text, value.selection.min, value.selection.max, marker)
+            sourceText = TextFieldValue(next, TextRange(lo, hi))
+            return
+        }
         val id = focusedId ?: blocks.getOrNull(focusedIndex())?.id ?: return
         val block = blocks.firstOrNull { it.id == id } ?: return
-        if (block.blockType == BlockType.DIVIDER || block.isAttachment) return
+        if (block.blockType == BlockType.DIVIDER || block.isAttachment || block.blockType == BlockType.TABLE) return
         val value = fieldOf(block)
         val (next, lo, hi) = Markup.wrap(value.text, value.selection.min, value.selection.max, marker)
         fields[id] = TextFieldValue(next, TextRange(lo, hi))
@@ -253,12 +385,20 @@ fun EditorScreen(
 
     /**
      * Toolbar 「@」 picker: insert the chosen note's stable-ID marker at the
-     * CURRENT caret of the CURRENT block, replacing the selection if one is
-     * active. Media/divider blocks have no caret, so the marker lands in a
+     * CURRENT caret of the current editing surface (source text or focused
+     * block). Media/divider blocks have no caret, so the marker lands in a
      * fresh paragraph right after them; on an empty note it opens block one.
      */
     fun insertNoteLinkAtCaret(targetId: String) {
         val marker = NoteLinkCodec.marker(targetId)
+        if (modeState.value == EditorMode.SOURCE) {
+            val value = sourceText
+            val lo = value.selection.min.coerceIn(0, value.text.length)
+            val hi = value.selection.max.coerceIn(lo, value.text.length)
+            val next = value.text.substring(0, lo) + marker + value.text.substring(hi)
+            sourceText = TextFieldValue(next, TextRange(lo + marker.length))
+            return
+        }
         val index = focusedIndex()
         val current = blocks.getOrNull(index)
         if (current == null) {
@@ -268,7 +408,7 @@ fun EditorScreen(
             focusedId = created.id
             return
         }
-        if (current.isMedia || current.blockType == BlockType.DIVIDER) {
+        if (current.isMedia || current.blockType == BlockType.DIVIDER || current.blockType == BlockType.TABLE) {
             insertAfter(
                 index,
                 newBlock(
@@ -296,18 +436,66 @@ fun EditorScreen(
     fun applyMention(targetId: String) {
         val active = mention ?: return
         mention = null
+        val marker = NoteLinkCodec.marker(targetId)
+        if (modeState.value == EditorMode.SOURCE) {
+            val value = sourceText
+            val m = active.mention
+            if (m.start < 0 || m.end > value.text.length || m.start >= m.end) return
+            val next = value.text.substring(0, m.start) + marker + value.text.substring(m.end)
+            sourceText = TextFieldValue(next, TextRange(m.start + marker.length))
+            return
+        }
         val block = blocks.firstOrNull { it.id == active.blockId } ?: return
         val value = fieldOf(block)
         val m = active.mention
         if (m.start < 0 || m.end > value.text.length || m.start >= m.end) return
-        val marker = NoteLinkCodec.marker(targetId)
         val next = value.text.substring(0, m.start) + marker + value.text.substring(m.end)
         fields[block.id] = TextFieldValue(next, TextRange(m.start + marker.length))
         updateBlocks(blocks.map { if (it.id == block.id) it.copy(text = next) else it })
         focusedId = block.id
     }
 
+    /** 在当前编辑面（源码 / 聚焦块）的插入点写入一段文本。 */
+    fun insertTextAtCaret(text: String) {
+        if (modeState.value == EditorMode.SOURCE) {
+            val value = sourceText
+            val lo = value.selection.min.coerceIn(0, value.text.length)
+            val hi = value.selection.max.coerceIn(lo, value.text.length)
+            val next = value.text.substring(0, lo) + text + value.text.substring(hi)
+            sourceText = TextFieldValue(next, TextRange(lo + text.length))
+            return
+        }
+        val index = focusedIndex()
+        val current = blocks.getOrNull(index)
+        if (current == null || current.isMedia || current.blockType == BlockType.DIVIDER ||
+            current.blockType == BlockType.TABLE
+        ) {
+            val created = newBlock(
+                BlockType.PARAGRAPH,
+                indent = current?.indent ?: 0,
+                text = text,
+                fontSize = current?.blockFontSize ?: BlockFontSize.NORMAL,
+            )
+            if (blocks.isEmpty()) {
+                updateBlocks(listOf(created))
+            } else {
+                insertAfter(index, created, focus = false)
+            }
+            fields[created.id] = TextFieldValue(text, TextRange(text.length))
+            focusedId = created.id
+            return
+        }
+        val value = fieldOf(current)
+        val lo = value.selection.min.coerceIn(0, value.text.length)
+        val hi = value.selection.max.coerceIn(lo, value.text.length)
+        val next = value.text.substring(0, lo) + text + value.text.substring(hi)
+        fields[current.id] = TextFieldValue(next, TextRange(lo + text.length))
+        updateBlocks(blocks.map { if (it.id == current.id) it.copy(text = next) else it })
+        focusedId = current.id
+    }
+
     fun cycleFontSize() {
+        if (modeState.value == EditorMode.SOURCE) return
         if (blocks.isEmpty()) return
         val index = focusedIndex()
         val current = blocks[index].blockFontSize.next()
@@ -319,6 +507,7 @@ fun EditorScreen(
     }
 
     fun changeIndent(delta: Int) {
+        if (modeState.value == EditorMode.SOURCE) return
         if (blocks.isEmpty()) return
         val index = focusedIndex()
         updateBlocks(
@@ -337,14 +526,14 @@ fun EditorScreen(
         if (index <= 0) {
             val only = blocks.getOrNull(0) ?: return
             if (only.blockType != BlockType.PARAGRAPH) {
-                updateBlocks(listOf(only.copy(type = BlockType.PARAGRAPH.name, checked = false, mediaPath = "", text = "")))
+                updateBlocks(listOf(only.copy(type = BlockType.PARAGRAPH.name, checked = false, mediaPath = "", text = "", headingLevel = 0)))
                 fields[only.id] = TextFieldValue("")
             }
             return
         }
         val current = blocks[index]
         val previous = blocks[index - 1]
-        if (previous.blockType != BlockType.DIVIDER && !previous.isMedia) {
+        if (previous.blockType != BlockType.DIVIDER && !previous.isMedia && previous.blockType != BlockType.TABLE) {
             val mergedText = previous.text + current.text
             val caret = previous.text.length
             updateBlocks(
@@ -367,6 +556,12 @@ fun EditorScreen(
     }
 
     fun onTextChanged(block: NoteBlock, incoming: TextFieldValue) {
+        // 表格块的原始竖线行里允许换行，不拆块。
+        if (block.blockType == BlockType.TABLE) {
+            fields[block.id] = incoming
+            updateBlocks(blocks.map { if (it.id == block.id) it.copy(text = incoming.text) else it })
+            return
+        }
         val newline = incoming.text.indexOf('\n')
         if (newline >= 0) {
             mention = null
@@ -395,6 +590,7 @@ fun EditorScreen(
                 indent = block.indent,
                 text = right,
                 fontSize = block.blockFontSize,
+                headingLevel = block.headingLevel,
             )
             updateBlocks(
                 blocks.toMutableList().also { list ->
@@ -416,33 +612,54 @@ fun EditorScreen(
         }
     }
 
+    /** 源码模式的文本变化：更新整篇 Markdown + 活动 @ 提及。 */
+    fun onSourceChanged(incoming: TextFieldValue) {
+        sourceText = incoming
+        val active = NoteMentionParser.activeMention(incoming.text, incoming.selection.min)
+        mention = active?.let { EditorMention(SOURCE_MENTION_ANCHOR, it) }
+    }
+
     LaunchedEffect(noteId) {
+        // 恢复持久化的默认编辑模式（初始 remember 拿到的可能是未加载的默认值）。
+        mode = settingsRepo.get().editorModeOption
         val note = repository.getById(noteId)
         if (note != null) {
-            repository.ensureMigratedBlocks(note)
             title = note.title
-            val loaded = repository.getBlocks(noteId)
-            val next = loaded.ifEmpty {
-                listOf(NoteBlock.paragraph(UUID.randomUUID().toString(), noteId, "", sortOrder = 0))
+            val content = repository.loadContent(note)
+            if (mode == EditorMode.SOURCE) {
+                sourceText = TextFieldValue(content, TextRange(content.length))
+            } else {
+                blocks = repository.deriveBlocks(noteId, content).ifEmpty {
+                    listOf(
+                        NoteBlock(
+                            id = UUID.randomUUID().toString(),
+                            noteId = noteId,
+                            type = BlockType.PARAGRAPH.name,
+                            text = "",
+                            indent = 0,
+                            checked = false,
+                            fontSize = BlockFontSize.NORMAL.name,
+                            mediaPath = "",
+                            sortOrder = 0,
+                        ),
+                    )
+                }
+                syncFieldsFromBlocks()
+                focusedId = blocks.firstOrNull { !it.isAttachment && it.blockType != BlockType.DIVIDER }?.id
+                    ?: blocks.firstOrNull()?.id
             }
-            fields.clear()
-            next.forEach { block ->
-                fields[block.id] = TextFieldValue(block.text, TextRange(block.text.length))
-            }
-            blocks = next
             noteTags = repository.getTagsForNote(noteId)
-            focusedId = next.firstOrNull { !it.isAttachment && it.blockType != BlockType.DIVIDER }?.id ?: next.firstOrNull()?.id
         }
         ready = true
     }
 
     LaunchedEffect(ready, noteId) {
         if (!ready) return@LaunchedEffect
-        snapshotFlow { title to blocks }
+        snapshotFlow { EditorSnapshot(modeState.value, titleState.value, currentContentMarkdown()) }
             .distinctUntilChanged()
             .debounce(400)
-            .collect { (t, b) ->
-                repository.save(noteId, t, b)
+            .collect { snapshot ->
+                repository.saveMarkdown(noteId, snapshot.title, snapshot.content)
             }
     }
 
@@ -453,7 +670,11 @@ fun EditorScreen(
         runCatching { requester.requestFocus() }
     }
 
-    val charCount = remember(blocks) { NoteRepository.bodyCharCount(blocks) }
+    val charCount = if (mode == EditorMode.SOURCE) {
+        remember(sourceText.text) { sourceText.text.codePointCount(0, sourceText.text.length) }
+    } else {
+        remember(blocks) { NoteRepository.bodyCharCount(blocks) }
+    }
 
     /**
      * Live search over the note library for the active `@` mention. Blank
@@ -464,7 +685,9 @@ fun EditorScreen(
     val mentionCandidates = remember(mention, allNotes) {
         val active = mention ?: return@remember emptyList<Note>()
         val query = active.mention.query.trim()
-        val pool = allNotes.filter { it.id != active.blockId }
+        // 源码模式的提及锚点是虚拟 ID；两种模式都排除“当前这篇笔记”。
+        val selfId = if (active.blockId == SOURCE_MENTION_ANCHOR) noteId else active.blockId
+        val pool = allNotes.filter { it.id != selfId }
         if (query.isEmpty()) {
             pool
         } else {
@@ -484,11 +707,11 @@ fun EditorScreen(
      */
     fun leave() {
         val titleNow = titleState.value
-        val blocksNow = blocksState.value
+        val contentNow = currentContentMarkdown()
         scope.launch {
             try {
                 withContext(NonCancellable + Dispatchers.IO) {
-                    repository.save(noteId, titleNow, blocksNow)
+                    repository.saveMarkdown(noteId, titleNow, contentNow)
                     repository.deleteIfBlank(noteId)
                 }
             } finally {
@@ -542,7 +765,7 @@ fun EditorScreen(
         if (saving) return
         saving = true
         scope.launch {
-            repository.save(noteId, titleState.value, blocksState.value)
+            repository.saveMarkdown(noteId, titleState.value, currentContentMarkdown())
             // AI runs as a fill-only pass: each field is filled ONLY if it is
             // still empty at apply time (checked inside one transaction), so
             // user-written titles/tags — including changes made while the AI
@@ -556,7 +779,7 @@ fun EditorScreen(
         if (generating) return
         generating = true
         scope.launch {
-            repository.save(noteId, titleState.value, blocksState.value)
+            repository.saveMarkdown(noteId, titleState.value, currentContentMarkdown())
             if (overwrite) {
                 // Reached only via the confirmation dialog; replaces the
                 // stored title and tags with the AI result, as the user chose.
@@ -605,10 +828,14 @@ fun EditorScreen(
             runCatching {
                 withContext(Dispatchers.IO) { media.importImage(uri, settings.compressImages) }
             }.onSuccess { path ->
-                val index = focusedIndex()
-                val indent = blocks.getOrNull(index)?.indent ?: 0
-                insertAfter(index, newBlock(BlockType.IMAGE, indent = indent, mediaPath = path))
-                insertAfter(focusedIndex(), newBlock(BlockType.PARAGRAPH, indent = indent), focus = true)
+                if (modeState.value == EditorMode.SOURCE) {
+                    insertTextAtCaret("![图片]($path)")
+                } else {
+                    val index = focusedIndex()
+                    val indent = blocks.getOrNull(index)?.indent ?: 0
+                    insertAfter(index, newBlock(BlockType.IMAGE, indent = indent, mediaPath = path))
+                    insertAfter(focusedIndex(), newBlock(BlockType.PARAGRAPH, indent = indent), focus = true)
+                }
             }.onFailure {
                 snackbar.showSnackbar("无法插入图片")
             }
@@ -623,10 +850,14 @@ fun EditorScreen(
             runCatching {
                 withContext(Dispatchers.IO) { media.importVideo(uri, settings.compressVideos) }
             }.onSuccess { path ->
-                val index = focusedIndex()
-                val indent = blocks.getOrNull(index)?.indent ?: 0
-                insertAfter(index, newBlock(BlockType.VIDEO, indent = indent, mediaPath = path))
-                insertAfter(focusedIndex(), newBlock(BlockType.PARAGRAPH, indent = indent), focus = true)
+                if (modeState.value == EditorMode.SOURCE) {
+                    insertTextAtCaret("[视频]($path)")
+                } else {
+                    val index = focusedIndex()
+                    val indent = blocks.getOrNull(index)?.indent ?: 0
+                    insertAfter(index, newBlock(BlockType.VIDEO, indent = indent, mediaPath = path))
+                    insertAfter(focusedIndex(), newBlock(BlockType.PARAGRAPH, indent = indent), focus = true)
+                }
             }.onFailure {
                 snackbar.showSnackbar("无法插入视频")
             }
@@ -641,11 +872,15 @@ fun EditorScreen(
             runCatching {
                 withContext(Dispatchers.IO) { media.importFile(uri) }
             }.onSuccess { path ->
-                val index = focusedIndex()
-                val indent = blocks.getOrNull(index)?.indent ?: 0
-                val name = path.substringAfterLast('/')
-                insertAfter(index, newBlock(BlockType.FILE, indent = indent, text = name, mediaPath = path))
-                insertAfter(focusedIndex(), newBlock(BlockType.PARAGRAPH, indent = indent), focus = true)
+                if (modeState.value == EditorMode.SOURCE) {
+                    insertTextAtCaret("[文件: ${path.substringAfterLast('/')}]($path)")
+                } else {
+                    val index = focusedIndex()
+                    val indent = blocks.getOrNull(index)?.indent ?: 0
+                    val name = path.substringAfterLast('/')
+                    insertAfter(index, newBlock(BlockType.FILE, indent = indent, text = name, mediaPath = path))
+                    insertAfter(focusedIndex(), newBlock(BlockType.PARAGRAPH, indent = indent), focus = true)
+                }
             }.onFailure {
                 snackbar.showSnackbar("无法插入文件")
             }
@@ -653,6 +888,28 @@ fun EditorScreen(
     }
 
     BackHandler { leave() }
+
+    /** 用系统应用打开附件（视频/文件/音频），失败给 snackbar。 */
+    fun openAttachment(path: String) {
+        val file = media.fileFor(path)
+        val mime = context.contentResolver.getType(
+            android.net.Uri.fromFile(file),
+        ) ?: guessedMime(path)
+        runCatching {
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file,
+            )
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(intent, "打开附件"))
+        }.onFailure {
+            scope.launch { snackbar.showSnackbar("无法打开附件") }
+        }
+    }
 
     val currentFontLabel = blocks.getOrNull(focusedIndex())?.blockFontSize?.label ?: BlockFontSize.NORMAL.label
 
@@ -669,6 +926,17 @@ fun EditorScreen(
                     }
                 },
                 actions = {
+                    // 模式切换：所见即所得 ⇄ 源码（内容 Markdown 互转，零损耗）。
+                    TextButton(onClick = {
+                        switchMode(
+                            if (mode == EditorMode.WYSIWYG) EditorMode.SOURCE else EditorMode.WYSIWYG,
+                        )
+                    }) {
+                        Text(
+                            if (mode == EditorMode.WYSIWYG) "源码" else "所见即所得",
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
                     TextButton(onClick = { saveExplicit() }, enabled = !saving) {
                         Text("保存")
                     }
@@ -684,11 +952,14 @@ fun EditorScreen(
         bottomBar = {
             OutlineToolbar(
                 fontLabel = currentFontLabel,
+                sourceMode = mode == EditorMode.SOURCE,
                 onTags = { showTagPicker = true },
                 onAt = { showLinkPicker = true },
                 onAddTask = { addTypedBlock(BlockType.TASK) },
                 onOrdered = { addTypedBlock(BlockType.ORDERED) },
                 onUnordered = { addTypedBlock(BlockType.UNORDERED) },
+                onHeading = { cycleHeadingLevel() },
+                onTable = { addTypedBlock(BlockType.TABLE) },
                 onDivider = { addTypedBlock(BlockType.DIVIDER) },
                 onFontSize = { cycleFontSize() },
                 onBold = { wrapFocused("**") },
@@ -754,49 +1025,47 @@ fun EditorScreen(
                         }
                     },
                 )
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    itemsIndexed(blocks, key = { _, block -> block.id }) { index, block ->
-                        OutlineBlockRow(
-                            block = block,
-                            number = orderedNumber(blocks, index),
-                            value = fieldOf(block),
-                            focusRequester = requesterOf(block.id),
-                            showPlaceholder = index == 0 && blocks.size == 1 && block.text.isEmpty() &&
-                                block.blockType == BlockType.PARAGRAPH,
-                            linkTitles = linkTitles,
-                            onFocus = {
-                                focusedId = block.id
-                                if (mention?.blockId != block.id) mention = null
-                            },
-                            onValueChange = { onTextChanged(block, it) },
-                            onCheckedChange = { setChecked(block.id, it) },
-                            onBackspaceEmpty = { mergeOrDelete(block.id) },
-                            onOpenVideo = { path ->
-                                val file = media.fileFor(path)
-                                val mime = context.contentResolver.getType(
-                                    android.net.Uri.fromFile(file),
-                                ) ?: guessedMime(path)
-                                runCatching {
-                                    val uri = FileProvider.getUriForFile(
-                                        context,
-                                        "${context.packageName}.fileprovider",
-                                        file,
-                                    )
-                                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                                        setDataAndType(uri, mime)
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(Intent.createChooser(intent, "打开附件"))
-                                }.onFailure {
-                                    scope.launch { snackbar.showSnackbar("无法打开附件") }
-                                }
-                            },
-                        )
+                if (mode == EditorMode.SOURCE) {
+                    // 源码模式：上半屏编辑 Markdown 源，下半屏实时预览
+                    // （图片/多媒体/标题/列表/表格/缩进/引用/强调/任务/代码）。
+                    SourceEditorPane(
+                        value = sourceText,
+                        onValueChange = { onSourceChanged(it) },
+                        editorFont = editorFont,
+                        linkTitles = linkTitles,
+                        onOpenAttachment = { path -> openAttachment(path) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        itemsIndexed(blocks, key = { _, block -> block.id }) { index, block ->
+                            OutlineBlockRow(
+                                block = block,
+                                number = orderedNumber(blocks, index),
+                                value = fieldOf(block),
+                                focusRequester = requesterOf(block.id),
+                                showPlaceholder = index == 0 && blocks.size == 1 && block.text.isEmpty() &&
+                                    block.blockType == BlockType.PARAGRAPH,
+                                linkTitles = linkTitles,
+                                onFocus = {
+                                    focusedId = block.id
+                                    if (mention?.blockId != block.id) mention = null
+                                },
+                                onValueChange = { onTextChanged(block, it) },
+                                onCheckedChange = { setChecked(block.id, it) },
+                                onBackspaceEmpty = { mergeOrDelete(block.id) },
+                                onOpenVideo = { path ->
+                                    openAttachment(path)
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -1034,7 +1303,18 @@ private fun OutlineBlockRow(
 ) {
     val scale = LocalFontScale.current
     val fontFamily = LocalEditorFontFamily.current
-    val fontSize = (block.blockFontSize.sp * scale).sp
+    // 标题块按级别放大加粗；其他块用块级字号设置。
+    val isHeading = block.blockType == BlockType.HEADING && block.headingLevel in 1..6
+    val headingSp = when (block.headingLevel.coerceIn(1, 6)) {
+        1 -> 26
+        2 -> 22
+        3 -> 19
+        4 -> 17
+        5 -> 15
+        else -> 14
+    }
+    val baseSp = if (isHeading) headingSp else block.blockFontSize.sp
+    val fontSize = (baseSp * scale).sp
     // Render inline Markdown (note links, emphasis, code, links) instead of
     // the raw source, while the stored text stays exactly as typed. The
     // transformation also fixes up caret mapping, so editing inside a
@@ -1099,6 +1379,31 @@ private fun OutlineBlockRow(
             BlockType.FILE -> {
                 LocalFileBlock(path = block.mediaPath, label = block.text, onOpen = { onOpenVideo(block.mediaPath) })
             }
+            BlockType.TABLE -> {
+                // 表格块的编辑面是原始竖线行（多行），所见即所得模式下
+                // 直接改单元格内容；渲染交给源码模式的预览面板。
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    BasicTextField(
+                        value = value,
+                        onValueChange = onValueChange,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onBackground,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = (12 * scale).sp,
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.onBackground),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp)
+                            .focusRequester(focusRequester)
+                            .onFocusChanged { if (it.isFocused) onFocus() },
+                    )
+                }
+            }
             else -> {
                 BasicTextField(
                     value = value,
@@ -1107,7 +1412,8 @@ private fun OutlineBlockRow(
                         color = MaterialTheme.colorScheme.onBackground,
                         fontFamily = fontFamily,
                         fontSize = fontSize,
-                        lineHeight = (block.blockFontSize.sp * scale * 1.5f).sp,
+                        lineHeight = (baseSp * scale * 1.5f).sp,
+                        fontWeight = if (isHeading) FontWeight.SemiBold else null,
                     ),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.onBackground),
                     visualTransformation = inlineTransformation,
@@ -1199,11 +1505,14 @@ private fun LocalVideoBlock(path: String, onOpen: () -> Unit) {
 @Composable
 private fun OutlineToolbar(
     fontLabel: String,
+    sourceMode: Boolean,
     onTags: () -> Unit,
     onAt: () -> Unit,
     onAddTask: () -> Unit,
     onOrdered: () -> Unit,
     onUnordered: () -> Unit,
+    onHeading: () -> Unit,
+    onTable: () -> Unit,
     onDivider: () -> Unit,
     onFontSize: () -> Unit,
     onBold: () -> Unit,
@@ -1225,17 +1534,21 @@ private fun OutlineToolbar(
     ) {
         ToolButton("标签", Icons.Outlined.Tag, onTags)
         ToolButton("@", Icons.Outlined.AlternateEmail, onAt)
-        ToolButton("任务", Icons.Outlined.CheckBox, onAddTask)
-        ToolButton("有序", Icons.Outlined.FormatListNumbered, onOrdered)
-        ToolButton("无序", Icons.AutoMirrored.Outlined.FormatListBulleted, onUnordered)
-        ToolButton("分割线", Icons.Outlined.HorizontalRule, onDivider)
-        ToolButton("字号$fontLabel", Icons.Outlined.FormatSize, onFontSize)
+        if (!sourceMode) {
+            ToolButton("标题", Icons.Outlined.Title, onHeading)
+            ToolButton("表格", Icons.Outlined.TableChart, onTable)
+            ToolButton("任务", Icons.Outlined.CheckBox, onAddTask)
+            ToolButton("有序", Icons.Outlined.FormatListNumbered, onOrdered)
+            ToolButton("无序", Icons.AutoMirrored.Outlined.FormatListBulleted, onUnordered)
+            ToolButton("分割线", Icons.Outlined.HorizontalRule, onDivider)
+            ToolButton("字号$fontLabel", Icons.Outlined.FormatSize, onFontSize)
+            ToolButton("缩进", Icons.AutoMirrored.Outlined.FormatIndentIncrease, onIndent)
+            ToolButton("反缩进", Icons.AutoMirrored.Outlined.FormatIndentDecrease, onOutdent)
+        }
         ToolButton("粗", Icons.Outlined.FormatBold, onBold)
         ToolButton("斜", Icons.Outlined.FormatItalic, onItalic)
         ToolButton("删除线", Icons.Outlined.StrikethroughS, onStrike)
         ToolButton("高亮", Icons.Outlined.Highlight, onHighlight)
-        ToolButton("缩进", Icons.AutoMirrored.Outlined.FormatIndentIncrease, onIndent)
-        ToolButton("反缩进", Icons.AutoMirrored.Outlined.FormatIndentDecrease, onOutdent)
         ToolButton("图片", Icons.Outlined.Image, onImage)
         ToolButton("视频", Icons.Outlined.Videocam, onVideo)
         ToolButton("文件", Icons.Outlined.AttachFile, onFile)
@@ -1307,6 +1620,70 @@ private data class EditorMention(
     val blockId: String,
     val mention: NoteMention,
 )
+
+/** 源码模式没有块；@ 提及用这个虚拟锚点标记「来自整篇文本」。 */
+private const val SOURCE_MENTION_ANCHOR = "__source__"
+
+/** 400ms 防抖保存的快照：模式 + 标题 + 当前模式的正文 Markdown。 */
+private data class EditorSnapshot(
+    val mode: EditorMode,
+    val title: String,
+    val content: String,
+)
+
+/**
+ * 源码模式的主编辑面：上半屏整篇 Markdown 文本（等宽字体），下半屏
+ * MarkdownPreview 实时预览。任务勾选、双链解析与附件打开在预览里可用。
+ */
+@Composable
+private fun SourceEditorPane(
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
+    editorFont: FontFamily,
+    linkTitles: Map<String, String>,
+    onOpenAttachment: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scale = LocalFontScale.current
+    Column(modifier = modifier) {
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                color = MaterialTheme.colorScheme.onBackground,
+                fontFamily = FontFamily.Monospace,
+                fontSize = (14 * scale).sp,
+                lineHeight = (20 * scale).sp,
+            ),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.onBackground),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        )
+        HorizontalDivider(
+            modifier = Modifier.padding(vertical = 6.dp),
+            color = MaterialTheme.colorScheme.outline,
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                "预览",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        MarkdownPreview(
+            content = value.text,
+            linkTitles = linkTitles,
+            onOpenAttachment = onOpenAttachment,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        )
+    }
+}
 
 /** Title text with the first [query] match highlighted, if any. */
 private fun highlightedTitle(title: String, query: String, highlightColor: Color): AnnotatedString {

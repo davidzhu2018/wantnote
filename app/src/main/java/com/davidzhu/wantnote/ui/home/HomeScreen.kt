@@ -40,6 +40,7 @@ import com.davidzhu.wantnote.data.HomeViewMode
 import com.davidzhu.wantnote.data.NoteWithDetails
 import com.davidzhu.wantnote.data.SearchText
 import com.davidzhu.wantnote.ui.LocalAi
+import com.davidzhu.wantnote.ui.LocalDinox
 import com.davidzhu.wantnote.ui.LocalNotes
 import com.davidzhu.wantnote.ui.LocalSettings
 import kotlinx.coroutines.launch
@@ -54,6 +55,7 @@ fun HomeScreen(
     val repository = LocalNotes.current
     val settingsRepo = LocalSettings.current
     val ai = LocalAi.current
+    val dinox = LocalDinox.current
     val items by repository.observeAllWithDetails().collectAsStateWithLifecycle(initialValue = emptyList())
     val allLinks by repository.observeAllLinks().collectAsStateWithLifecycle(initialValue = emptyList())
     val settings by settingsRepo.observe().collectAsStateWithLifecycle(initialValue = AppSettings.DEFAULT)
@@ -171,6 +173,21 @@ fun HomeScreen(
                     }
                     HomeMenuAction("生成标签", enabled = !busy) {
                         generateField(target, wantTitle = false)
+                    }
+                    HomeMenuAction("发送到Dinox", enabled = !busy) {
+                        val id = target.note.id
+                        menuNote = null
+                        busy = true
+                        scope.launch {
+                            val result = dinox.sendNote(id)
+                            busy = false
+                            result.fold(
+                                onSuccess = { snackbar.showSnackbar(it) },
+                                onFailure = { error ->
+                                    snackbar.showSnackbar(error.message ?: "发送失败，请先在数据管理里配置 Dinox")
+                                },
+                            )
+                        }
                     }
                     HomeMenuAction("删除笔记", enabled = !busy) {
                         menuNote = null

@@ -61,6 +61,8 @@ class BackupService(
     private val notes: NoteRepository,
     private val media: MediaStorage,
     private val appVersion: String,
+    /** 0.9.0：恢复后补写 Markdown 文件、导入 Dinox 可同步密文用。 */
+    private val dinox: com.davidzhu.wantnote.sync.dinox.DinoxSyncService? = null,
 ) {
     suspend fun createBackup(
         output: OutputStream,
@@ -285,6 +287,11 @@ class BackupService(
             db.settingsDao().upsert(settings.copy(id = 1))
         }
 
+        // 0.9.0：旧备份的笔记没有 mdPath/Markdown 文件 —— 恢复后统一补写，
+        // 保证正文源文件与数据库一致；再尝试导入随设置恢复的 Dinox Token。
+        runCatching { notes.ensureMarkdownFiles() }
+        runCatching { dinox?.importSealedToken() }
+
         return RestoreResult(
             notes = noteList.size,
             blocks = validBlocks.size,
@@ -321,6 +328,7 @@ class BackupService(
                     .put("id", note.id)
                     .put("title", note.title)
                     .put("body", note.body)
+                    .put("mdPath", note.mdPath)
                     .put("createdAt", note.createdAt)
                     .put("updatedAt", note.updatedAt),
             )
@@ -417,6 +425,14 @@ class BackupService(
         .put("editorFontId", settings.editorFontId)
         .put("customFontPath", settings.customFontPath)
         .put("syncMethod", settings.syncMethod)
+        .put("editorMode", settings.editorMode)
+        .put("themeCustomJson", settings.themeCustomJson)
+        .put("dinoxTokenSealed", settings.dinoxTokenSealed)
+        .put("dinoxSealMethod", settings.dinoxSealMethod)
+        .put("dinoxLastSyncAt", settings.dinoxLastSyncAt)
+        .put("dinoxSyncBox", settings.dinoxSyncBox)
+        .put("dinoxAutoSyncMinutes", settings.dinoxAutoSyncMinutes)
+        .put("markdownMigrationDone", settings.markdownMigrationDone)
         .toString()
 
     // ---- JSON 反序列化（缺字段用当前默认值，兼容未来/旧版备份） -------------
@@ -429,6 +445,7 @@ class BackupService(
                 body = obj.optString("body"),
                 createdAt = obj.optLong("createdAt"),
                 updatedAt = obj.optLong("updatedAt"),
+                mdPath = obj.optString("mdPath"),
             )
         }
 
@@ -519,6 +536,14 @@ class BackupService(
             editorFontId = obj.optString("editorFontId", default.editorFontId),
             customFontPath = obj.optString("customFontPath", default.customFontPath),
             syncMethod = obj.optString("syncMethod", default.syncMethod),
+            editorMode = obj.optString("editorMode", default.editorMode),
+            themeCustomJson = obj.optString("themeCustomJson", default.themeCustomJson),
+            dinoxTokenSealed = obj.optString("dinoxTokenSealed", default.dinoxTokenSealed),
+            dinoxSealMethod = obj.optString("dinoxSealMethod", default.dinoxSealMethod),
+            dinoxLastSyncAt = obj.optLong("dinoxLastSyncAt", default.dinoxLastSyncAt),
+            dinoxSyncBox = obj.optString("dinoxSyncBox", default.dinoxSyncBox),
+            dinoxAutoSyncMinutes = obj.optInt("dinoxAutoSyncMinutes", default.dinoxAutoSyncMinutes),
+            markdownMigrationDone = obj.optBoolean("markdownMigrationDone", default.markdownMigrationDone),
         )
     }
 

@@ -9,9 +9,6 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface BlockDao {
     @Query("SELECT * FROM note_blocks WHERE noteId = :noteId ORDER BY sortOrder ASC")
-    fun observeByNoteId(noteId: String): Flow<List<NoteBlock>>
-
-    @Query("SELECT * FROM note_blocks WHERE noteId = :noteId ORDER BY sortOrder ASC")
     suspend fun getByNoteId(noteId: String): List<NoteBlock>
 
     @Query("SELECT * FROM note_blocks WHERE type = 'TASK'")
@@ -31,12 +28,6 @@ interface BlockDao {
 
     @Query("DELETE FROM note_blocks WHERE noteId = :noteId")
     suspend fun deleteByNoteId(noteId: String)
-
-    @Query("UPDATE note_blocks SET checked = :checked WHERE id = :id")
-    suspend fun setChecked(id: String, checked: Boolean)
-
-    @Query("SELECT COUNT(*) FROM note_blocks WHERE noteId = :noteId")
-    suspend fun countByNoteId(noteId: String): Int
 
     @Query("DELETE FROM note_blocks")
     suspend fun deleteAll()

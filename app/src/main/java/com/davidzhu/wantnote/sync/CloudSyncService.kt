@@ -20,11 +20,16 @@ import java.io.File
  * selected remote (WebDAV or S3), and downloads them back with a last-write
  * merge on [Note.updatedAt]. Credentials stay in the local Room settings row
  * and are never written to the remote payload or to logs.
+ *
+ * 0.9.0：快照携带每篇笔记的 Markdown 路径（mdPath）与 Dinox Token 的
+ * 「可同步密文」（凭据派生密钥加密，见 DinoxPortableCipher），下载端
+ * 用自己的同步凭据解密后导入本机 Keystore 存储。
  */
 class CloudSyncService(
     private val notes: NoteRepository,
     private val settingsRepository: SettingsRepository,
     private val media: MediaStorage,
+    private val dinox: com.davidzhu.wantnote.sync.dinox.DinoxSyncService? = null,
 ) {
     suspend fun testAndSave(draft: AppSettings): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
@@ -83,6 +88,18 @@ class CloudSyncService(
                 val used = notes.mergeRemoteNote(remote, blocksByNote[remote.id].orEmpty())
                 if (used) applied += 1
             }
+            runCatching { notes.ensureMarkdownFiles() }
+            // 0.9.0：随设置同步的 Dinox Token 密文 —— 存下来并尝试用本地
+            // 同步凭据解开（凭据一致才能解开；不一致则静默跳过）。
+            if (snapshot.dinoxTokenSealed.isNotBlank()) {
+                settingsRepository.update {
+                    it.copy(
+                        dinoxTokenSealed = snapshot.dinoxTokenSealed,
+                        dinoxSealMethod = snapshot.dinoxSealMethod,
+                    )
+                }
+                dinox?.importSealedToken()
+            }
             val idMap = mutableMapOf<String, String>()
             snapshot.tags.forEach { remote ->
                 val local = notes.mergeRemoteTag(remote)
@@ -114,6 +131,7 @@ class CloudSyncService(
     }
 
     private suspend fun exportSnapshot(): SyncSnapshot {
+        val settings = settingsRepository.get()
         val allNotes = notes.getAllNotes()
         val allBlocks = notes.getAllBlocks()
         val allTags = notes.getAllTags()
@@ -135,6 +153,8 @@ class CloudSyncService(
             tags = allTags,
             noteTags = refs,
             attachments = attachments,
+            dinoxTokenSealed = settings.dinoxTokenSealed,
+            dinoxSealMethod = settings.dinoxSealMethod,
         )
     }
 
@@ -234,11 +254,16 @@ internal data class SyncSnapshot(
     val tags: List<Tag>,
     val noteTags: List<NoteTagCrossRef>,
     val attachments: List<SyncAttachment>,
+    /** 0.9.0：Dinox Token 的可同步密文（凭据派生密钥加密；明文绝不入快照）。 */
+    val dinoxTokenSealed: String = "",
+    val dinoxSealMethod: String = "",
 ) {
     fun toJson(): String {
         val root = JSONObject()
             .put("format", FORMAT)
             .put("exportedAt", exportedAt)
+            .put("dinoxTokenSealed", dinoxTokenSealed)
+            .put("dinoxSealMethod", dinoxSealMethod)
         root.put(
             "notes",
             JSONArray().also { arr ->
@@ -248,6 +273,7 @@ internal data class SyncSnapshot(
                             .put("id", note.id)
                             .put("title", note.title)
                             .put("body", note.body)
+                            .put("mdPath", note.mdPath)
                             .put("createdAt", note.createdAt)
                             .put("updatedAt", note.updatedAt),
                     )
@@ -323,6 +349,7 @@ internal data class SyncSnapshot(
                     body = obj.optString("body"),
                     createdAt = obj.optLong("createdAt"),
                     updatedAt = obj.optLong("updatedAt"),
+                    mdPath = obj.optString("mdPath"),
                 )
             }
             val blocks = root.optJSONArray("blocks").orEmpty().mapObjects { obj ->
@@ -363,6 +390,8 @@ internal data class SyncSnapshot(
                 tags = tags,
                 noteTags = refs,
                 attachments = attachments,
+                dinoxTokenSealed = root.optString("dinoxTokenSealed"),
+                dinoxSealMethod = root.optString("dinoxSealMethod"),
             )
         }
 

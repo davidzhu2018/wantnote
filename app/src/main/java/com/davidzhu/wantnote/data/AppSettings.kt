@@ -114,6 +114,22 @@ data class AppSettings(
     val editorFontId: String = EditorFontOption.SYSTEM.id,
     val customFontPath: String = "",
     val syncMethod: String = SyncMethod.WEBDAV.name,
+    /** 0.9.0：编辑器默认模式（所见即所得 / 源码）。 */
+    val editorMode: String = EditorMode.WYSIWYG.name,
+    /** 0.9.0：内置主题覆盖 + 用户自建主题，序列化为 JSON（见 ThemeCustoms）。 */
+    val themeCustomJson: String = "{}",
+    /** 0.9.0：Dinox Token 的可同步密文（AES-GCM，密钥派生自同步凭据，见 DinoxPortableCipher）。 */
+    val dinoxTokenSealed: String = "",
+    /** 0.9.0：dinoxTokenSealed 加密时使用的同步方式（WEBDAV/S3），供对端解密。 */
+    val dinoxSealMethod: String = "",
+    /** 0.9.0：上次 Dinox 增量同步的时间（epoch ms，ISO 8601 转换见 DinoxModels）。 */
+    val dinoxLastSyncAt: Long = 0L,
+    /** 0.9.0：Dinox 卡片盒名称过滤（空 = 全部；多个用「、/,」分隔）。 */
+    val dinoxSyncBox: String = "",
+    /** 0.9.0：Dinox 自动同步间隔分钟数（0 = 关闭）。 */
+    val dinoxAutoSyncMinutes: Int = 0,
+    /** 0.9.0：历史数据 → Markdown 的强制迁移是否已完成（完成后不再拦截启动）。 */
+    val markdownMigrationDone: Boolean = false,
 ) {
     val palette: ThemePalette get() = ThemePalette.fromStorage(themeName)
     val fontScaleOption: FontScaleOption get() = FontScaleOption.fromStorage(fontScale)
@@ -121,8 +137,21 @@ data class AppSettings(
     val homeViewMode: HomeViewMode get() = HomeViewMode.fromStorage(homeView)
     val editorFont: EditorFontOption get() = EditorFontOption.fromStorage(editorFontId)
     val syncMethodOption: SyncMethod get() = SyncMethod.fromStorage(syncMethod)
+    val editorModeOption: EditorMode get() = EditorMode.fromStorage(editorMode)
 
     companion object {
         val DEFAULT = AppSettings()
+    }
+}
+
+enum class EditorMode(val label: String) {
+    WYSIWYG("所见即所得"),
+    SOURCE("源码"),
+    ;
+
+    companion object {
+        fun fromStorage(value: String?): EditorMode {
+            return entries.firstOrNull { it.name == value } ?: WYSIWYG
+        }
     }
 }

@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
                     LocalSync provides app.cloudSync,
                     LocalBackup provides app.backupService,
                     LocalTransfer provides app.importExportService,
+                    com.davidzhu.wantnote.ui.LocalDinox provides app.dinoxSync,
                 ) {
                     WantNoteApp()
                     StorageAccessGate()

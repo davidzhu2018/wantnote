@@ -36,3 +36,7 @@ val LocalBackup = staticCompositionLocalOf<BackupService> {
 val LocalTransfer = staticCompositionLocalOf<ImportExportService> {
     error("ImportExportService not provided")
 }
+
+val LocalDinox = staticCompositionLocalOf<com.davidzhu.wantnote.sync.dinox.DinoxSyncService> {
+    error("DinoxSyncService not provided")
+}

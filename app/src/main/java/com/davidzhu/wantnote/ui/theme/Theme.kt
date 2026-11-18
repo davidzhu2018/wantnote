@@ -9,6 +9,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -18,6 +19,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.davidzhu.wantnote.data.AppSettings
 import com.davidzhu.wantnote.data.DayNightMode
+import com.davidzhu.wantnote.data.ThemeColorSet
+import com.davidzhu.wantnote.data.ThemeCustoms
 import com.davidzhu.wantnote.data.ThemePalette
 
 val Paper = Color(0xFFF7F2EA)
@@ -105,13 +108,72 @@ private val Palettes = mapOf(
     ),
 )
 
+/**
+ * 内置主题的出厂配色（0.9.0 起「内置主题配色」允许被覆盖，
+ * 覆盖值持久化在 AppSettings.themeCustomJson，可一键重置）。
+ */
+fun builtinColorSet(palette: ThemePalette): ThemeColorSet {
+    val p = Palettes[palette] ?: return ThemeColorSet()
+    return ThemeColorSet(
+        lightBg = p.lightBg.toArgb().toLong() and 0xFFFFFFFFL,
+        lightInk = p.lightInk.toArgb().toLong() and 0xFFFFFFFFL,
+        lightMuted = p.lightMuted.toArgb().toLong() and 0xFFFFFFFFL,
+        lightVariant = p.lightVariant.toArgb().toLong() and 0xFFFFFFFFL,
+        lightOutline = p.lightOutline.toArgb().toLong() and 0xFFFFFFFFL,
+        darkBg = p.darkBg.toArgb().toLong() and 0xFFFFFFFFL,
+        darkInk = p.darkInk.toArgb().toLong() and 0xFFFFFFFFL,
+        darkMuted = p.darkMuted.toArgb().toLong() and 0xFFFFFFFFL,
+        darkVariant = p.darkVariant.toArgb().toLong() and 0xFFFFFFFFL,
+        darkOutline = p.darkOutline.toArgb().toLong() and 0xFFFFFFFFL,
+        highlight = p.highlight.toArgb().toLong() and 0xFFFFFFFFL,
+    )
+}
+
+/** ARGB long → Compose Color（主题编辑器与 ThemeCustom 存储用）。 */
+fun colorFromArgb(value: Long): Color = Color(value.toInt())
+
+/**
+ * 解析当前主题的生效配色：
+ * - 内置主题：出厂色 + themeCustomJson 中的覆盖（可重置）。
+ * - USER_ 前缀自建主题：自建值缺省回退 PAPER 出厂色。
+ * - 未知/被删主题：fromStorage 回退 PAPER 出厂色，保证永远有可用配色。
+ */
+private fun resolvePalette(
+    themeName: String,
+    customs: Map<String, ThemeColorSet>,
+): Palette {
+    val paper = Palettes.getValue(ThemePalette.PAPER)
+    val resolved = ThemeCustoms.resolve(
+        themeName = themeName,
+        builtIn = builtinColorSet(ThemePalette.fromStorage(themeName)),
+        customs = customs,
+        fallback = builtinColorSet(ThemePalette.PAPER),
+    ) ?: return paper
+    fun argb(color: Color): Long = color.toArgb().toLong() and 0xFFFFFFFFL
+    fun pick(value: Long?, base: Color): Color = colorFromArgb(value ?: argb(base))
+    return Palette(
+        lightBg = pick(resolved.lightBg, paper.lightBg),
+        lightInk = pick(resolved.lightInk, paper.lightInk),
+        lightMuted = pick(resolved.lightMuted, paper.lightMuted),
+        lightVariant = pick(resolved.lightVariant, paper.lightVariant),
+        lightOutline = pick(resolved.lightOutline, paper.lightOutline),
+        darkBg = pick(resolved.darkBg, paper.darkBg),
+        darkInk = pick(resolved.darkInk, paper.darkInk),
+        darkMuted = pick(resolved.darkMuted, paper.darkMuted),
+        darkVariant = pick(resolved.darkVariant, paper.darkVariant),
+        darkOutline = pick(resolved.darkOutline, paper.darkOutline),
+        highlight = pick(resolved.highlight, paper.highlight),
+    )
+}
+
 @Composable
 fun WantNoteTheme(
     settings: AppSettings = AppSettings.DEFAULT,
     fontFamily: FontFamily = FontFamily.Default,
     content: @Composable () -> Unit,
 ) {
-    val palette = Palettes[settings.palette] ?: Palettes.getValue(ThemePalette.PAPER)
+    val customs = remember(settings.themeCustomJson) { ThemeCustoms.parse(settings.themeCustomJson) }
+    val palette = resolvePalette(settings.themeName, customs)
     val dark = when (settings.dayNightMode) {
         DayNightMode.LIGHT -> false
         DayNightMode.DARK -> true

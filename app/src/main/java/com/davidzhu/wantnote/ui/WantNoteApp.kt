@@ -24,7 +24,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -40,6 +43,7 @@ import com.davidzhu.wantnote.ui.calendar.CalendarScreen
 import com.davidzhu.wantnote.ui.editor.EditorScreen
 import com.davidzhu.wantnote.ui.home.HomeScreen
 import com.davidzhu.wantnote.ui.insights.InsightsScreen
+import com.davidzhu.wantnote.ui.migration.MigrationGate
 import com.davidzhu.wantnote.ui.search.SearchScreen
 import com.davidzhu.wantnote.ui.settings.AboutScreen
 import com.davidzhu.wantnote.ui.settings.AiSettingsScreen
@@ -50,6 +54,7 @@ import com.davidzhu.wantnote.ui.settings.GeneralSettingsScreen
 import com.davidzhu.wantnote.ui.settings.ImportExportScreen
 import com.davidzhu.wantnote.ui.settings.SettingsScreen
 import com.davidzhu.wantnote.ui.settings.TagManagementScreen
+import com.davidzhu.wantnote.ui.settings.ThemeEditorScreen
 import kotlinx.coroutines.launch
 
 private enum class MainTab(
@@ -71,6 +76,13 @@ fun WantNoteApp() {
     val backStack by nav.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
     val showBar = currentRoute in setOf("home", "calendar", "insights", "settings")
+
+    // 0.9.0 强制迁移闸门：待迁移笔记 > 0 时先迁移，再进主界面。
+    var migrationGate by remember { mutableStateOf(true) }
+    if (migrationGate) {
+        MigrationGate(onDone = { migrationGate = false })
+        return
+    }
 
     fun openEditor(id: String) {
         nav.navigate("editor/$id")
@@ -130,6 +142,9 @@ fun WantNoteApp() {
             }
             composable("settings/general") {
                 GeneralSettingsScreen(onBack = { nav.popBackStack() })
+            }
+            composable("settings/themes") {
+                ThemeEditorScreen(onBack = { nav.popBackStack() })
             }
             composable("settings/editor") {
                 EditorSettingsScreen(onBack = { nav.popBackStack() })

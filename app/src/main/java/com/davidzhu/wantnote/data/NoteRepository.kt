@@ -1,6 +1,9 @@
 package com.davidzhu.wantnote.data
 
 import androidx.room.withTransaction
+import com.davidzhu.wantnote.transfer.MarkdownBlock
+import com.davidzhu.wantnote.transfer.MarkdownCodec
+import com.davidzhu.wantnote.transfer.MarkdownMigrator
 import kotlinx.coroutines.flow.Flow
 import java.util.UUID
 
@@ -9,7 +12,20 @@ data class DayTask(
     val note: Note,
 )
 
-class NoteRepository(private val db: NoteDatabase) {
+/**
+ * 0.9.0 起 Markdown 是正文的唯一可信来源：
+ *
+ * - `saveMarkdown` 先写 `notes/<id>.md`（磁盘文件是源），再在一个事务里
+ *   更新 body 镜像、重建派生块缓存（供日历任务 / 卡片媒体缩略图）并按
+ *   正文里的 `[[note:id]]` 标记重建双向链接。
+ * - 派生块用稳定 ID：内容未变的块在重新解析后保留原 ID，让日历勾选等
+ *   基于 blockId 的操作在多次保存之间保持有效。
+ * - 0.8.0 及更早的块数据通过 [migrateNoteToMarkdown] 强制迁移（不可跳过）。
+ */
+class NoteRepository(
+    private val db: NoteDatabase,
+    private val markdownStore: MarkdownStore,
+) {
     private val notes = db.noteDao()
     private val blocks = db.blockDao()
     private val tags = db.tagDao()
@@ -23,40 +39,201 @@ class NoteRepository(private val db: NoteDatabase) {
 
     fun observeById(id: String): Flow<Note?> = notes.observeById(id)
 
-    fun observeBlocks(noteId: String): Flow<List<NoteBlock>> = blocks.observeByNoteId(noteId)
-
     fun search(query: String): Flow<List<Note>> = notes.search(query)
 
     suspend fun getById(id: String): Note? = notes.getById(id)
 
     suspend fun getBlocks(noteId: String): List<NoteBlock> = blocks.getByNoteId(noteId)
 
-    suspend fun ensureMigratedBlocks(note: Note) {
-        if (blocks.countByNoteId(note.id) > 0) return
-        val lines = if (note.body.isEmpty()) {
-            listOf("")
-        } else {
-            note.body.replace("\r\n", "\n").replace('\r', '\n').split("\n")
-        }
-        val imported = lines.mapIndexed { index, line ->
-            NoteBlock.paragraph(
-                id = UUID.randomUUID().toString(),
-                noteId = note.id,
-                text = line,
-                sortOrder = index,
+    // ---- Markdown 源（0.9.0） ------------------------------------------
+
+    /** 把 Markdown 内容解析为块模型（本地 media 引用全部原样保留）。 */
+    fun parseMarkdownBlocks(content: String): List<MarkdownBlock> {
+        return MarkdownCodec.parseMarkdown(
+            content,
+            fallbackTitle = "",
+            resolveMedia = { it },
+            consumeLeadingTitle = false,
+        ).blocks
+    }
+
+    /** 编辑器展示用：内容 → 派生块（沿用旧块的稳定 ID 与字号）。 */
+    suspend fun deriveBlocks(noteId: String, content: String): List<NoteBlock> {
+        return withStableIds(
+            noteId,
+            parseMarkdownBlocks(content),
+            blocks.getByNoteId(noteId),
+        )
+    }
+
+    /** 派生块的稳定 ID：类型/文本/缩进/勾选都相同的块沿用旧 ID（旧字号也保留）。 */
+    private fun withStableIds(
+        noteId: String,
+        markdownBlocks: List<MarkdownBlock>,
+        previous: List<NoteBlock>,
+    ): List<NoteBlock> {
+        val available = previous.toMutableList()
+        return markdownBlocks.mapIndexed { sortOrder, mb ->
+            val matchIndex = available.indexOfFirst { pb ->
+                pb.type == mb.type.name &&
+                    pb.text == mb.text &&
+                    pb.indent == mb.indent.coerceIn(0, 8) &&
+                    (mb.type != BlockType.TASK || pb.checked == mb.checked)
+            }
+            val reused = if (matchIndex >= 0) available.removeAt(matchIndex) else null
+            NoteBlock(
+                id = reused?.id ?: UUID.randomUUID().toString(),
+                noteId = noteId,
+                type = mb.type.name,
+                text = mb.text,
+                indent = mb.indent.coerceIn(0, 8),
+                checked = mb.checked,
+                fontSize = reused?.fontSize ?: BlockFontSize.NORMAL.name,
+                mediaPath = mb.mediaPath,
+                sortOrder = sortOrder,
+                headingLevel = mb.headingLevel.coerceIn(0, 6),
             )
         }
-        blocks.upsertAll(imported)
+    }
+
+    /** 完整文档（文件内容）：标题 H1 + 正文内容。 */
+    fun documentOf(note: Note, content: String): String =
+        MarkdownMigrator.documentOf(note.title, content)
+
+    /** 从完整文档剥离标题 H1，得到正文内容（与 [documentOf] 互逆）。 */
+    fun contentFromDocument(note: Note, document: String): String {
+        val trimmed = document.trimEnd('\n')
+        if (note.title.isBlank()) return trimmed
+        val lines = trimmed.split("\n")
+        return if (lines.firstOrNull()?.startsWith("# ") == true) {
+            lines.drop(1).joinToString("\n").trimStart('\n')
+        } else {
+            trimmed
+        }
+    }
+
+    /**
+     * 当前内容源：优先读 .md 文件（唯一可信来源）；文件缺失时用 body
+     * 镜像补写文件（旧备份恢复 / 文件被清理后的自愈）。
+     */
+    suspend fun loadContent(note: Note): String {
+        val document = markdownStore.readDocument(note.mdPath)
+        if (document != null) {
+            return contentFromDocument(note, document)
+        }
+        if (note.mdPath.isBlank()) {
+            // 尚未迁移的旧数据：直接用 body（迁移流程会补文件）。
+            return note.body
+        }
+        markdownStore.writeDocument(note.mdPath, documentOf(note, note.body))
+        return note.body
+    }
+
+    /**
+     * 保存 Markdown 内容：先写文件（源），再提交数据库（body 镜像、
+     * 派生块、链接）。若内容以 H1 开头，首个 H1 作为标题（与导入一致），
+     * 避免下次保存时标题行重复。
+     */
+    suspend fun saveMarkdown(noteId: String, title: String, contentMarkdown: String): Note? {
+        val existing = notes.getById(noteId) ?: return null
+        val content = contentMarkdown.replace("\r\n", "\n").trimEnd('\n')
+        val parsed = parseMarkdownBlocks(content)
+        // 正文与标题分开存：不要把正文里的第一个标题偷成笔记标题。
+        val effectiveTitle = title
+        val mdPath = existing.mdPath.ifBlank { markdownStore.relativePathFor(noteId) }
+        markdownStore.writeDocument(mdPath, MarkdownMigrator.documentOf(effectiveTitle, content))
+        val previous = blocks.getByNoteId(noteId)
+        val nextBlocks = withStableIds(noteId, parsed, previous)
+        val updated = existing.copy(
+            title = effectiveTitle,
+            body = content,
+            mdPath = mdPath,
+            updatedAt = System.currentTimeMillis(),
+        )
+        db.withTransaction {
+            notes.upsert(updated)
+            blocks.deleteByNoteId(noteId)
+            if (nextBlocks.isNotEmpty()) blocks.upsertAll(nextBlocks)
+            syncOutgoingLinksLocked(noteId, content)
+        }
+        return updated
+    }
+
+    /**
+     * 导入/恢复时写入一篇新笔记：写 .md 文件、body 镜像、派生块与链接
+     * 在同一事务内完成，避免出现半篇笔记。
+     */
+    suspend fun insertImportedMarkdown(note: Note, contentMarkdown: String): Note {
+        val content = contentMarkdown.replace("\r\n", "\n").trimEnd('\n')
+        val mdPath = note.mdPath.ifBlank { markdownStore.relativePathFor(note.id) }
+        markdownStore.writeDocument(mdPath, MarkdownMigrator.documentOf(note.title, content))
+        val nextBlocks = withStableIds(note.id, parseMarkdownBlocks(content), emptyList())
+        val stored = note.copy(body = content, mdPath = mdPath)
+        db.withTransaction {
+            notes.upsert(stored)
+            blocks.deleteByNoteId(note.id)
+            if (nextBlocks.isNotEmpty()) blocks.upsertAll(nextBlocks)
+            syncOutgoingLinksLocked(note.id, content)
+        }
+        return stored
+    }
+
+    /** 还未生成 .md 文件的笔记（强制迁移的待处理清单）。 */
+    suspend fun pendingMarkdownMigration(): List<Note> {
+        return notes.getAll().filter { it.mdPath.isBlank() }
+    }
+
+    /**
+     * 强制迁移一篇：块/旧 body → Markdown，写文件，重建块缓存与链接。
+     * 幂等：已迁移（mdPath 非空）的笔记直接跳过，所以中断后可续跑。
+     */
+    suspend fun migrateNoteToMarkdown(note: Note): Boolean {
+        if (note.mdPath.isNotBlank()) return false
+        val blockList = blocks.getByNoteId(note.id)
+        val migrated = MarkdownMigrator.migrate(note, blockList)
+        val mdPath = markdownStore.relativePathFor(note.id)
+        markdownStore.writeDocument(mdPath, migrated.document)
+        val nextBlocks = withStableIds(note.id, migrated.markdownBlocks, blockList)
+        db.withTransaction {
+            notes.upsert(
+                note.copy(
+                    body = migrated.content,
+                    mdPath = mdPath,
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            )
+            blocks.deleteByNoteId(note.id)
+            if (nextBlocks.isNotEmpty()) blocks.upsertAll(nextBlocks)
+            syncOutgoingLinksLocked(note.id, migrated.content)
+        }
+        return true
+    }
+
+    /** 恢复备份 / 云同步之后：给所有缺 .md 文件的笔记补文件，返回补写篇数。 */
+    suspend fun ensureMarkdownFiles(): Int {
+        var repaired = 0
+        notes.getAll().forEach { note ->
+            if (note.mdPath.isBlank()) {
+                if (migrateNoteToMarkdown(note)) repaired += 1
+            } else if (markdownStore.readDocument(note.mdPath) == null) {
+                markdownStore.writeDocument(note.mdPath, documentOf(note, note.body))
+                repaired += 1
+            }
+        }
+        return repaired
     }
 
     suspend fun createBlank(): Note {
         val now = System.currentTimeMillis()
+        val id = UUID.randomUUID().toString()
+        val mdPath = markdownStore.relativePathFor(id)
         val note = Note(
-            id = UUID.randomUUID().toString(),
+            id = id,
             title = "",
             body = "",
             createdAt = now,
             updatedAt = now,
+            mdPath = mdPath,
         )
         val starter = NoteBlock.paragraph(
             id = UUID.randomUUID().toString(),
@@ -64,6 +241,7 @@ class NoteRepository(private val db: NoteDatabase) {
             text = "",
             sortOrder = 0,
         )
+        markdownStore.writeDocument(mdPath, "")
         db.withTransaction {
             notes.upsert(note)
             blocks.upsertAll(listOf(starter))
@@ -71,54 +249,35 @@ class NoteRepository(private val db: NoteDatabase) {
         return note
     }
 
-    suspend fun save(id: String, title: String, blockList: List<NoteBlock>): Note? {
-        val existing = notes.getById(id) ?: return null
-        val normalized = blockList.mapIndexed { index, block ->
-            block.copy(
-                noteId = id,
-                indent = block.indent.coerceIn(0, 8),
-                sortOrder = index,
-            )
-        }
-        val body = SearchText.fromBlocks(normalized)
-        val updated = existing.copy(
-            title = title,
-            body = body,
-            updatedAt = System.currentTimeMillis(),
-        )
-        db.withTransaction {
-            notes.upsert(updated)
-            blocks.deleteByNoteId(id)
-            if (normalized.isNotEmpty()) {
-                blocks.upsertAll(normalized)
-            }
-            syncOutgoingLinksLocked(id, normalized)
-        }
-        return updated
-    }
-
+    /**
+     * 勾选/取消一个任务块：以 Markdown 源为准改写内容并整体落盘
+     * （文件 + body 镜像 + 派生块）。
+     */
     suspend fun setTaskChecked(blockId: String, checked: Boolean) {
-        db.withTransaction {
-            val all = blocks.getAllTasks()
-            val target = all.firstOrNull { it.id == blockId } ?: return@withTransaction
-            blocks.setChecked(blockId, checked)
-            val note = notes.getById(target.noteId) ?: return@withTransaction
-            val refreshed = blocks.getByNoteId(note.id).map { block ->
-                if (block.id == blockId) block.copy(checked = checked) else block
-            }
-            notes.upsert(note.copy(body = SearchText.fromBlocks(refreshed)))
+        val target = blocks.getAllTasks().firstOrNull { it.id == blockId } ?: return
+        val note = notes.getById(target.noteId) ?: return
+        val content = loadContent(note)
+        val parsed = parseMarkdownBlocks(content).toMutableList()
+        val index = when {
+            target.sortOrder in parsed.indices && parsed[target.sortOrder].type == BlockType.TASK ->
+                target.sortOrder
+            else -> parsed.indexOfFirst { it.type == BlockType.TASK && it.text == target.text }
         }
+        if (index < 0) return
+        parsed[index] = parsed[index].copy(checked = checked)
+        saveMarkdown(note.id, note.title, MarkdownCodec.render(title = "", blocks = parsed))
     }
 
     suspend fun deleteIfBlank(id: String): Boolean {
         val existing = notes.getById(id) ?: return false
         val blockList = blocks.getByNoteId(id)
         val emptyBlocks = blockList.isEmpty() || blockList.all { it.isBlank() }
-        if (existing.title.isBlank() && emptyBlocks) {
+        if (existing.title.isBlank() && emptyBlocks && existing.body.isBlank()) {
             db.withTransaction {
                 blocks.deleteByNoteId(id)
                 notes.delete(id)
             }
+            markdownStore.deleteDocument(existing.mdPath)
             return true
         }
         return false
@@ -128,15 +287,17 @@ class NoteRepository(private val db: NoteDatabase) {
      * Permanently delete one note. Blocks, tag associations and both
      * directions of note links are removed in the same transaction; the
      * foreign keys also cascade, so no dangling relation can survive.
+     * The .md document is deleted with it.
      */
     suspend fun deleteNote(id: String): Boolean {
-        if (notes.getById(id) == null) return false
+        val existing = notes.getById(id) ?: return false
         db.withTransaction {
             links.deleteOutgoing(id)
             db.tagDao().clearNoteTags(id)
             blocks.deleteByNoteId(id)
             notes.delete(id)
         }
+        markdownStore.deleteDocument(existing.mdPath)
         return true
     }
 
@@ -147,16 +308,12 @@ class NoteRepository(private val db: NoteDatabase) {
     suspend fun getAllLinks(): List<NoteLink> = links.getAll()
 
     /**
-     * Rebuild this note's outgoing relations from the link markers currently
-     * in [blockList]. Invalid/self/duplicate targets are ignored, so edits and
+     * Rebuild this note's outgoing relations from the `[[note:id]]` markers
+     * in [text]. Invalid/self/duplicate targets are ignored, so edits and
      * removals in the editor are reflected immediately.
      */
-    suspend fun syncOutgoingLinks(noteId: String, blockList: List<NoteBlock>) {
-        db.withTransaction { syncOutgoingLinksLocked(noteId, blockList) }
-    }
-
-    private suspend fun syncOutgoingLinksLocked(noteId: String, blockList: List<NoteBlock>) {
-        val requested = NoteLinkCodec.targetIds(blockList)
+    private suspend fun syncOutgoingLinksLocked(noteId: String, text: String) {
+        val requested = NoteLinkCodec.targetIds(text)
             .filter { it != noteId }
             .distinct()
         val valid = if (requested.isEmpty()) {
@@ -200,7 +357,11 @@ class NoteRepository(private val db: NoteDatabase) {
 
     suspend fun updateTitle(id: String, title: String) {
         val existing = notes.getById(id) ?: return
-        notes.upsert(existing.copy(title = title, updatedAt = System.currentTimeMillis()))
+        val content = loadContent(existing)
+        val mdPath = existing.mdPath.ifBlank { markdownStore.relativePathFor(id) }
+        val updated = existing.copy(title = title, mdPath = mdPath, updatedAt = System.currentTimeMillis())
+        markdownStore.writeDocument(mdPath, documentOf(updated, content))
+        notes.upsert(updated)
     }
 
     /** Outcome of [fillEmptyTitleAndTags]: which empty fields were filled. */
@@ -224,7 +385,11 @@ class NoteRepository(private val db: NoteDatabase) {
             if (note.title.isBlank() && suggestedTitle.isNotBlank()) {
                 val next = suggestedTitle.trim().take(40)
                 if (next.isNotEmpty()) {
-                    notes.upsert(note.copy(title = next, updatedAt = System.currentTimeMillis()))
+                    val content = loadContent(note)
+                    val mdPath = note.mdPath.ifBlank { markdownStore.relativePathFor(noteId) }
+                    val updated = note.copy(title = next, mdPath = mdPath, updatedAt = System.currentTimeMillis())
+                    markdownStore.writeDocument(mdPath, documentOf(updated, content))
+                    notes.upsert(updated)
                     titleFilled = true
                 }
             }
@@ -308,36 +473,6 @@ class NoteRepository(private val db: NoteDatabase) {
         notes.upsert(note)
     }
 
-    /** 导入 Markdown/HTML 时一次性写入新笔记和块，避免出现半篇笔记。 */
-    suspend fun insertImportedNote(note: Note, blockList: List<NoteBlock>) {
-        val normalized = blockList.mapIndexed { index, block ->
-            block.copy(
-                noteId = note.id,
-                indent = block.indent.coerceIn(0, 8),
-                sortOrder = index,
-            )
-        }
-        db.withTransaction {
-            notes.upsert(note)
-            blocks.deleteByNoteId(note.id)
-            if (normalized.isNotEmpty()) blocks.upsertAll(normalized)
-            syncOutgoingLinksLocked(note.id, normalized)
-        }
-    }
-
-    suspend fun replaceNoteBlocks(noteId: String, blockList: List<NoteBlock>) {
-        val normalized = blockList.mapIndexed { index, block ->
-            block.copy(noteId = noteId, indent = block.indent.coerceIn(0, 8), sortOrder = index)
-        }
-        db.withTransaction {
-            blocks.deleteByNoteId(noteId)
-            if (normalized.isNotEmpty()) {
-                blocks.upsertAll(normalized)
-            }
-            syncOutgoingLinksLocked(noteId, normalized)
-        }
-    }
-
     class TagPathConflict(val path: String) : Exception("标签路径已存在：$path")
 
     suspend fun renameTag(tagId: String, newPath: String): Tag? {
@@ -377,33 +512,51 @@ class NoteRepository(private val db: NoteDatabase) {
     /**
      * Merge a remote note into the local database.
      * Last-write wins by updatedAt; equal timestamps keep the local copy.
+     * 0.9.0 起远端 body 就是 Markdown；0.8.0 旧快照（mdPath 为空）则从
+     * 远端块重建 Markdown 源。两种情况都会补写本地 .md 文件。
      * Returns true if the local note was inserted or replaced by the remote.
      */
     suspend fun mergeRemoteNote(remote: Note, remoteBlocks: List<NoteBlock>): Boolean {
         val local = notes.getById(remote.id)
-        if (local == null) {
-            db.withTransaction {
-                notes.upsert(remote)
-                if (remoteBlocks.isNotEmpty()) {
-                    blocks.upsertAll(remoteBlocks.mapIndexed { index, block ->
-                        block.copy(noteId = remote.id, sortOrder = index)
-                    })
-                }
-                syncOutgoingLinksLocked(remote.id, remoteBlocks)
+        if (remote.mdPath.isNotBlank() || remoteBlocks.isNotEmpty() || remote.body.isNotBlank()) {
+            val markdownBlocks = when {
+                remote.mdPath.isNotBlank() && remote.body.isNotBlank() ->
+                    parseMarkdownBlocks(remote.body)
+                remoteBlocks.isNotEmpty() ->
+                    MarkdownMigrator.toMarkdownBlocks(remoteBlocks)
+                else ->
+                    parseMarkdownBlocks(remote.body)
             }
+            val content = when {
+                remote.mdPath.isNotBlank() -> remote.body
+                remoteBlocks.isNotEmpty() ->
+                    MarkdownCodec.render(title = "", blocks = markdownBlocks).trimEnd('\n')
+                else -> remote.body.replace("\r\n", "\n").trimEnd('\n')
+            }
+            val mdPath = remote.mdPath.ifBlank { markdownStore.relativePathFor(remote.id) }
+            val remoteMarkdown = remote.copy(body = content, mdPath = mdPath)
+            val isNewer = local == null || remote.updatedAt > local.updatedAt
+            if (isNewer) {
+                markdownStore.writeDocument(mdPath, documentOf(remoteMarkdown, content))
+                val previous = local?.let { blocks.getByNoteId(remote.id) }.orEmpty()
+                val nextBlocks = withStableIds(remote.id, markdownBlocks, previous)
+                db.withTransaction {
+                    notes.upsert(remoteMarkdown)
+                    blocks.deleteByNoteId(remote.id)
+                    if (nextBlocks.isNotEmpty()) blocks.upsertAll(nextBlocks)
+                    syncOutgoingLinksLocked(remote.id, content)
+                }
+                return true
+            }
+            return false
+        }
+        // 远端既无 Markdown 也无块：只保留正文镜像（理论上不会出现）。
+        if (local == null) {
+            db.withTransaction { notes.upsert(remote) }
             return true
         }
         if (remote.updatedAt > local.updatedAt) {
-            db.withTransaction {
-                notes.upsert(remote)
-                blocks.deleteByNoteId(remote.id)
-                if (remoteBlocks.isNotEmpty()) {
-                    blocks.upsertAll(remoteBlocks.mapIndexed { index, block ->
-                        block.copy(noteId = remote.id, sortOrder = index)
-                    })
-                }
-                syncOutgoingLinksLocked(remote.id, remoteBlocks)
-            }
+            db.withTransaction { notes.upsert(remote) }
             return true
         }
         return false

@@ -36,8 +36,8 @@ android {
         applicationId = "com.davidzhu.wantnote"
         minSdk = 24
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.8.0"
+        versionCode = 9
+        versionName = "0.9.0"
     }
 
     signingConfigs {
@@ -98,7 +98,11 @@ dependencies {
     // OkHttp 可以发送任意 HTTP 动词（PROPFIND/MKCOL），避免
     // HttpURLConnection 在 doOutput 时把非标准方法悄悄改成 POST。
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Dinox 自动同步的周期性后台任务。
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
     ksp("androidx.room:room-compiler:2.6.1")
 
     testImplementation("junit:junit:4.13.2")
+    // JVM 单测里用真实的 org.json 实现（android.jar 里的 stub 不可用）。
+    testImplementation("org.json:json:20240303")
 }

@@ -82,17 +82,24 @@ interface NoteDao {
 
     @Query(
         """
-        UPDATE notes SET title = :title, body = :body,
+        UPDATE notes SET title = :title, body = :body, mdPath = :mdPath,
             createdAt = :createdAt, updatedAt = :updatedAt
         WHERE id = :id
         """,
     )
-    suspend fun updateColumns(id: String, title: String, body: String, createdAt: Long, updatedAt: Long)
+    suspend fun updateColumns(
+        id: String,
+        title: String,
+        body: String,
+        mdPath: String,
+        createdAt: Long,
+        updatedAt: Long,
+    )
 
     @Transaction
     suspend fun upsert(note: Note) {
         if (insertIfAbsent(note) == -1L) {
-            updateColumns(note.id, note.title, note.body, note.createdAt, note.updatedAt)
+            updateColumns(note.id, note.title, note.body, note.mdPath, note.createdAt, note.updatedAt)
         }
     }
 
@@ -100,7 +107,7 @@ interface NoteDao {
     suspend fun upsertAll(notes: List<Note>) {
         notes.forEach { note ->
             if (insertIfAbsent(note) == -1L) {
-                updateColumns(note.id, note.title, note.body, note.createdAt, note.updatedAt)
+                updateColumns(note.id, note.title, note.body, note.mdPath, note.createdAt, note.updatedAt)
             }
         }
     }

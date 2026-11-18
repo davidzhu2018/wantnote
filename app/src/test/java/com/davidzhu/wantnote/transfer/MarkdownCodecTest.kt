@@ -160,4 +160,24 @@ class MarkdownCodecTest {
         assertEquals(1, parsed.blocks[0].indent)
         assertEquals(2, parsed.blocks[1].indent)
     }
+
+    @Test
+    fun consumeLeadingTitleLeavesFirstHeadingInContent() {
+        val markdown = "## 第二节\n\n正文"
+        val asDocument = MarkdownCodec.parseMarkdown(markdown, "文件名")
+        assertEquals("第二节", asDocument.title)
+        assertEquals(1, asDocument.blocks.size)
+        assertEquals(BlockType.PARAGRAPH, asDocument.blocks[0].type)
+
+        val asContent = MarkdownCodec.parseMarkdown(
+            markdown,
+            fallbackTitle = "",
+            consumeLeadingTitle = false,
+        )
+        assertEquals("", asContent.title)
+        assertEquals(2, asContent.blocks.size)
+        assertEquals(BlockType.HEADING, asContent.blocks[0].type)
+        assertEquals(2, asContent.blocks[0].headingLevel)
+        assertEquals("第二节", asContent.blocks[0].text)
+    }
 }

@@ -3,10 +3,9 @@ package com.davidzhu.wantnote.transfer
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
-import com.davidzhu.wantnote.data.BlockFontSize
+import com.davidzhu.wantnote.data.BlockType
 import com.davidzhu.wantnote.data.MediaStorage
 import com.davidzhu.wantnote.data.Note
-import com.davidzhu.wantnote.data.NoteBlock
 import com.davidzhu.wantnote.data.NoteRepository
 import com.davidzhu.wantnote.data.SearchText
 import kotlinx.coroutines.Dispatchers
@@ -250,37 +249,20 @@ class ImportExportService(
         val now = System.currentTimeMillis()
         val noteId = UUID.randomUUID().toString()
         val noteTitle = parsed.title.ifBlank { "导入的笔记" }.take(200)
-        val blocks = parsed.blocks.mapIndexed { index, parsedBlock ->
-            NoteBlock(
-                id = UUID.randomUUID().toString(),
-                noteId = noteId,
-                type = parsedBlock.type.name,
-                text = parsedBlock.text,
-                indent = parsedBlock.indent.coerceIn(0, 8),
-                checked = parsedBlock.checked,
-                fontSize = BlockFontSize.NORMAL.name,
-                mediaPath = parsedBlock.mediaPath,
-                sortOrder = index,
-                headingLevel = parsedBlock.headingLevel.coerceIn(0, 6),
-            )
-        }.ifEmpty {
-            listOf(
-                NoteBlock.paragraph(
-                    id = UUID.randomUUID().toString(),
-                    noteId = noteId,
-                    text = "",
-                    sortOrder = 0,
-                ),
-            )
+        // 内容 Markdown（不含标题 H1）：块模型渲染回纯文本 Markdown。
+        // 引用不到的媒体保留为原始引用行，等附件同步到位后自然恢复。
+        val markdownBlocks = parsed.blocks.ifEmpty {
+            listOf(MarkdownBlock(BlockType.PARAGRAPH, text = ""))
         }
+        val content = MarkdownCodec.render(title = "", blocks = markdownBlocks).trimEnd('\n')
         val note = Note(
             id = noteId,
             title = noteTitle,
-            body = SearchText.fromBlocks(blocks),
+            body = "",
             createdAt = now,
             updatedAt = now,
         )
-        notes.insertImportedNote(note, blocks)
+        notes.insertImportedMarkdown(note, content)
     }
 
     private fun readTaskText(task: ImportTask): String {

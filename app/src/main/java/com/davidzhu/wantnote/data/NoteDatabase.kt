@@ -18,7 +18,7 @@ import java.util.UUID
         AiProvider::class,
         NoteLink::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class NoteDatabase : RoomDatabase() {
@@ -197,6 +197,29 @@ abstract class NoteDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 0.9.0: each note body gains a Markdown document path
+         * (`notes/<id>.md` under the app data root), plus settings columns
+         * for the editor mode, custom themes, Dinox sync state and the
+         * forced-migration flag. The actual blocks → Markdown conversion
+         * runs later through the forced, resumable upgrade flow in the UI;
+         * this migration only adds columns so a 0.8.0 database opens
+         * unchanged.
+         */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE notes ADD COLUMN mdPath TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE settings ADD COLUMN editorMode TEXT NOT NULL DEFAULT 'WYSIWYG'")
+                db.execSQL("ALTER TABLE settings ADD COLUMN themeCustomJson TEXT NOT NULL DEFAULT '{}'")
+                db.execSQL("ALTER TABLE settings ADD COLUMN dinoxTokenSealed TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE settings ADD COLUMN dinoxSealMethod TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE settings ADD COLUMN dinoxLastSyncAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE settings ADD COLUMN dinoxSyncBox TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE settings ADD COLUMN dinoxAutoSyncMinutes INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE settings ADD COLUMN markdownMigrationDone INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun create(context: Context): NoteDatabase {
             // 0.6.0：数据库优先放在 Documents/WantNote（卸载后可找回），
             // 未授权时回退到旧私有位置；首次启动由 AppStorage.prepare 迁移旧数据。
@@ -207,7 +230,10 @@ abstract class NoteDatabase : RoomDatabase() {
                 NoteDatabase::class.java,
                 dbFile.absolutePath,
             )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(
+                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
+                    MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
+                )
                 .build()
         }
     }

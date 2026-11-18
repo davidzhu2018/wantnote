@@ -12,6 +12,7 @@ object SearchText {
                 BlockType.IMAGE -> "[图片]"
                 BlockType.VIDEO -> "[视频]"
                 BlockType.FILE -> "[文件] " + block.text
+                BlockType.TABLE -> block.text
                 BlockType.HEADING, BlockType.QUOTE, BlockType.CODE,
                 BlockType.ORDERED, BlockType.UNORDERED, BlockType.PARAGRAPH -> block.text
             }
