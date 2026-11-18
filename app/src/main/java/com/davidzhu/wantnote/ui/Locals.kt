@@ -6,6 +6,8 @@ import com.davidzhu.wantnote.data.MediaStorage
 import com.davidzhu.wantnote.data.NoteRepository
 import com.davidzhu.wantnote.data.SettingsRepository
 import com.davidzhu.wantnote.sync.CloudSyncService
+import com.davidzhu.wantnote.transfer.BackupService
+import com.davidzhu.wantnote.transfer.ImportExportService
 
 val LocalNotes = staticCompositionLocalOf<NoteRepository> {
     error("NoteRepository not provided")
@@ -25,4 +27,12 @@ val LocalAi = staticCompositionLocalOf<AiService> {
 
 val LocalSync = staticCompositionLocalOf<CloudSyncService> {
     error("CloudSyncService not provided")
+}
+
+val LocalBackup = staticCompositionLocalOf<BackupService> {
+    error("BackupService not provided")
+}
+
+val LocalTransfer = staticCompositionLocalOf<ImportExportService> {
+    error("ImportExportService not provided")
 }

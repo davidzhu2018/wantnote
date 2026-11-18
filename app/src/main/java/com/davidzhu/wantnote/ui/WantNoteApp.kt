@@ -44,9 +44,10 @@ import com.davidzhu.wantnote.ui.search.SearchScreen
 import com.davidzhu.wantnote.ui.settings.AboutScreen
 import com.davidzhu.wantnote.ui.settings.AiSettingsScreen
 import com.davidzhu.wantnote.ui.settings.AttachmentSettingsScreen
-import com.davidzhu.wantnote.ui.settings.CloudSyncScreen
+import com.davidzhu.wantnote.ui.settings.BackupSyncScreen
 import com.davidzhu.wantnote.ui.settings.EditorSettingsScreen
 import com.davidzhu.wantnote.ui.settings.GeneralSettingsScreen
+import com.davidzhu.wantnote.ui.settings.ImportExportScreen
 import com.davidzhu.wantnote.ui.settings.SettingsScreen
 import com.davidzhu.wantnote.ui.settings.TagManagementScreen
 import kotlinx.coroutines.launch
@@ -140,7 +141,10 @@ fun WantNoteApp() {
                 AttachmentSettingsScreen(onBack = { nav.popBackStack() })
             }
             composable("settings/sync") {
-                CloudSyncScreen(onBack = { nav.popBackStack() })
+                BackupSyncScreen(onBack = { nav.popBackStack() })
+            }
+            composable("settings/importexport") {
+                ImportExportScreen(onBack = { nav.popBackStack() })
             }
             composable("settings/ai") {
                 AiSettingsScreen(onBack = { nav.popBackStack() })

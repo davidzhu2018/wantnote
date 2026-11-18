@@ -74,4 +74,10 @@ interface TagDao {
 
     @Query("SELECT * FROM note_tags")
     suspend fun getAllCrossRefs(): List<NoteTagCrossRef>
+
+    @Query("DELETE FROM note_tags")
+    suspend fun deleteAllCrossRefs()
+
+    @Query("DELETE FROM tags")
+    suspend fun deleteAll()
 }

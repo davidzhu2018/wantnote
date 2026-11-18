@@ -8,6 +8,8 @@ import com.davidzhu.wantnote.data.NoteDatabase
 import com.davidzhu.wantnote.data.NoteRepository
 import com.davidzhu.wantnote.data.SettingsRepository
 import com.davidzhu.wantnote.sync.CloudSyncService
+import com.davidzhu.wantnote.transfer.BackupService
+import com.davidzhu.wantnote.transfer.ImportExportService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,6 +33,22 @@ class WantNoteApplication : Application() {
         CloudSyncService(
             notes = repository,
             settingsRepository = settingsRepository,
+            media = mediaStorage,
+        )
+    }
+    val backupService by lazy {
+        BackupService(
+            context = this,
+            db = database,
+            notes = repository,
+            media = mediaStorage,
+            appVersion = BuildConfig.VERSION_NAME,
+        )
+    }
+    val importExportService by lazy {
+        ImportExportService(
+            context = this,
+            notes = repository,
             media = mediaStorage,
         )
     }

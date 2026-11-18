@@ -253,6 +253,22 @@ class NoteRepository(private val db: NoteDatabase) {
         notes.upsert(note)
     }
 
+    /** 导入 Markdown/HTML 时一次性写入新笔记和块，避免出现半篇笔记。 */
+    suspend fun insertImportedNote(note: Note, blockList: List<NoteBlock>) {
+        val normalized = blockList.mapIndexed { index, block ->
+            block.copy(
+                noteId = note.id,
+                indent = block.indent.coerceIn(0, 8),
+                sortOrder = index,
+            )
+        }
+        db.withTransaction {
+            notes.upsert(note)
+            blocks.deleteByNoteId(note.id)
+            if (normalized.isNotEmpty()) blocks.upsertAll(normalized)
+        }
+    }
+
     suspend fun replaceNoteBlocks(noteId: String, blockList: List<NoteBlock>) {
         val normalized = blockList.mapIndexed { index, block ->
             block.copy(noteId = noteId, indent = block.indent.coerceIn(0, 8), sortOrder = index)

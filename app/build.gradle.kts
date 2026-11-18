@@ -36,8 +36,8 @@ android {
         applicationId = "com.davidzhu.wantnote"
         minSdk = 24
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.6.0"
+        versionCode = 7
+        versionName = "0.7.0"
     }
 
     signingConfigs {
@@ -95,5 +95,10 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
+    // OkHttp 可以发送任意 HTTP 动词（PROPFIND/MKCOL），避免
+    // HttpURLConnection 在 doOutput 时把非标准方法悄悄改成 POST。
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     ksp("androidx.room:room-compiler:2.6.1")
+
+    testImplementation("junit:junit:4.13.2")
 }

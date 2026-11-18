@@ -35,7 +35,8 @@ val SettingsEntries = listOf(
     SettingsEntry("编辑器设置", "界面字体、字号", "settings/editor"),
     SettingsEntry("标签管理", "增删查改、颜色和子标签", "settings/tags"),
     SettingsEntry("附件管理", "文件、图片、视频与压缩", "settings/attachments"),
-    SettingsEntry("云同步", "WebDAV / S3 上传下载", "settings/sync"),
+    SettingsEntry("备份与同步", "本地备份/恢复与 WebDAV / S3 云同步", "settings/sync"),
+    SettingsEntry("导入与导出", "Markdown / HTML 导入，导出 Markdown", "settings/importexport"),
     SettingsEntry("AI设置", "模型与密钥（仅保存在本机）", "settings/ai"),
     SettingsEntry("关于", "版本与检查更新", "settings/about"),
 )

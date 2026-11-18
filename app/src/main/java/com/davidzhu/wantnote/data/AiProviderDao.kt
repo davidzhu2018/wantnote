@@ -22,4 +22,7 @@ interface AiProviderDao {
 
     @Query("DELETE FROM ai_providers WHERE id = :id")
     suspend fun delete(id: String)
+
+    @Query("DELETE FROM ai_providers")
+    suspend fun deleteAll()
 }

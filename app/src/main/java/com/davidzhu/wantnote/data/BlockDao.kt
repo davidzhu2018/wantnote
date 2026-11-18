@@ -37,4 +37,7 @@ interface BlockDao {
 
     @Query("SELECT COUNT(*) FROM note_blocks WHERE noteId = :noteId")
     suspend fun countByNoteId(noteId: String): Int
+
+    @Query("DELETE FROM note_blocks")
+    suspend fun deleteAll()
 }

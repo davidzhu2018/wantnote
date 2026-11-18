@@ -29,10 +29,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.davidzhu.wantnote.data.AppSettings
 import com.davidzhu.wantnote.data.AppStorage
 import com.davidzhu.wantnote.ui.LocalAi
+import com.davidzhu.wantnote.ui.LocalBackup
 import com.davidzhu.wantnote.ui.LocalMedia
 import com.davidzhu.wantnote.ui.LocalNotes
 import com.davidzhu.wantnote.ui.LocalSettings
 import com.davidzhu.wantnote.ui.LocalSync
+import com.davidzhu.wantnote.ui.LocalTransfer
 import com.davidzhu.wantnote.ui.WantNoteApp
 import com.davidzhu.wantnote.ui.theme.WantNoteTheme
 import com.davidzhu.wantnote.ui.theme.loadEditorFontFamily
@@ -56,6 +58,8 @@ class MainActivity : ComponentActivity() {
                     LocalMedia provides app.mediaStorage,
                     LocalAi provides app.aiService,
                     LocalSync provides app.cloudSync,
+                    LocalBackup provides app.backupService,
+                    LocalTransfer provides app.importExportService,
                 ) {
                     WantNoteApp()
                     StorageAccessGate()
