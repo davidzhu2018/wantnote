@@ -148,6 +148,43 @@ class NoteRepository(private val db: NoteDatabase) {
         notes.upsert(existing.copy(title = title, updatedAt = System.currentTimeMillis()))
     }
 
+    /** Outcome of [fillEmptyTitleAndTags]: which empty fields were filled. */
+    data class FillResult(val titleFilled: Boolean, val tagsFilled: Boolean)
+
+    /**
+     * Fill ONLY blank fields, preserving anything the user wrote or changed:
+     * the decision is made inside one transaction at apply time, so user edits
+     * that landed while the AI request was in flight are respected.
+     * Title is set only if the stored title is still blank; tags are attached
+     * only if the note still has none. Nothing is ever overwritten.
+     */
+    suspend fun fillEmptyTitleAndTags(
+        noteId: String,
+        suggestedTitle: String,
+        suggestedTags: List<String>,
+    ): FillResult {
+        return db.withTransaction {
+            val note = notes.getById(noteId) ?: return@withTransaction FillResult(false, false)
+            var titleFilled = false
+            if (note.title.isBlank() && suggestedTitle.isNotBlank()) {
+                val next = suggestedTitle.trim().take(40)
+                if (next.isNotEmpty()) {
+                    notes.upsert(note.copy(title = next, updatedAt = System.currentTimeMillis()))
+                    titleFilled = true
+                }
+            }
+            var tagsFilled = false
+            if (tags.getForNote(noteId).isEmpty() && suggestedTags.isNotEmpty()) {
+                val ids = suggestedTags.mapNotNull { path -> upsertTag(path)?.id }.distinct()
+                if (ids.isNotEmpty()) {
+                    tags.upsertCrossRefs(ids.map { NoteTagCrossRef(noteId, it) })
+                    tagsFilled = true
+                }
+            }
+            FillResult(titleFilled = titleFilled, tagsFilled = tagsFilled)
+        }
+    }
+
     suspend fun upsertTag(path: String, color: Long = Tag.defaultColor()): Tag? {
         val normalized = Tag.normalizePath(path)
         if (normalized.isEmpty()) return null

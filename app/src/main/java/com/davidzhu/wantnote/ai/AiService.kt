@@ -175,38 +175,92 @@ class AiService(
      * After a note is saved, try to fill a blank title and missing tags.
      * Never blocks or rewrites the user's existing title/tags. Failures are skipped.
      */
-    fun enqueueAutoTitleTags(noteId: String, force: Boolean = false) {
+    fun enqueueAutoTitleTags(noteId: String) {
         scope.launch {
-            runAutoTitleTags(noteId, force)
+            runAutoTitleTags(noteId)
         }
     }
 
-    suspend fun runAutoTitleTags(noteId: String, force: Boolean = false): Result<TitleTagSuggestion> {
+    /**
+     * Fill-only pass: a generated title is written ONLY if the stored title is
+     * still blank, and generated tags are attached ONLY if the note still has
+     * none. Never replaces user-written content.
+     */
+    suspend fun runAutoTitleTags(noteId: String): Result<TitleTagSuggestion> {
         val note = notes.getById(noteId) ?: return Result.failure(AiException("笔记不存在"))
         val existingTags = notes.getTagsForNote(noteId)
         val body = SearchText.fromBlocks(notes.getBlocks(noteId))
         if (body.isBlank() && note.title.isBlank()) {
             return Result.failure(AiException("空笔记不会生成标题和标签"))
         }
-        val shouldTitle = force || note.title.isBlank()
-        val shouldTags = force || existingTags.isEmpty()
-        if (!shouldTitle && !shouldTags) {
-            return Result.failure(AiException("标题和标签已有内容，未自动覆盖"))
+        val canTitle = note.title.isBlank()
+        val canTags = existingTags.isEmpty()
+        if (!canTitle && !canTags) {
+            return Result.failure(AiException("标题和标签已有内容，未自动生成"))
         }
         val result = generateTitleAndTags(note.title, body)
         val suggestion = result.getOrElse { return result }
-        val newTitle = if (shouldTitle && suggestion.title.isNotBlank()) suggestion.title.take(40) else note.title
+        val newTitle = if (canTitle && suggestion.title.isNotBlank()) suggestion.title.take(40) else note.title
         if (newTitle != note.title) {
             notes.updateTitle(noteId, newTitle)
         }
-        if (shouldTags && suggestion.tags.isNotEmpty()) {
-            val merged = (existingTags.map { it.path } + suggestion.tags)
+        if (canTags && suggestion.tags.isNotEmpty()) {
+            val tags = suggestion.tags
                 .map { Tag.normalizePath(it) }
                 .filter { it.isNotEmpty() }
                 .distinct()
-            notes.setNoteTagPaths(noteId, merged)
+            notes.setNoteTagPaths(noteId, tags)
         }
         return Result.success(suggestion)
+    }
+
+    /**
+     * The ONLY title/tag entrypoint allowed to replace existing content, and
+     * it is reachable only from the editor's confirmation dialog: the user is
+     * shown what will be replaced and explicitly taps 「覆盖标题和标签」.
+     * Title is replaced by the AI title; tags are replaced by the AI tags.
+     */
+    suspend fun runOverwriteTitleTags(noteId: String): Result<TitleTagSuggestion> {
+        val note = notes.getById(noteId) ?: return Result.failure(AiException("笔记不存在"))
+        val body = SearchText.fromBlocks(notes.getBlocks(noteId))
+        if (body.isBlank() && note.title.isBlank()) {
+            return Result.failure(AiException("空笔记不会生成标题和标签"))
+        }
+        val result = generateTitleAndTags(note.title, body)
+        result.onSuccess { suggestion ->
+            val newTitle = suggestion.title.take(40)
+            if (newTitle.isNotBlank()) {
+                notes.updateTitle(noteId, newTitle)
+            }
+            val tags = suggestion.tags
+                .map { Tag.normalizePath(it) }
+                .filter { it.isNotEmpty() }
+                .distinct()
+            if (tags.isNotEmpty()) {
+                notes.setNoteTagPaths(noteId, tags)
+            }
+        }
+        return result
+    }
+
+    /**
+     * Non-force counterpart used by the 保存 button: generate a suggestion but
+     * apply nothing here. The caller (NoteRepository.fillEmptyTitleAndTags)
+     * applies the result to whatever is still empty at apply time, so any
+     * user-written title/tags made while the request was in flight survive.
+     */
+    suspend fun suggestFillTitleTags(noteId: String): Result<TitleTagSuggestion> {
+        val note = notes.getById(noteId) ?: return Result.failure(AiException("笔记不存在"))
+        val body = SearchText.fromBlocks(notes.getBlocks(noteId))
+        if (body.isBlank() && note.title.isBlank()) {
+            return Result.failure(AiException("空笔记不会生成标题和标签"))
+        }
+        val canTitle = note.title.isBlank()
+        val canTags = notes.getTagsForNote(noteId).isEmpty()
+        if (!canTitle && !canTags) {
+            return Result.failure(AiException("标题和标签已有内容，未自动生成"))
+        }
+        return generateTitleAndTags(note.title, body)
     }
 
     private suspend fun maybeSetDefaultModels(providerId: String, modelId: String) {

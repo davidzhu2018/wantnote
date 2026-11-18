@@ -109,6 +109,7 @@ data class AppSettings(
     val aiTitleTagModelId: String = "",
     val aiSummaryText: String = "",
     val aiSummaryUpdatedAt: Long = 0L,
+    val aiSummaryScope: String = "",
     val compressVideos: Boolean = false,
     val editorFontId: String = EditorFontOption.SYSTEM.id,
     val customFontPath: String = "",

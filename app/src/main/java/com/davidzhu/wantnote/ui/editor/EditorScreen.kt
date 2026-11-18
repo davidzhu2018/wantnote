@@ -17,8 +17,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -39,6 +41,7 @@ import androidx.compose.material.icons.outlined.Highlight
 import androidx.compose.material.icons.outlined.HorizontalRule
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.StrikethroughS
+import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Videocam
@@ -50,6 +53,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -103,6 +107,7 @@ import com.davidzhu.wantnote.ui.LocalMedia
 import com.davidzhu.wantnote.ui.LocalNotes
 import com.davidzhu.wantnote.ui.LocalSettings
 import com.davidzhu.wantnote.ui.components.TagChip
+import com.davidzhu.wantnote.ui.components.TagColorPicker
 import com.davidzhu.wantnote.ui.theme.LocalEditorFontFamily
 import com.davidzhu.wantnote.ui.theme.LocalFontScale
 import kotlinx.coroutines.Dispatchers
@@ -135,6 +140,7 @@ fun EditorScreen(
     var focusedId by remember { mutableStateOf<String?>(null) }
     var noteTags by remember { mutableStateOf(listOf<Tag>()) }
     var showTagPicker by remember { mutableStateOf(false) }
+    var showOverwriteDialog by remember { mutableStateOf(false) }
     var generating by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     val fields = remember { mutableStateMapOf<String, TextFieldValue>() }
@@ -370,49 +376,103 @@ fun EditorScreen(
         }
     }
 
+    /**
+     * One fill-only AI pass, shared by the 保存 button and the sparkle
+     * dialog's 「只补充空位」 choice: applies the suggestion ONLY to fields
+     * that are still empty at apply time and reports what was filled.
+     */
+    suspend fun runFillOnlyPass() {
+        val result = ai.suggestFillTitleTags(noteId)
+        if (result.isSuccess) {
+            val suggestion = result.getOrNull()
+            if (suggestion != null) {
+                val fill = repository.fillEmptyTitleAndTags(noteId, suggestion.title, suggestion.tags)
+                val latest = repository.getById(noteId)
+                if (title.isBlank() && fill.titleFilled && latest != null) {
+                    title = latest.title
+                }
+                noteTags = repository.getTagsForNote(noteId)
+                snackbar.showSnackbar(
+                    when {
+                        fill.titleFilled && fill.tagsFilled -> "已保存，AI 补充了标题和标签"
+                        fill.titleFilled -> "已保存，AI 补充了标题"
+                        fill.tagsFilled -> "已保存，AI 补充了标签"
+                        else -> "已保存"
+                    },
+                )
+            } else {
+                snackbar.showSnackbar("已保存")
+            }
+        } else {
+            val error = result.exceptionOrNull()
+            val msg = error?.message.orEmpty()
+            when {
+                msg.contains("请先在设置里") || msg.contains("还没有配置") || msg.contains("空笔记") -> {
+                    snackbar.showSnackbar("已保存")
+                }
+                msg.contains("已有内容") -> snackbar.showSnackbar("已保存")
+                else -> snackbar.showSnackbar("已保存。自动标题/标签未完成：${msg.ifBlank { "已保留当前内容" }}")
+            }
+        }
+    }
+
+    /** 保存 + fill-only AI pass (never overwrites manual content). */
     fun saveExplicit() {
         if (saving) return
         saving = true
         scope.launch {
             repository.save(noteId, titleState.value, blocksState.value)
-            val result = ai.runAutoTitleTags(noteId, force = false)
-            val latest = repository.getById(noteId)
-            if (latest != null && latest.title.isNotBlank()) {
-                title = latest.title
-            }
-            noteTags = repository.getTagsForNote(noteId)
-            result.onSuccess {
-                snackbar.showSnackbar("已保存")
-            }.onFailure { error ->
-                val msg = error.message.orEmpty()
-                if (msg.contains("请先在设置里") || msg.contains("还没有配置") || msg.contains("空笔记")) {
-                    snackbar.showSnackbar("已保存")
-                } else if (msg.contains("已有内容")) {
-                    snackbar.showSnackbar("已保存")
-                } else {
-                    snackbar.showSnackbar("已保存。自动标题/标签未完成：${error.message ?: "已保留当前内容"}")
-                }
-            }
+            // AI runs as a fill-only pass: each field is filled ONLY if it is
+            // still empty at apply time (checked inside one transaction), so
+            // user-written titles/tags — including changes made while the AI
+            // request was in flight — are never overwritten or clobbered.
+            runFillOnlyPass()
             saving = false
         }
     }
 
-    fun generateTitleTags() {
+    fun runAiGeneration(overwrite: Boolean) {
         if (generating) return
         generating = true
         scope.launch {
             repository.save(noteId, titleState.value, blocksState.value)
-            val result = ai.runAutoTitleTags(noteId, force = true)
-            result.onSuccess { suggestion ->
-                if (suggestion.title.isNotBlank()) {
-                    title = suggestion.title
-                }
-                noteTags = repository.getTagsForNote(noteId)
-                snackbar.showSnackbar("已生成标题和标签")
-            }.onFailure { error ->
-                snackbar.showSnackbar(error.message ?: "生成失败，已保留当前内容")
+            if (overwrite) {
+                // Reached only via the confirmation dialog; replaces the
+                // stored title and tags with the AI result, as the user chose.
+                ai.runOverwriteTitleTags(noteId)
+                    .onSuccess { suggestion ->
+                        if (suggestion.title.isNotBlank()) {
+                            title = suggestion.title.take(40)
+                        }
+                        noteTags = repository.getTagsForNote(noteId)
+                        snackbar.showSnackbar("已覆盖标题和标签")
+                    }
+                    .onFailure { error ->
+                        snackbar.showSnackbar(error.message ?: "生成失败，已保留当前内容")
+                    }
+            } else {
+                runFillOnlyPass()
             }
             generating = false
+        }
+    }
+
+    /**
+     * Sparkle button: if the note already has a manual title or tags, ask the
+     * user first — nothing is overwritten without an explicit confirmed
+     * choice. Only a completely blank title/tag note regenerates directly.
+     */
+    fun generateTitleTags() {
+        if (generating) return
+        scope.launch {
+            val note = repository.getById(noteId)
+            val hasExisting = note != null &&
+                (note.title.isNotBlank() || repository.getTagsForNote(noteId).isNotEmpty())
+            if (hasExisting) {
+                showOverwriteDialog = true
+            } else {
+                runAiGeneration(overwrite = false)
+            }
         }
     }
 
@@ -503,6 +563,7 @@ fun EditorScreen(
         bottomBar = {
             OutlineToolbar(
                 fontLabel = currentFontLabel,
+                onTags = { showTagPicker = true },
                 onAddTask = { addTypedBlock(BlockType.TASK) },
                 onOrdered = { addTypedBlock(BlockType.ORDERED) },
                 onUnordered = { addTypedBlock(BlockType.UNORDERED) },
@@ -612,42 +673,159 @@ fun EditorScreen(
     }
 
     if (showTagPicker) {
+        TagPickerDialog(
+            allTags = allTags,
+            selectedIds = noteTags.map { it.id }.toSet(),
+            onToggle = { tag ->
+                scope.launch {
+                    if (tag.id in noteTags.map { it.id }.toSet()) {
+                        repository.removeTagFromNote(noteId, tag.id)
+                    } else {
+                        repository.addTagToNote(noteId, tag.path, tag.color)
+                    }
+                    noteTags = repository.getTagsForNote(noteId)
+                }
+            },
+            onCreate = { path, color ->
+                scope.launch {
+                    val created = repository.addTagToNote(noteId, path, color)
+                    noteTags = repository.getTagsForNote(noteId)
+                    if (created == null) {
+                        snackbar.showSnackbar("请填写有效的标签路径")
+                    } else {
+                        snackbar.showSnackbar("已创建并附加：${created.path}")
+                    }
+                }
+            },
+            onDismiss = { showTagPicker = false },
+        )
+    }
+
+    if (showOverwriteDialog) {
         AlertDialog(
-            onDismissRequest = { showTagPicker = false },
-            title = { Text("选择标签") },
+            onDismissRequest = { showOverwriteDialog = false },
+            title = { Text("重新生成标题和标签") },
             text = {
-                val selected = noteTags.map { it.id }.toSet()
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "这篇笔记已有标题或标签。选择应用方式：",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    TextButton(onClick = {
+                        showOverwriteDialog = false
+                        runAiGeneration(overwrite = false)
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text("只补充空位（不动已有内容）")
+                    }
+                    TextButton(onClick = {
+                        showOverwriteDialog = false
+                        runAiGeneration(overwrite = true)
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text("覆盖标题和标签", color = MaterialTheme.colorScheme.error)
+                    }
+                    TextButton(onClick = { showOverwriteDialog = false }, modifier = Modifier.fillMaxWidth()) {
+                        Text("取消")
+                    }
+                }
+            },
+            confirmButton = {},
+        )
+    }
+}
+
+/**
+ * Manual tag add/select dialog, opened from the editor toolbar # button
+ * (and from 选择标签). Existing tags can be attached/detached by tapping;
+ * a new tag can be typed (slash paths allowed) and created on the fly with
+ * a color, then attached to the current note.
+ */
+@Composable
+private fun TagPickerDialog(
+    allTags: List<Tag>,
+    selectedIds: Set<String>,
+    onToggle: (Tag) -> Unit,
+    onCreate: (String, Long) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    var draftColor by remember { mutableStateOf(Tag.defaultColor()) }
+    val newPath = Tag.normalizePath(query)
+    val exists = allTags.any { it.path == newPath }
+    val canCreate = newPath.isNotEmpty() && !exists
+    val filtered = if (query.isBlank()) allTags else allTags.filter { it.path.contains(query.trim(), ignoreCase = true) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择标签") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("搜索或输入新标签") },
+                    placeholder = { Text("例如 工作/项目") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (canCreate) {
+                    Text(
+                        text = "新标签：$newPath",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TagColorPicker(
+                            selected = draftColor,
+                            onSelect = { draftColor = it },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    TextButton(
+                        onClick = {
+                            onCreate(newPath, draftColor)
+                            query = ""
+                            draftColor = Tag.defaultColor()
+                        },
+                        modifier = Modifier.padding(top = 2.dp),
+                    ) {
+                        Text("创建并附加")
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
                 if (allTags.isEmpty()) {
-                    Text("还没有标签。请到设置 → 标签管理中创建。")
+                    Text(
+                        "还没有标签。在上方输入名称即可创建并附加到本笔记。",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (filtered.isEmpty()) {
+                    Text(
+                        "没有匹配「${query.trim()}」的标签，可以新建。",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 } else {
                     androidx.compose.foundation.lazy.LazyColumn {
-                        items(allTags.size) { index ->
-                            val tag = allTags[index]
-                            val on = tag.id in selected
+                        items(filtered.size) { index ->
+                            val tag = filtered[index]
+                            val on = tag.id in selectedIds
                             FilterChip(
                                 selected = on,
-                                onClick = {
-                                    scope.launch {
-                                        if (on) {
-                                            repository.removeTagFromNote(noteId, tag.id)
-                                        } else {
-                                            repository.addTagToNote(noteId, tag.path, tag.color)
-                                        }
-                                        noteTags = repository.getTagsForNote(noteId)
-                                    }
-                                },
+                                onClick = { onToggle(tag) },
                                 label = { Text(tag.path) },
                                 modifier = Modifier.padding(end = 6.dp, bottom = 6.dp),
                             )
                         }
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { showTagPicker = false }) { Text("完成") }
-            },
-        )
-    }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("完成") }
+        },
+    )
 }
 
 
@@ -851,6 +1029,7 @@ private fun LocalVideoBlock(path: String, onOpen: () -> Unit) {
 @Composable
 private fun OutlineToolbar(
     fontLabel: String,
+    onTags: () -> Unit,
     onAddTask: () -> Unit,
     onOrdered: () -> Unit,
     onUnordered: () -> Unit,
@@ -873,6 +1052,7 @@ private fun OutlineToolbar(
             .padding(horizontal = 4.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        ToolButton("标签", Icons.Outlined.Tag, onTags)
         ToolButton("任务", Icons.Outlined.CheckBox, onAddTask)
         ToolButton("有序", Icons.Outlined.FormatListNumbered, onOrdered)
         ToolButton("无序", Icons.AutoMirrored.Outlined.FormatListBulleted, onUnordered)

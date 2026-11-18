@@ -4,19 +4,26 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.ArrowDropDown
+import androidx.compose.material.icons.outlined.ArrowDropUp
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -42,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.davidzhu.wantnote.ai.AiPresets
@@ -65,10 +73,16 @@ fun AiSettingsScreen(onBack: () -> Unit) {
 
     var addingPreset by remember { mutableStateOf<String?>(null) }
 
-    val enabledChoices = providers.flatMap { provider ->
-        provider.enabledModels().map { model ->
-            Triple(provider, model.id, "${provider.name} / ${model.name}")
+    val modelChoices = providers.flatMap { provider ->
+        val enabled = provider.enabledModelIds().toSet()
+        val available = provider.availableModels()
+        // Dropdown lists every fetched model; ones ticked as enabled come first.
+        val ordered = if (available.isEmpty()) {
+            provider.enabledModels()
+        } else {
+            available.sortedByDescending { it.id in enabled }
         }
+        ordered.map { model -> Triple(provider, model.id, "${provider.name} / ${model.name}") }
     }
 
     Scaffold(
@@ -102,9 +116,10 @@ fun AiSettingsScreen(onBack: () -> Unit) {
             )
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text("用于提炼总结的模型", style = MaterialTheme.typography.titleMedium)
-            ModelChoiceRow(
-                choices = enabledChoices,
+            Text("用于提炼总结的默认模型", style = MaterialTheme.typography.titleMedium)
+            ModelDropdown(
+                label = "提炼总结的默认模型",
+                choices = modelChoices,
                 providerId = settings.aiSummaryProviderId,
                 modelId = settings.aiSummaryModelId,
                 onSelect = { providerId, modelId ->
@@ -116,9 +131,10 @@ fun AiSettingsScreen(onBack: () -> Unit) {
                 },
             )
             Spacer(modifier = Modifier.height(12.dp))
-            Text("用于自动标题和标签的模型", style = MaterialTheme.typography.titleMedium)
-            ModelChoiceRow(
-                choices = enabledChoices,
+            Text("用于自动标题和标签的默认模型", style = MaterialTheme.typography.titleMedium)
+            ModelDropdown(
+                label = "自动标题和标签的默认模型",
+                choices = modelChoices,
                 providerId = settings.aiTitleTagProviderId,
                 modelId = settings.aiTitleTagModelId,
                 onSelect = { providerId, modelId ->
@@ -238,8 +254,13 @@ fun AiSettingsScreen(onBack: () -> Unit) {
     }
 }
 
+/**
+ * Default-model picker as a dropdown over the models fetched from the
+ * added providers (ticked/enabled models first). Replaces the old chip row.
+ */
 @Composable
-private fun ModelChoiceRow(
+private fun ModelDropdown(
+    label: String,
     choices: List<Triple<AiProvider, String, String>>,
     providerId: String,
     modelId: String,
@@ -247,20 +268,68 @@ private fun ModelChoiceRow(
 ) {
     if (choices.isEmpty()) {
         Text(
-            "先添加提供商并勾选模型，才会出现可选项。",
+            "先添加提供商并获取/勾选模型，才会出现可选项。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
         )
         return
     }
+    var expanded by remember { mutableStateOf(false) }
+    val selected = choices.firstOrNull { it.first.id == providerId && it.second == modelId }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
-        choices.forEach { (provider, id, label) ->
-            FilterChip(
-                selected = provider.id == providerId && id == modelId,
-                onClick = { onSelect(provider.id, id) },
-                label = { Text(label) },
-            )
+        OutlinedButton(
+            onClick = { expanded = !expanded },
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        selected?.third ?: "请选择模型",
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Outlined.ArrowDropUp else Icons.Outlined.ArrowDropDown,
+                    contentDescription = null,
+                )
+            }
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth(0.9f),
+        ) {
+            choices.forEach { (provider, id, displayLabel) ->
+                val isCurrent = provider.id == providerId && id == modelId
+                DropdownMenuItem(
+                    text = { Text(displayLabel, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                    trailingIcon = {
+                        if (isCurrent) {
+                            Icon(
+                                imageVector = Icons.Outlined.Check,
+                                contentDescription = "当前默认模型",
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    },
+                    onClick = {
+                        onSelect(provider.id, id)
+                        expanded = false
+                    },
+                )
+            }
         }
     }
 }

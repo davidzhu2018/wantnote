@@ -1,17 +1,17 @@
 package com.davidzhu.wantnote.ui.home
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -20,13 +20,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -36,6 +37,46 @@ import com.davidzhu.wantnote.data.NoteWithDetails
 import com.davidzhu.wantnote.data.SearchText
 import com.davidzhu.wantnote.ui.components.NoteMediaThumb
 import com.davidzhu.wantnote.ui.components.TagChipRow
+
+/**
+ * Raised 3D card chrome shared by every home view (grid cards, waterfall,
+ * minimal list, timestamp list). Draws a real soft drop shadow below the
+ * card plus a hairline top edge, so each note card reads as lifted off the
+ * paper background instead of flat against it.
+ */
+private val NoteCardShape = RoundedCornerShape(16.dp)
+
+@Composable
+private fun Modifier.noteCardShadow(elevation: Int): Modifier {
+    return shadow(
+        elevation = elevation.dp,
+        shape = NoteCardShape,
+        clip = false,
+        ambientColor = Color.Black.copy(alpha = 0.28f),
+        spotColor = Color.Black.copy(alpha = 0.52f),
+    )
+}
+
+@Composable
+private fun NoteCard(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    elevation: Int = 8,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .noteCardShadow(elevation),
+        shape = NoteCardShape,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        tonalElevation = 2.dp,
+        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)),
+    ) {
+        Column(content = content)
+    }
+}
 
 @Composable
 fun NoteCollection(
@@ -68,56 +109,47 @@ private fun CardView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit,
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 24.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 28.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(items, key = { it.note.id }) { item ->
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenNote(item.note.id) },
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                tonalElevation = 0.dp,
-            ) {
-                Column {
-                    val media = item.firstMedia
-                    if (media != null) {
-                        NoteMediaThumb(
-                            media = media,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(4f / 3f),
-                            corner = 0.dp,
-                        )
-                    }
-                    Column(modifier = Modifier.padding(14.dp)) {
+            NoteCard(onClick = { onOpenNote(item.note.id) }, elevation = 8) {
+                val media = item.firstMedia
+                if (media != null) {
+                    NoteMediaThumb(
+                        media = media,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(4f / 3f),
+                        corner = 0.dp,
+                    )
+                }
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = SearchText.displayTitle(item.note),
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val preview = SearchText.preview(item.note)
+                    if (preview.isNotBlank()) {
                         Text(
-                            text = SearchText.displayTitle(item.note),
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        val preview = SearchText.preview(item.note)
-                        if (preview.isNotBlank()) {
-                            Text(
-                                text = preview,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 5,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(top = 6.dp),
-                            )
-                        }
-                        TagChipRow(tags = item.tags, modifier = Modifier.padding(top = 8.dp), max = 3)
-                        Text(
-                            text = Dates.formatTime(item.note.updatedAt),
-                            style = MaterialTheme.typography.labelSmall,
+                            text = preview,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 8.dp),
+                            maxLines = 5,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 6.dp),
                         )
                     }
+                    TagChipRow(tags = item.tags, modifier = Modifier.padding(top = 8.dp), max = 3)
+                    Text(
+                        text = Dates.formatTime(item.note.updatedAt),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
                 }
             }
         }
@@ -129,9 +161,9 @@ private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
     LazyVerticalStaggeredGrid(
         columns = StaggeredGridCells.Fixed(2),
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 24.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalItemSpacing = 10.dp,
+        contentPadding = PaddingValues(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 28.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalItemSpacing = 12.dp,
     ) {
         items(items, key = { it.note.id }) { item ->
             val preview = SearchText.preview(item.note)
@@ -141,51 +173,43 @@ private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
                 preview.length > 20 -> 3
                 else -> 2
             }
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenNote(item.note.id) },
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.surfaceVariant,
-            ) {
-                Column {
-                    val media = item.firstMedia
-                    if (media != null) {
-                        val ratio = if (media.blockType.name == "VIDEO") 16f / 9f else 1f
-                        NoteMediaThumb(
-                            media = media,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(ratio),
-                            corner = 0.dp,
-                        )
-                    }
-                    Column(modifier = Modifier.padding(14.dp)) {
+            NoteCard(onClick = { onOpenNote(item.note.id) }, elevation = 8) {
+                val media = item.firstMedia
+                if (media != null) {
+                    val ratio = if (media.blockType.name == "VIDEO") 16f / 9f else 1f
+                    NoteMediaThumb(
+                        media = media,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(ratio),
+                        corner = 0.dp,
+                    )
+                }
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = SearchText.displayTitle(item.note),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (preview.isNotBlank()) {
                         Text(
-                            text = SearchText.displayTitle(item.note),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        if (preview.isNotBlank()) {
-                            Text(
-                                text = preview,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = maxLines,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(top = 6.dp),
-                            )
-                        }
-                        TagChipRow(tags = item.tags, modifier = Modifier.padding(top = 8.dp), max = 3)
-                        Text(
-                            text = Dates.formatTime(item.note.updatedAt),
-                            style = MaterialTheme.typography.labelSmall,
+                            text = preview,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 8.dp),
+                            maxLines = maxLines,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 6.dp),
                         )
                     }
+                    TagChipRow(tags = item.tags, modifier = Modifier.padding(top = 8.dp), max = 3)
+                    Text(
+                        text = Dates.formatTime(item.note.updatedAt),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
                 }
             }
         }
@@ -196,43 +220,44 @@ private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
 private fun MinimalView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, modifier: Modifier = Modifier) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 24.dp),
+        contentPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         items(items, key = { it.note.id }) { item ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenNote(item.note.id) }
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val media = item.firstMedia
-                if (media != null) {
-                    NoteMediaThumb(
-                        media = media,
-                        modifier = Modifier
-                            .padding(end = 12.dp)
-                            .size(40.dp),
-                        corner = 6.dp,
-                    )
-                }
-                Column(modifier = Modifier.weight(1f)) {
+            NoteCard(onClick = { onOpenNote(item.note.id) }, elevation = 5) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val media = item.firstMedia
+                    if (media != null) {
+                        NoteMediaThumb(
+                            media = media,
+                            modifier = Modifier
+                                .padding(end = 12.dp)
+                                .size(40.dp),
+                            corner = 6.dp,
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = SearchText.displayTitle(item.note),
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        TagChipRow(tags = item.tags, max = 2)
+                    }
                     Text(
-                        text = SearchText.displayTitle(item.note),
-                        style = MaterialTheme.typography.bodyLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        text = Dates.formatTime(item.note.updatedAt),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 12.dp),
                     )
-                    TagChipRow(tags = item.tags, max = 2)
                 }
-                Text(
-                    text = Dates.formatTime(item.note.updatedAt),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 12.dp),
-                )
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
         }
     }
 }
@@ -243,7 +268,8 @@ private fun TimestampView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
     val keys = grouped.keys.toList()
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 24.dp),
+        contentPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         keys.forEach { key ->
             val dayNotes = grouped.getValue(key)
@@ -253,55 +279,55 @@ private fun TimestampView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
                     text = dayLabel,
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
                 )
             }
             items(dayNotes, key = { it.note.id }) { item ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpenNote(item.note.id) }
-                        .padding(horizontal = 20.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    val media = item.firstMedia
-                    if (media != null) {
-                        NoteMediaThumb(
-                            media = media,
-                            modifier = Modifier
-                                .padding(end = 12.dp, top = 4.dp)
-                                .size(56.dp),
-                            corner = 6.dp,
-                        )
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = Dates.formatTimestamp(item.note.updatedAt),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Text(
-                            text = SearchText.displayTitle(item.note),
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
-                        val preview = SearchText.preview(item.note)
-                        if (preview.isNotBlank()) {
-                            Text(
-                                text = preview,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
+                NoteCard(onClick = { onOpenNote(item.note.id) }, elevation = 5) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        val media = item.firstMedia
+                        if (media != null) {
+                            NoteMediaThumb(
+                                media = media,
+                                modifier = Modifier
+                                    .padding(end = 12.dp, top = 4.dp)
+                                    .size(56.dp),
+                                corner = 6.dp,
                             )
                         }
-                        TagChipRow(tags = item.tags, modifier = Modifier.padding(top = 6.dp), max = 3)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = Dates.formatTimestamp(item.note.updatedAt),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                text = SearchText.displayTitle(item.note),
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                            val preview = SearchText.preview(item.note)
+                            if (preview.isNotBlank()) {
+                                Text(
+                                    text = preview,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            TagChipRow(tags = item.tags, modifier = Modifier.padding(top = 6.dp), max = 3)
+                        }
                     }
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
             }
         }
     }
