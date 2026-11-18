@@ -280,15 +280,17 @@ object MarkdownCodec {
             if (image != null) {
                 val ref = image.groupValues[3]
                 if (isRemoteLink(ref)) {
-                    // Remote images are kept as rendered Markdown instead of
-                    // being dropped (there is no local file to resolve).
+                    // 0.10.0：远程图片保留为真正的 IMAGE 块（mediaPath 是
+                    // http(s) URL），编辑器与预览直接拉取渲染，不再退化为
+                    // 原始 Markdown 段落。导出时 render() 原样还原 `![alt](url)`。
                     blocks += MarkdownBlock(
-                        type = BlockType.PARAGRAPH,
-                        text = line.trim(),
+                        type = BlockType.IMAGE,
+                        text = image.groupValues[2].trim(),
                         indent = indentOf(image.groupValues[1]),
+                        mediaPath = ref,
                     )
                     index += 1
-                continue
+                    continue
                 }
                 val resolved = resolveMedia(ref)
                 if (resolved == null) {

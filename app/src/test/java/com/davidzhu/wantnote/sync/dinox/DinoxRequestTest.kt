@@ -216,4 +216,37 @@ class DinoxRequestTest {
             DinoxSyncService.stripLeadingTitle("会议纪要", "# 其他标题\n正文"),
         )
     }
+
+    @Test
+    fun resolveFollowBoxNameUsesFirstSelectedMatchNotUnselected() {
+        // 笔记同时属于未选中的「其他」和选中的 ABC：必须进 ABC，不能误建「其他」。
+        assertEquals(
+            "ABC",
+            DinoxSyncService.resolveFollowBoxName(
+                remoteBoxes = listOf("其他", "ABC"),
+                sourceBoxes = listOf("ABC", "DEF"),
+            ),
+        )
+    }
+
+    @Test
+    fun resolveFollowBoxNameFallsBackToSingleSource() {
+        assertEquals(
+            "ABC",
+            DinoxSyncService.resolveFollowBoxName(
+                remoteBoxes = emptyList(),
+                sourceBoxes = listOf("ABC"),
+            ),
+        )
+    }
+
+    @Test
+    fun resolveFollowBoxNameReturnsNullWhenMultipleSourcesDoNotIntersect() {
+        assertNull(
+            DinoxSyncService.resolveFollowBoxName(
+                remoteBoxes = listOf("其他"),
+                sourceBoxes = listOf("ABC", "DEF"),
+            ),
+        )
+    }
 }

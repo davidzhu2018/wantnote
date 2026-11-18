@@ -40,6 +40,7 @@ import androidx.compose.material.icons.outlined.FormatBold
 import androidx.compose.material.icons.outlined.FormatItalic
 import androidx.compose.material.icons.outlined.FormatListNumbered
 import androidx.compose.material.icons.outlined.FormatSize
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Highlight
 import androidx.compose.material.icons.outlined.HorizontalRule
 import androidx.compose.material.icons.outlined.Image
@@ -115,6 +116,7 @@ import com.davidzhu.wantnote.data.EditorMode
 import com.davidzhu.wantnote.data.Markup
 import com.davidzhu.wantnote.data.Note
 import com.davidzhu.wantnote.data.NoteBlock
+import com.davidzhu.wantnote.data.NoteBox
 import com.davidzhu.wantnote.data.NoteLinkCodec
 import com.davidzhu.wantnote.data.NoteMention
 import com.davidzhu.wantnote.data.NoteMentionParser
@@ -129,6 +131,7 @@ import com.davidzhu.wantnote.ui.LocalNotes
 import com.davidzhu.wantnote.ui.LocalSettings
 import com.davidzhu.wantnote.ui.components.MarkdownPreview
 import com.davidzhu.wantnote.ui.components.MarkdownVisual
+import com.davidzhu.wantnote.ui.components.NoteImage
 import com.davidzhu.wantnote.ui.components.TagChip
 import com.davidzhu.wantnote.ui.components.TagColorPicker
 import com.davidzhu.wantnote.ui.theme.LocalEditorFontFamily
@@ -167,6 +170,11 @@ fun EditorScreen(
     var focusedId by remember { mutableStateOf<String?>(null) }
     var noteTags by remember { mutableStateOf(listOf<Tag>()) }
     var showTagPicker by remember { mutableStateOf(false) }
+    // 0.10.0 卡片盒：本会话选择的卡片盒 ID（"" = 未分配）。手动选择后立即
+    // 落库；未手动选择时点「保存」由 AI 自动分配到一个已存在的卡片盒。
+    val boxes by repository.observeBoxes().collectAsStateWithLifecycle(initialValue = emptyList())
+    val noteRow by repository.observeById(noteId).collectAsStateWithLifecycle(initialValue = null)
+    var showBoxPicker by remember { mutableStateOf(false) }
     var showOverwriteDialog by remember { mutableStateOf(false) }
     var generating by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
@@ -650,6 +658,8 @@ fun EditorScreen(
             }
             noteTags = repository.getTagsForNote(noteId)
         }
+        // 0.10.0：打开选择器前确保默认卡片盒存在（首次使用兜底）。
+        repository.ensureDefaultBox()
         ready = true
     }
 
@@ -725,7 +735,8 @@ fun EditorScreen(
      * dialog's 「只补充空位」 choice: applies the suggestion ONLY to fields
      * that are still empty at apply time and reports what was filled.
      */
-    suspend fun runFillOnlyPass() {
+    suspend fun runFillOnlyPass(extraMessage: String? = null) {
+        val suffix = extraMessage?.takeIf { it.isNotBlank() }?.let { "；$it" } ?: ""
         val result = ai.suggestFillTitleTags(noteId)
         if (result.isSuccess) {
             val suggestion = result.getOrNull()
@@ -738,26 +749,46 @@ fun EditorScreen(
                 noteTags = repository.getTagsForNote(noteId)
                 snackbar.showSnackbar(
                     when {
-                        fill.titleFilled && fill.tagsFilled -> "已保存，AI 补充了标题和标签"
-                        fill.titleFilled -> "已保存，AI 补充了标题"
-                        fill.tagsFilled -> "已保存，AI 补充了标签"
-                        else -> "已保存"
+                        fill.titleFilled && fill.tagsFilled -> "已保存，AI 补充了标题和标签$suffix"
+                        fill.titleFilled -> "已保存，AI 补充了标题$suffix"
+                        fill.tagsFilled -> "已保存，AI 补充了标签$suffix"
+                        else -> "已保存$suffix"
                     },
                 )
             } else {
-                snackbar.showSnackbar("已保存")
+                snackbar.showSnackbar("已保存$suffix")
             }
         } else {
             val error = result.exceptionOrNull()
             val msg = error?.message.orEmpty()
             when {
                 msg.contains("请先在设置里") || msg.contains("还没有配置") || msg.contains("空笔记") -> {
-                    snackbar.showSnackbar("已保存")
+                    snackbar.showSnackbar("已保存$suffix")
                 }
-                msg.contains("已有内容") -> snackbar.showSnackbar("已保存")
-                else -> snackbar.showSnackbar("已保存。自动标题/标签未完成：${msg.ifBlank { "已保留当前内容" }}")
+                msg.contains("已有内容") -> snackbar.showSnackbar("已保存$suffix")
+                else -> snackbar.showSnackbar("已保存。自动标题/标签未完成：${msg.ifBlank { "已保留当前内容" }}$suffix")
             }
         }
+    }
+
+    /**
+     * 0.10.0 保存时的卡片盒自动分配：仅当这篇笔记还没有任何卡片盒时触发；
+     * AI 只能从「已存在的卡片盒」里选（见 [AiService.suggestExistingBox]），
+     * 绝不新建。AI 未配置或没有合适盒时静默跳过（不阻塞保存）。
+     */
+    suspend fun autoAssignBoxIfNeeded(): String? {
+        val stored = repository.getById(noteId) ?: return null
+        if (stored.boxId.isNotBlank()) return null
+        return ai.suggestExistingBox(noteId).fold(
+            onSuccess = { boxName ->
+                val box = repository.assignNoteToBoxByName(noteId, boxName)
+                if (box != null) "已自动分配到卡片盒「${box.name}」" else null
+            },
+            onFailure = { error ->
+                val msg = error.message.orEmpty()
+                if (msg.contains("没有找到合适的卡片盒")) "自动分配卡片盒未完成：$msg" else null
+            },
+        )
     }
 
     /** 保存 + fill-only AI pass (never overwrites manual content). */
@@ -766,11 +797,12 @@ fun EditorScreen(
         saving = true
         scope.launch {
             repository.saveMarkdown(noteId, titleState.value, currentContentMarkdown())
+            val boxMessage = autoAssignBoxIfNeeded()
             // AI runs as a fill-only pass: each field is filled ONLY if it is
             // still empty at apply time (checked inside one transaction), so
             // user-written titles/tags — including changes made while the AI
             // request was in flight — are never overwritten or clobbered.
-            runFillOnlyPass()
+            runFillOnlyPass(extraMessage = boxMessage)
             saving = false
         }
     }
@@ -1025,6 +1057,11 @@ fun EditorScreen(
                         }
                     },
                 )
+                // 0.10.0：卡片盒选择行（手动选择立即保存）。
+                EditorBoxBar(
+                    boxName = boxes.firstOrNull { it.id == noteRow?.boxId.orEmpty() }?.name,
+                    onPick = { showBoxPicker = true },
+                )
                 if (mode == EditorMode.SOURCE) {
                     // 源码模式：上半屏编辑 Markdown 源，下半屏实时预览
                     // （图片/多媒体/标题/列表/表格/缩进/引用/强调/任务/代码）。
@@ -1122,6 +1159,17 @@ fun EditorScreen(
                 }
             },
             onDismiss = { showTagPicker = false },
+        )
+    }
+
+    if (showBoxPicker) {
+        BoxPickerDialog(
+            boxes = boxes,
+            currentBoxId = noteRow?.boxId,
+            onPick = { boxId ->
+                scope.launch { repository.assignNoteToBox(noteId, boxId) }
+            },
+            onDismiss = { showBoxPicker = false },
         )
     }
 
@@ -1453,27 +1501,12 @@ private fun OutlineBlockRow(
 
 @Composable
 private fun LocalImageBlock(path: String, modifier: Modifier = Modifier) {
-    val media = LocalMedia.current
-    val bitmap by produceState<Bitmap?>(initialValue = null, path) {
-        value = withContext(Dispatchers.IO) { media.decodePreview(path) }
-    }
-    val image = bitmap
-    if (image != null) {
-        Image(
-            bitmap = image.asImageBitmap(),
-            contentDescription = "图片",
-            modifier = modifier
-                .padding(vertical = 6.dp)
-                .clip(RoundedCornerShape(8.dp)),
-            contentScale = ContentScale.FillWidth,
-        )
-    } else {
-        Text(
-            "图片无法显示",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(vertical = 8.dp),
-        )
-    }
+    // 0.10.0：本地附件与远程 http(s) 图片统一由 NoteImage 真实渲染。
+    NoteImage(
+        path = path,
+        modifier = modifier.padding(vertical = 6.dp),
+        fallbackLabel = "图片无法显示",
+    )
 }
 
 @Composable
@@ -1587,6 +1620,80 @@ private fun EditorTagBar(
             }
         }
     }
+}
+
+/** 0.10.0：编辑器里的卡片盒行——显示当前归属，点按打开选择对话框。 */
+@Composable
+private fun EditorBoxBar(
+    boxName: String?,
+    onPick: () -> Unit,
+) {
+    TextButton(onClick = onPick, modifier = Modifier.padding(bottom = 4.dp)) {
+        Icon(
+            Icons.Outlined.Folder,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            text = if (boxName.isNullOrBlank()) "卡片盒：未分配（保存时自动分配）" else "卡片盒：$boxName",
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.padding(start = 6.dp),
+        )
+    }
+}
+
+/**
+ * 0.10.0 卡片盒选择对话框：只列已存在的卡片盒（含默认「暂存箱」）。
+ * 点选即写库；不做任何新建——新建入口在设置 → 卡片盒管理。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BoxPickerDialog(
+    boxes: List<NoteBox>,
+    currentBoxId: String?,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择卡片盒") },
+        text = {
+            Column {
+                Text(
+                    "点选后立即保存到该卡片盒；不选择时，点「保存」会由 AI 自动分配到一个已存在的卡片盒。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                if (boxes.isEmpty()) {
+                    Text(
+                        "还没有卡片盒。可到 设置 → 卡片盒管理 创建。",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        boxes.forEach { box ->
+                            FilterChip(
+                                selected = box.id == currentBoxId,
+                                onClick = {
+                                    onPick(box.id)
+                                    onDismiss()
+                                },
+                                label = { Text(box.name) },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("完成") }
+        },
+    )
 }
 
 @Composable

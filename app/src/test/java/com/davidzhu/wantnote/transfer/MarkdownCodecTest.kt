@@ -76,7 +76,7 @@ class MarkdownCodecTest {
     }
 
     @Test
-    fun remoteImagesStayRenderedAsMarkdown() {
+    fun remoteImagesBecomeImageBlocks() {
         val parsed = MarkdownCodec.parseMarkdown(
             "# 远程图\n\n![截图](https://example.com/a.png)",
             "远程图",
@@ -84,10 +84,13 @@ class MarkdownCodecTest {
         )
         assertEquals(
             listOf(
-                MarkdownBlock(BlockType.PARAGRAPH, "![截图](https://example.com/a.png)"),
+                MarkdownBlock(BlockType.IMAGE, "截图", mediaPath = "https://example.com/a.png"),
             ),
             parsed.blocks,
         )
+        // 往返：IMAGE 块导出后仍是原始 `![alt](url)`。
+        val rendered = MarkdownCodec.render(title = "", blocks = parsed.blocks)
+        assertTrue(rendered.contains("![截图](https://example.com/a.png)"))
     }
 
     @Test

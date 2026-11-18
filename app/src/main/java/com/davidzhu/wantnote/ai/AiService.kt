@@ -262,6 +262,50 @@ class AiService(
         return generateTitleAndTags(note.title, body)
     }
 
+    /**
+     * 0.10.0 卡片盒自动分配：让模型从「已存在的卡片盒」里挑一个最合适的。
+     * 只能返回候选名单里的名字（服务端校验），绝不在自动分配路径里新建
+     * 卡片盒；模型认为没有合适的盒子时返回失败，由调用方提示用户手动选择。
+     */
+    suspend fun suggestExistingBox(noteId: String): Result<String> {
+        val note = notes.getById(noteId) ?: return Result.failure(AiException("笔记不存在"))
+        val body = notes.loadContent(note)
+        if (body.isBlank() && note.title.isBlank()) {
+            return Result.failure(AiException("空笔记不自动分配卡片盒"))
+        }
+        val boxNames = notes.getAllBoxes().map { it.name }
+        if (boxNames.isEmpty()) {
+            return Result.failure(AiException("还没有任何卡片盒，请先在设置里创建"))
+        }
+        val settings = settingsRepository.get()
+        val providerId = settings.aiTitleTagProviderId
+        val modelId = settings.aiTitleTagModelId
+        if (providerId.isBlank() || modelId.isBlank()) {
+            return Result.failure(AiException("请先在设置里配置 AI，并选择用于生成标题和标签的模型"))
+        }
+        val system = """
+            你是笔记助手。给你一篇笔记和一组「已存在的卡片盒」名称。
+            从列表里选出最适合归档这篇笔记的一个卡片盒名称，必须逐字使用列表里的名称。
+            如果没有任何一个合适的，返回空字符串。
+            只输出 JSON 对象：{"box":"..."}
+            不要使用 Markdown 代码块，不要输出其他说明。
+        """.trimIndent()
+        val user = buildString {
+            append("卡片盒列表：")
+            append(boxNames.joinToString("、"))
+            append('\n')
+            if (note.title.isNotBlank()) {
+                append("标题：")
+                append(note.title.take(80))
+                append('\n')
+            }
+            append(body.take(8_000))
+        }
+        return complete(providerId, modelId, system, user).mapCatching { raw ->
+            parseBoxChoice(raw, boxNames) ?: throw AiException("AI 没有找到合适的卡片盒，可手动选择")
+        }
+    }
+
     private suspend fun maybeSetDefaultModels(providerId: String, modelId: String) {
         settingsRepository.update { settings ->
             var next = settings
@@ -325,6 +369,21 @@ class AiService(
                 }
             }
             return TitleTagSuggestion(title = title, tags = tags.distinct().take(5))
+        }
+
+        /**
+         * 卡片盒自动分配的结果解析：只接受与候选名单逐字一致（trim 后）的
+         * 名字；模型编造的名字、空字符串都返回 null。
+         */
+        fun parseBoxChoice(raw: String, validNames: List<String>): String? {
+            val jsonText = extractJsonObject(raw)
+            val box = try {
+                JSONObject(jsonText).optString("box").trim()
+            } catch (_: Exception) {
+                return null
+            }
+            if (box.isEmpty()) return null
+            return validNames.firstOrNull { it.trim() == box }
         }
 
         private fun extractJsonObject(raw: String): String {

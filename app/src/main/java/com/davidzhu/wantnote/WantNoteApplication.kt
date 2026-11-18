@@ -76,6 +76,10 @@ class WantNoteApplication : Application() {
             settingsRepository.ensureDefault()
         }
         applicationScope.launch {
+            // 0.10.0：确保默认卡片盒「暂存箱」存在（幂等）。
+            runCatching { repository.ensureDefaultBox() }
+        }
+        applicationScope.launch {
             // 已授权时，把私有目录里旧的附件/字体文件补拷到 Documents/WantNote。
             AppStorage.prepare(this@WantNoteApplication)
         }

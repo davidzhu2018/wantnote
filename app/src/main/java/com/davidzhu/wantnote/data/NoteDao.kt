@@ -20,6 +20,8 @@ data class NoteWithDetails(
     @Embedded val note: Note,
     @Relation(parentColumn = "id", entityColumn = "noteId")
     val blocks: List<NoteBlock>,
+    @Relation(parentColumn = "boxId", entityColumn = "id")
+    val noteBox: NoteBox?,
     @Relation(
         parentColumn = "id",
         entityColumn = "id",
@@ -83,7 +85,7 @@ interface NoteDao {
     @Query(
         """
         UPDATE notes SET title = :title, body = :body, mdPath = :mdPath,
-            createdAt = :createdAt, updatedAt = :updatedAt
+            createdAt = :createdAt, updatedAt = :updatedAt, boxId = :boxId
         WHERE id = :id
         """,
     )
@@ -94,12 +96,13 @@ interface NoteDao {
         mdPath: String,
         createdAt: Long,
         updatedAt: Long,
+        boxId: String,
     )
 
     @Transaction
     suspend fun upsert(note: Note) {
         if (insertIfAbsent(note) == -1L) {
-            updateColumns(note.id, note.title, note.body, note.mdPath, note.createdAt, note.updatedAt)
+            updateColumns(note.id, note.title, note.body, note.mdPath, note.createdAt, note.updatedAt, note.boxId)
         }
     }
 
@@ -107,10 +110,18 @@ interface NoteDao {
     suspend fun upsertAll(notes: List<Note>) {
         notes.forEach { note ->
             if (insertIfAbsent(note) == -1L) {
-                updateColumns(note.id, note.title, note.body, note.mdPath, note.createdAt, note.updatedAt)
+                updateColumns(note.id, note.title, note.body, note.mdPath, note.createdAt, note.updatedAt, note.boxId)
             }
         }
     }
+
+    /** 0.10.0：把一篇笔记分配到卡片盒（boxId 传空串 = 取消分配）。 */
+    @Query("UPDATE notes SET boxId = :boxId WHERE id = :noteId")
+    suspend fun assignBox(noteId: String, boxId: String)
+
+    /** 0.10.0：删除卡片盒时的安全迁移——整盒笔记移入目标盒。 */
+    @Query("UPDATE notes SET boxId = :toBoxId WHERE boxId = :fromBoxId")
+    suspend fun moveNotes(fromBoxId: String, toBoxId: String)
 
     @Query("DELETE FROM notes WHERE id = :id")
     suspend fun delete(id: String)

@@ -271,27 +271,8 @@ private fun PreviewListItem(
 
 @Composable
 private fun PreviewImage(path: String) {
-    val media = LocalMedia.current
-    val bitmap by produceState<Bitmap?>(initialValue = null, path) {
-        value = withContext(Dispatchers.IO) { media.decodePreview(path) }
-    }
-    val image = bitmap
-    if (image != null) {
-        Image(
-            bitmap = image.asImageBitmap(),
-            contentDescription = "图片",
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp)),
-            contentScale = ContentScale.FillWidth,
-        )
-    } else {
-        Text(
-            "图片无法显示（$path）",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+    // 0.10.0：本地附件与远程 http(s) 图片统一由 NoteImage 真实渲染。
+    NoteImage(path = path, fallbackLabel = "图片无法显示")
 }
 
 @Composable

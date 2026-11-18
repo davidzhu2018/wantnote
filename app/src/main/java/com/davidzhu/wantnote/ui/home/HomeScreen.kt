@@ -3,8 +3,6 @@
 package com.davidzhu.wantnote.ui.home
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,13 +10,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -27,23 +29,35 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.davidzhu.wantnote.data.AppSettings
 import com.davidzhu.wantnote.data.HomeViewMode
+import com.davidzhu.wantnote.data.NoteBox
+import com.davidzhu.wantnote.data.NoteRepository
 import com.davidzhu.wantnote.data.NoteWithDetails
 import com.davidzhu.wantnote.data.SearchText
+import com.davidzhu.wantnote.data.Tag
 import com.davidzhu.wantnote.ui.LocalAi
 import com.davidzhu.wantnote.ui.LocalDinox
 import com.davidzhu.wantnote.ui.LocalNotes
 import com.davidzhu.wantnote.ui.LocalSettings
 import kotlinx.coroutines.launch
+
+/** 主页筛选维度：全部 / 未分配 / 按卡片盒 / 按标签（0.10.0 单选）。 */
+private sealed interface HomeFilter {
+    data object All : HomeFilter
+    data object Unassigned : HomeFilter
+    data class ByBox(val boxId: String) : HomeFilter
+    data class ByTag(val tagId: String) : HomeFilter
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,12 +73,27 @@ fun HomeScreen(
     val items by repository.observeAllWithDetails().collectAsStateWithLifecycle(initialValue = emptyList())
     val allLinks by repository.observeAllLinks().collectAsStateWithLifecycle(initialValue = emptyList())
     val settings by settingsRepo.observe().collectAsStateWithLifecycle(initialValue = AppSettings.DEFAULT)
+    val boxes by repository.observeBoxes().collectAsStateWithLifecycle(initialValue = emptyList())
+    val allTags by repository.observeAllTags().collectAsStateWithLifecycle(initialValue = emptyList())
     val viewMode = settings.homeViewMode
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var menuNote by remember { mutableStateOf<NoteWithDetails?>(null) }
     var deleteTarget by remember { mutableStateOf<NoteWithDetails?>(null) }
+    var sendTarget by remember { mutableStateOf<NoteWithDetails?>(null) }
     var busy by remember { mutableStateOf(false) }
+    // 0.10.0：卡片盒 / 标签筛选（会话级，不持久化）。
+    var filter by remember { mutableStateOf<HomeFilter>(HomeFilter.All) }
+
+    val filtered = remember(items, filter) {
+        val current = filter
+        when (current) {
+            HomeFilter.All -> items
+            HomeFilter.Unassigned -> NoteRepository.filterNotes(items, boxId = "")
+            is HomeFilter.ByBox -> NoteRepository.filterNotes(items, boxId = current.boxId)
+            is HomeFilter.ByTag -> NoteRepository.filterNotes(items, tagIds = setOf(current.tagId))
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -88,17 +117,37 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            ViewModeRow(
-                selected = viewMode,
-                onSelect = { mode ->
-                    scope.launch {
-                        settingsRepo.update { it.copy(homeView = mode.name) }
-                    }
-                },
-            )
-            if (items.isEmpty()) {
+            // 0.10.0：顶部展示控件改为两个下拉框（视图模式 + 卡片盒/标签筛选），
+            // 不再是平铺的选项行。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ViewModeDropdown(
+                    selected = viewMode,
+                    onSelect = { mode ->
+                        scope.launch {
+                            settingsRepo.update { it.copy(homeView = mode.name) }
+                        }
+                    },
+                )
+                FilterDropdown(
+                    filter = filter,
+                    boxes = boxes,
+                    tags = allTags,
+                    onSelect = { filter = it },
+                )
+            }
+            if (filtered.isEmpty()) {
                 Text(
-                    text = "还没有笔记。点中间的加号就可以开始写，不必先起标题。",
+                    text = if (items.isEmpty()) {
+                        "还没有笔记。点中间的加号就可以开始写，不必先起标题。"
+                    } else {
+                        "当前筛选条件下没有笔记。"
+                    },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
                         .padding(horizontal = 24.dp, vertical = 24.dp)
@@ -106,7 +155,7 @@ fun HomeScreen(
                 )
             } else {
                 NoteCollection(
-                    items = items,
+                    items = filtered,
                     links = allLinks,
                     viewMode = viewMode,
                     onOpenNote = onOpenNote,
@@ -158,6 +207,31 @@ fun HomeScreen(
         }
     }
 
+    /**
+     * 0.10.0 长按「自动分配卡片盒」：AI 从已存在的卡片盒里挑一个最合适的，
+     * 绝不新建盒子。没有盒子或 AI 未配置时给出可操作的提示。
+     */
+    fun autoAssignBox(target: NoteWithDetails) {
+        val id = target.note.id
+        menuNote = null
+        busy = true
+        scope.launch {
+            val message = ai.suggestExistingBox(id).fold(
+                onSuccess = { boxName ->
+                    repository.assignNoteToBoxByName(id, boxName)?.let { box ->
+                        "已分配到卡片盒「${box.name}」"
+                    } ?: "自动分配失败，请重试或手动选择"
+                },
+                onFailure = { error ->
+                    error.message?.take(160)?.ifBlank { null }
+                        ?: "AI 未配置或暂时不可用，请到「设置 → AI」检查"
+                },
+            )
+            busy = false
+            snackbar.showSnackbar(message)
+        }
+    }
+
     menuNote?.let { target ->
         AlertDialog(
             onDismissRequest = { if (!busy) menuNote = null },
@@ -174,20 +248,12 @@ fun HomeScreen(
                     HomeMenuAction("生成标签", enabled = !busy) {
                         generateField(target, wantTitle = false)
                     }
+                    HomeMenuAction("自动分配卡片盒", enabled = !busy) {
+                        autoAssignBox(target)
+                    }
                     HomeMenuAction("发送到Dinox", enabled = !busy) {
-                        val id = target.note.id
                         menuNote = null
-                        busy = true
-                        scope.launch {
-                            val result = dinox.sendNote(id)
-                            busy = false
-                            result.fold(
-                                onSuccess = { snackbar.showSnackbar(it) },
-                                onFailure = { error ->
-                                    snackbar.showSnackbar(error.message ?: "发送失败，请先在数据管理里配置 Dinox")
-                                },
-                            )
-                        }
+                        sendTarget = target
                     }
                     HomeMenuAction("删除笔记", enabled = !busy) {
                         menuNote = null
@@ -198,6 +264,28 @@ fun HomeScreen(
             confirmButton = {
                 TextButton(onClick = { menuNote = null }, enabled = !busy) { Text("取消") }
             },
+        )
+    }
+
+    sendTarget?.let { target ->
+        SendToDinoxDialog(
+            noteTitle = SearchText.displayTitle(target.note),
+            onSend = { boxName ->
+                val id = target.note.id
+                sendTarget = null
+                busy = true
+                scope.launch {
+                    val result = dinox.sendNote(id, boxName)
+                    busy = false
+                    result.fold(
+                        onSuccess = { snackbar.showSnackbar(it) },
+                        onFailure = { error ->
+                            snackbar.showSnackbar(error.message ?: "发送失败，请先在数据管理里配置 Dinox")
+                        },
+                    )
+                }
+            },
+            onDismiss = { if (!busy) sendTarget = null },
         )
     }
 
@@ -242,24 +330,202 @@ private fun HomeMenuAction(
     }
 }
 
+/** 下拉触发按钮：标签 + 右侧小箭头，统一样式。 */
 @Composable
-private fun ViewModeRow(
+private fun DropdownTrigger(label: String, onClick: () -> Unit) {
+    TextButton(onClick = onClick) {
+        Text(label, style = MaterialTheme.typography.labelLarge)
+        Icon(
+            Icons.Outlined.ArrowDropDown,
+            contentDescription = null,
+            modifier = Modifier.padding(start = 2.dp),
+        )
+    }
+}
+
+/** 0.10.0：视图模式下拉框（卡片/瀑布流/极简/时间戳）。 */
+@Composable
+private fun ViewModeDropdown(
     selected: HomeViewMode,
     onSelect: (HomeViewMode) -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        HomeViewMode.entries.forEach { mode ->
-            FilterChip(
-                selected = mode == selected,
-                onClick = { onSelect(mode) },
-                label = { Text(mode.label) },
-            )
+    var expanded by remember { mutableStateOf(false) }
+    androidx.compose.foundation.layout.Box {
+        DropdownTrigger(label = selected.label) { expanded = true }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            HomeViewMode.entries.forEach { mode ->
+                DropdownMenuItem(
+                    text = { Text(mode.label) },
+                    onClick = {
+                        expanded = false
+                        onSelect(mode)
+                    },
+                )
+            }
         }
     }
+}
+
+/** 0.10.0：筛选下拉框——按卡片盒或标签过滤主页卡片。 */
+@Composable
+private fun FilterDropdown(
+    filter: HomeFilter,
+    boxes: List<NoteBox>,
+    tags: List<Tag>,
+    onSelect: (HomeFilter) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val label = when (filter) {
+        HomeFilter.All -> "全部笔记"
+        HomeFilter.Unassigned -> "未分配"
+        is HomeFilter.ByBox -> "卡片盒：${boxes.firstOrNull { it.id == filter.boxId }?.name ?: "…"}"
+        is HomeFilter.ByTag -> "#${tags.firstOrNull { it.id == filter.tagId }?.path ?: "…"}"
+    }
+    androidx.compose.foundation.layout.Box {
+        DropdownTrigger(label = label) { expanded = true }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("全部笔记") },
+                onClick = {
+                    expanded = false
+                    onSelect(HomeFilter.All)
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("未分配（无卡片盒）") },
+                onClick = {
+                    expanded = false
+                    onSelect(HomeFilter.Unassigned)
+                },
+            )
+            if (boxes.isNotEmpty()) {
+                boxes.forEach { box ->
+                    DropdownMenuItem(
+                        text = { Text("卡片盒：${box.name}") },
+                        onClick = {
+                            expanded = false
+                            onSelect(HomeFilter.ByBox(box.id))
+                        },
+                    )
+                }
+            }
+            if (tags.isNotEmpty()) {
+                tags.forEach { tag ->
+                    DropdownMenuItem(
+                        text = { Text("#${tag.path}") },
+                        onClick = {
+                            expanded = false
+                            onSelect(HomeFilter.ByTag(tag.id))
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 0.10.0「发送到Dinox」对话框：打开时实时拉取 Dinox 最新的卡片盒列表
+ * （M16，不用缓存），用户单选目标卡片盒后才能点发送。
+ */
+@Composable
+private fun SendToDinoxDialog(
+    noteTitle: String,
+    onSend: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val dinox = LocalDinox.current
+    var boxNames by remember { mutableStateOf<List<String>?>(null) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var selected by remember { mutableStateOf<String?>(null) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var sending by remember { mutableStateOf(false) }
+    var loadAttempt by remember { mutableStateOf(0) }
+
+    // M16：每次打开对话框都现拉一次 Dinox 卡片盒（Dinox 端可能刚增删过）。
+    androidx.compose.runtime.LaunchedEffect(loadAttempt) {
+        loadError = null
+        dinox.fetchRemoteBoxes().fold(
+            onSuccess = { boxNames = it },
+            onFailure = { error -> loadError = error.message ?: "无法获取 Dinox 卡片盒" },
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("发送到Dinox", maxLines = 1) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "「$noteTitle」将按 Markdown 发送到 Dinox。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                when {
+                    loadError != null -> {
+                        Text(loadError.orEmpty(), color = MaterialTheme.colorScheme.error)
+                        OutlinedButton(onClick = { loadAttempt += 1 }) {
+                            Text("重试")
+                        }
+                    }
+                    boxNames == null -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.padding(end = 10.dp))
+                            Text("正在获取 Dinox 卡片盒…")
+                        }
+                    }
+                    else -> {
+                        val names = boxNames.orEmpty()
+                        androidx.compose.foundation.layout.Box {
+                            OutlinedButton(onClick = { menuOpen = true }, modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    selected?.let { "卡片盒：$it" } ?: "选择目标卡片盒",
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Icon(Icons.Outlined.ArrowDropDown, contentDescription = null)
+                            }
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("不放入卡片盒") },
+                                    onClick = {
+                                        selected = ""
+                                        menuOpen = false
+                                    },
+                                )
+                                names.forEach { name ->
+                                    DropdownMenuItem(
+                                        text = { Text(name) },
+                                        onClick = {
+                                            selected = name
+                                            menuOpen = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        if (names.isEmpty()) {
+                            Text(
+                                "Dinox 里还没有卡片盒；可直接发送（不放入卡片盒）。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val chosen = selected ?: return@TextButton
+                    sending = true
+                    onSend(chosen.takeIf { it.isNotBlank() })
+                },
+                enabled = !sending && boxNames != null && selected != null,
+            ) { Text(if (sending) "发送中…" else "发送") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !sending) { Text("取消") }
+        },
+    )
 }

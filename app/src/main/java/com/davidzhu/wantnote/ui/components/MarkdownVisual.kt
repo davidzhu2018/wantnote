@@ -1,12 +1,31 @@
 package com.davidzhu.wantnote.ui.components
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -16,8 +35,14 @@ import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.davidzhu.wantnote.data.NoteLinkCodec
+import com.davidzhu.wantnote.ui.LocalMedia
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Inline Markdown rendering shared by the editor and the home previews.
@@ -184,6 +209,96 @@ object MarkdownVisual {
         )
     }
 
+    /**
+     * 只读面（预览、卡片、搜索）的富渲染：与 [render] 同一套行内语法，但
+     * 额外提供 0.10.0 的两项真实渲染——
+     * - http(s) 超链接用 [LinkAnnotation] 输出，`Text` 会自动响应点击（用
+     *   系统 UriHandler 打开浏览器），不再只是带下划线的样式文本；
+     * - 行内 `![alt](url)` 图片输出为 inlineContent 占位，由调用方把
+     *   [RichRendered.inlineImages] 里的 URL 渲染成真实位图。
+     */
+    fun renderRich(
+        source: String,
+        highlightColor: Color,
+        linkTitles: Map<String, String> = emptyMap(),
+        linkColor: Color = Color.Unspecified,
+    ): RichRendered {
+        if (source.isEmpty()) return RichRendered(AnnotatedString(""), emptyMap())
+        val inlineImages = LinkedHashMap<String, String>()
+        var imageIndex = 0
+        val text = buildAnnotatedString {
+            var cursor = 0
+            for (match in token.findAll(source)) {
+                if (match.range.first > cursor) {
+                    append(source.substring(cursor, match.range.first))
+                }
+                val range = match.range
+                val noteId = match.groups[1]?.value
+                val imageAlt = match.groups[2]?.value
+                val linkLabel = match.groups[4]?.value
+                val code = match.groups[6]?.value
+                val bold = match.groups[7]?.value
+                val italic = match.groups[8]?.value
+                val highlight = match.groups[9]?.value
+                val strike = match.groups[10]?.value
+                when {
+                    noteId != null -> {
+                        val title = linkTitles[noteId]?.takeIf { it.isNotBlank() } ?: "已删除的笔记"
+                        withStyle(SpanStyle(color = linkColor, fontWeight = FontWeight.Medium)) {
+                            append("→ $title")
+                        }
+                    }
+                    imageAlt != null -> {
+                        val url = match.groups[3]?.value.orEmpty().trim()
+                        if (url.isNotEmpty()) {
+                            val id = "img${imageIndex++}"
+                            inlineImages[id] = url
+                            appendInlineContent(id, if (imageAlt.isBlank()) "[图片]" else "[图片] $imageAlt")
+                        } else {
+                            append(source.substring(range))
+                        }
+                    }
+                    linkLabel != null -> {
+                        val url = match.groups[5]?.value.orEmpty().trim()
+                        val label = linkLabel.ifBlank { url }
+                        if (url.startsWith("http://") || url.startsWith("https://")) {
+                            withLink(
+                                LinkAnnotation.Url(
+                                    url,
+                                    TextLinkStyles(
+                                        style = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline),
+                                    ),
+                                ),
+                            ) {
+                                append(label)
+                            }
+                        } else {
+                            withStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)) {
+                                append(label)
+                            }
+                        }
+                    }
+                    code != null -> withStyle(
+                        SpanStyle(fontFamily = FontFamily.Monospace, background = highlightColor.copy(alpha = 0.25f)),
+                    ) { append(code) }
+                    bold != null -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(bold) }
+                    italic != null -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(italic) }
+                    highlight != null -> withStyle(SpanStyle(background = highlightColor)) { append(highlight) }
+                    strike != null -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { append(strike) }
+                }
+                cursor = range.last + 1
+            }
+            if (cursor < source.length) append(source.substring(cursor))
+        }
+        return RichRendered(text, inlineImages)
+    }
+
+    data class RichRendered(
+        val text: AnnotatedString,
+        /** inlineContent id → 图片 URL（本地附件路径或 http(s) URL）。 */
+        val inlineImages: Map<String, String>,
+    )
+
     private fun emittedLength(segments: List<Segment>): Int = segments.sumOf { it.visible.length }
 
     private data class Segment(
@@ -206,17 +321,62 @@ fun MarkdownText(
 ) {
     val highlight = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
     val linkColor = MaterialTheme.colorScheme.primary
-    val annotated = remember(text, linkTitles, highlight, linkColor) {
-        MarkdownVisual.render(text, highlight, linkTitles, linkColor).text
+    // 0.10.0：只读渲染走 renderRich——超链接可点击、行内图片真实显示。
+    val rendered = remember(text, linkTitles, highlight, linkColor) {
+        MarkdownVisual.renderRich(text, highlight, linkTitles, linkColor)
+    }
+    val inline = remember(rendered.inlineImages) {
+        rendered.inlineImages.mapValues { (_, url) ->
+            InlineTextContent(
+                Placeholder(width = 64.sp, height = 40.sp, PlaceholderVerticalAlign.TextCenter),
+            ) {
+                InlineNoteImage(url)
+            }
+        }
     }
     Text(
-        text = annotated,
+        text = rendered.text,
         modifier = modifier,
         style = style,
         color = color,
         maxLines = maxLines,
         overflow = overflow,
+        inlineContent = inline,
     )
+}
+
+/** 行内小图：本地附件或 http(s) URL，加载失败显示占位小块。 */
+@Composable
+private fun InlineNoteImage(url: String) {
+    val media = LocalMedia.current
+    val bitmap by produceState<android.graphics.Bitmap?>(initialValue = null, url) {
+        value = withContext(Dispatchers.IO) { media.loadPreview(url, maxSide = 640) }
+    }
+    val image = bitmap
+    if (image != null) {
+        Image(
+            bitmap = image.asImageBitmap(),
+            contentDescription = "图片",
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(6.dp)),
+            contentScale = ContentScale.Crop,
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(6.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "图片",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
 
 /** Render a single line that may still contain note markers (for exports). */

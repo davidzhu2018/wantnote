@@ -111,7 +111,77 @@ class MediaStorage(private val context: Context) {
         return BitmapFactory.decodeFile(file.absolutePath, opts)
     }
 
+    /** 0.10.0：Markdown 里的远程 http(s) 图片引用。 */
+    fun isRemote(path: String): Boolean {
+        val lower = path.trim().lowercase()
+        return lower.startsWith("http://") || lower.startsWith("https://")
+    }
+
+    private val remoteHttp = okhttp3.OkHttpClient.Builder()
+        .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+
+    private val remoteFailures = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val remoteFailureBackoffMs = 60_000L
+
+    private fun decodeRemoteBytes(bytes: ByteArray, maxSide: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val longest = maxOf(bounds.outWidth, bounds.outHeight).coerceAtLeast(1)
+        val sample = Integer.highestOneBit((longest / maxSide).coerceAtLeast(1))
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.let { scaleDown(it, maxSide) }
+    }
+
+    /**
+     * 0.10.0：图片统一入口——本地附件走 [decodePreview]，http(s) URL 走
+     * OkHttp 拉取（限 10MB，失败 60 秒内不再重试同一 URL，避免预览反复
+     * 打网络）。带 LruCache；必须在工作线程调用。
+     */
+    fun loadPreview(path: String, maxSide: Int = 1080): Bitmap? {
+        if (isRemote(path)) {
+            val url = path.trim()
+            previewCache.get(url)?.let { return it }
+            remoteFailures[url]?.let { failedAt ->
+                if (System.currentTimeMillis() - failedAt < remoteFailureBackoffMs) return null
+                remoteFailures.remove(url)
+            }
+            return try {
+                remoteHttp.newCall(
+                    okhttp3.Request.Builder().url(url).build(),
+                ).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        remoteFailures[url] = System.currentTimeMillis()
+                        return null
+                    }
+                    val bytes = response.body?.bytes()
+                    if (bytes == null || bytes.size > 10 * 1024 * 1024) {
+                        remoteFailures[url] = System.currentTimeMillis()
+                        return null
+                    }
+                    val bitmap = decodeRemoteBytes(bytes, maxSide)
+                    if (bitmap != null) {
+                        previewCache.put(url, bitmap)
+                    } else {
+                        remoteFailures[url] = System.currentTimeMillis()
+                    }
+                    bitmap
+                }
+            } catch (_: Exception) {
+                remoteFailures[url] = System.currentTimeMillis()
+                null
+            }
+        }
+        return decodePreview(path, maxSide)
+    }
+
     fun decodeThumbnail(relativePath: String, isVideo: Boolean, maxSide: Int = 360): Bitmap? {
+        if (isRemote(relativePath)) {
+            // 远程图片没有视频帧概念；缩略图 = loadPreview 缩到 maxSide。
+            return if (!isVideo) loadPreview(relativePath, maxSide) else null
+        }
         val key = "$relativePath|$isVideo|$maxSide"
         previewCache.get(key)?.let { return it }
         val decoded = if (isVideo) {

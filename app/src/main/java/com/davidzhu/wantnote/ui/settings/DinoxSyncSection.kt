@@ -1,6 +1,7 @@
 package com.davidzhu.wantnote.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,6 +13,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -27,6 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -35,8 +42,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.davidzhu.wantnote.data.AppSettings
 import com.davidzhu.wantnote.data.Dates
+import com.davidzhu.wantnote.data.NoteBox
 import com.davidzhu.wantnote.sync.dinox.DinoxAutoSyncWorker
+import com.davidzhu.wantnote.sync.dinox.DinoxSyncService
 import com.davidzhu.wantnote.ui.LocalDinox
+import com.davidzhu.wantnote.ui.LocalNotes
 import com.davidzhu.wantnote.ui.LocalSettings
 import kotlinx.coroutines.launch
 
@@ -56,14 +66,18 @@ private val AutoSyncOptions = listOf(
  * - Token 粘贴后先「测试连接」，只有测试成功才加密落盘（Android
  *   Keystore），并生成可随 WebDAV/S3 设置同步的密文。
  * - 支持全量 / 增量（按 updateTime 游标）拉取、按卡片盒过滤、定时自动同步。
+ * - 0.10.0 导入：多选 Dinox 卡片盒作来源，沿用 Dinox 盒名或指定一个本地
+ *   目标卡片盒；每次打开来源下拉都实时拉取 Dinox 最新的卡片盒列表（M16）。
  * - 发送：主页长按笔记卡片 →「发送到Dinox」。
  *
  * 扩展点：后续第三方应用按同样的「Token 测试→保存 / 拉取 / 推送」形状
  * 在本 Tab 增加独立 Section + 各自的 Service，不要复用/污染 Dinox 状态。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EcosystemTab(snackbar: SnackbarHostState) {
     val settingsRepo = LocalSettings.current
+    val notesRepo = LocalNotes.current
     val dinox = LocalDinox.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -74,6 +88,38 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
     var lastError by remember { mutableStateOf<String?>(null) }
     var boxInput by remember(settings.dinoxSyncBox) { mutableStateOf(settings.dinoxSyncBox) }
     var hasToken by remember { mutableStateOf(false) }
+
+    // ---- 0.10.0 导入状态 ----
+    val localBoxes by notesRepo.observeBoxes().collectAsStateWithLifecycle(initialValue = emptyList())
+    var remoteBoxes by remember { mutableStateOf<List<String>?>(null) }
+    var refreshingBoxes by remember { mutableStateOf(false) }
+    var boxesError by remember { mutableStateOf<String?>(null) }
+    var sourceMenuOpen by remember { mutableStateOf(false) }
+    var selectedSources by remember { mutableStateOf<List<String>>(emptyList()) }
+    var followDinoxNames by remember { mutableStateOf(true) }
+    var targetMenuOpen by remember { mutableStateOf(false) }
+    var targetBoxId by remember { mutableStateOf<String?>(null) }
+
+    /**
+     * M16：Dinox 端卡片盒随时可能增删，所以每次打开来源下拉/开始导入前
+     * 都现拉一次（fetchRemoteBoxes 是全新量 listNotes），绝不使用缓存。
+     */
+    fun refreshRemoteBoxes() {
+        if (refreshingBoxes) return
+        refreshingBoxes = true
+        boxesError = null
+        scope.launch {
+            dinox.fetchRemoteBoxes().fold(
+                onSuccess = { names ->
+                    remoteBoxes = names
+                    // 刷新后丢掉已不存在的勾选，避免拿着过期来源去导入。
+                    selectedSources = selectedSources.filter { it in names }
+                },
+                onFailure = { error -> boxesError = error.message ?: "无法获取 Dinox 卡片盒" },
+            )
+            refreshingBoxes = false
+        }
+    }
 
     LaunchedEffect(Unit) {
         dinox.importSealedToken()
@@ -166,6 +212,151 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
 
+        SectionTitle("从 Dinox 卡片盒导入本机")
+        Text(
+            "选择一个或多个 Dinox 卡片盒作为来源；每次打开下拉都会实时拉取 Dinox 最新的卡片盒。" +
+                "目标可以是同名本地卡片盒（沿用 Dinox 卡片盒名字，没有就自动创建），或指定某一个本地卡片盒。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        // 来源：Dinox 卡片盒多选下拉（打开即刷新，M16）。
+        Box {
+            OutlinedButton(
+                onClick = {
+                    sourceMenuOpen = true
+                    refreshRemoteBoxes()
+                },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    if (selectedSources.isEmpty()) "选择来源卡片盒（可多选）" else "已选 ${selectedSources.size} 个来源卡片盒",
+                    modifier = Modifier.weight(1f),
+                )
+                Text("▾", style = MaterialTheme.typography.labelLarge)
+            }
+            DropdownMenu(expanded = sourceMenuOpen, onDismissRequest = { sourceMenuOpen = false }) {
+                when {
+                    refreshingBoxes -> DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.padding(end = 10.dp).height(16.dp),
+                                )
+                                Text("正在获取 Dinox 卡片盒…")
+                            }
+                        },
+                        onClick = {},
+                    )
+                    boxesError != null -> DropdownMenuItem(
+                        text = { Text(boxesError.orEmpty(), color = MaterialTheme.colorScheme.error) },
+                        onClick = { refreshRemoteBoxes() },
+                    )
+                    else -> {
+                        val names = remoteBoxes.orEmpty()
+                        if (names.isEmpty()) {
+                            DropdownMenuItem(text = { Text("Dinox 里还没有卡片盒") }, onClick = {})
+                        }
+                        names.forEach { name ->
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(
+                                            checked = name in selectedSources,
+                                            onCheckedChange = null,
+                                            modifier = Modifier.padding(end = 4.dp),
+                                        )
+                                        Text(name)
+                                    }
+                                },
+                                onClick = {
+                                    // 多选：切换勾选后保持菜单打开。
+                                    selectedSources = if (name in selectedSources) {
+                                        selectedSources - name
+                                    } else {
+                                        selectedSources + name
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        // 目标：沿用 Dinox 名字 / 指定本地卡片盒（单选）。
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = followDinoxNames,
+                onClick = { followDinoxNames = true },
+                label = { Text("沿用 Dinox 卡片盒名字") },
+            )
+            FilterChip(
+                selected = !followDinoxNames,
+                onClick = { followDinoxNames = false },
+                label = { Text("导入到指定卡片盒") },
+            )
+        }
+        if (!followDinoxNames) {
+            Box {
+                OutlinedButton(
+                    onClick = { targetMenuOpen = true },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    val name = targetBoxId?.let { id -> localBoxes.firstOrNull { it.id == id }?.name }
+                    Text(
+                        name?.let { "目标：$it" } ?: "选择本地目标卡片盒（单选）",
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text("▾", style = MaterialTheme.typography.labelLarge)
+                }
+                DropdownMenu(expanded = targetMenuOpen, onDismissRequest = { targetMenuOpen = false }) {
+                    if (localBoxes.isEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text("还没有本地卡片盒，可到 设置 → 卡片盒管理 创建") },
+                            onClick = {},
+                        )
+                    }
+                    localBoxes.forEach { box ->
+                        DropdownMenuItem(
+                            text = { Text(if (box.id == NoteBox.DEFAULT_ID) "${box.name}（默认）" else box.name) },
+                            onClick = {
+                                targetBoxId = box.id
+                                targetMenuOpen = false
+                            },
+                        )
+                    }
+                }
+            }
+        }
+        Button(
+            onClick = {
+                val target = if (followDinoxNames) {
+                    DinoxSyncService.ImportTarget.FollowDinoxNames
+                } else {
+                    val id = targetBoxId
+                    if (id == null) return@Button
+                    DinoxSyncService.ImportTarget.LocalBox(id)
+                }
+                val sources = selectedSources
+                if (sources.isEmpty()) return@Button
+                busy = true
+                lastError = null
+                scope.launch {
+                    dinox.importFromBoxes(sources, target)
+                        .onSuccess { message ->
+                            snackbar.showSnackbar(message)
+                            selectedSources = emptyList()
+                        }
+                        .onFailure { error -> lastError = error.message ?: "导入失败" }
+                    busy = false
+                }
+            },
+            enabled = !busy && selectedSources.isNotEmpty() && (followDinoxNames || targetBoxId != null),
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(if (busy) "正在导入…" else "开始导入") }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+
         SectionTitle("从 Dinox 同步到本机")
         OutlinedTextField(
             value = boxInput,
@@ -229,8 +420,8 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
 
         SectionTitle("发送到 Dinox")
         Text(
-            "在主页长按笔记卡片选择「发送到Dinox」，会把这篇笔记的 Markdown、" +
-                "标题、标签与原创建时间发送到 Dinox（卡片盒按上面的设置）。",
+            "在主页长按笔记卡片选择「发送到Dinox」，会先弹出 Dinox 卡片盒选择（实时刷新），" +
+                "选定目标卡片盒后再把这篇笔记的 Markdown、标题、标签与原创建时间发送到 Dinox。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -30,6 +30,7 @@ class NoteRepository(
     private val blocks = db.blockDao()
     private val tags = db.tagDao()
     private val links = db.noteLinkDao()
+    private val boxes = db.noteBoxDao()
 
     fun observeAll(): Flow<List<Note>> = notes.observeAll()
 
@@ -460,6 +461,95 @@ class NoteRepository(
         tags.removeNoteTag(noteId, tagId)
     }
 
+    // ---- 卡片盒（0.10.0） ----------------------------------------------
+
+    fun observeBoxes(): Flow<List<NoteBox>> = boxes.observeAll()
+
+    suspend fun getAllBoxes(): List<NoteBox> = boxes.getAll()
+
+    suspend fun getBoxById(id: String): NoteBox? = boxes.getById(id)
+
+    suspend fun getBoxByName(name: String): NoteBox? = boxes.getByName(name)
+
+    /** 每个卡片盒的笔记数（按 boxId 分组；未分配不算在任何盒里）。 */
+    suspend fun boxNoteCounts(): Map<String, Int> {
+        return boxes.noteCounts().associate { it.boxId to it.noteCount }
+    }
+
+    /**
+     * 确保「暂存箱」存在（幂等）：应用启动、卡片盒管理、删除卡片盒与
+     * AI 自动分配前都会调用。名字被占用（理论上不可能）时按已有盒子返回。
+     */
+    suspend fun ensureDefaultBox(): NoteBox {
+        boxes.getById(NoteBox.DEFAULT_ID)?.let { return it }
+        boxes.getByName(NoteBox.DEFAULT_NAME)?.let { return it }
+        val created = NoteBox(
+            id = NoteBox.DEFAULT_ID,
+            name = NoteBox.DEFAULT_NAME,
+            createdAt = 0L,
+        )
+        boxes.insertIfAbsent(created)
+        return boxes.getById(NoteBox.DEFAULT_ID) ?: created
+    }
+
+    /** 新建卡片盒；名字为空或与已有盒子重名时返回 null（UI 给重名提示）。 */
+    suspend fun createBox(name: String): NoteBox? {
+        val normalized = name.trim()
+        if (normalized.isEmpty()) return null
+        if (boxes.getByName(normalized) != null) return null
+        val box = NoteBox(
+            id = UUID.randomUUID().toString(),
+            name = normalized,
+            createdAt = System.currentTimeMillis(),
+        )
+        if (boxes.insertIfAbsent(box) == -1L) return null
+        return box
+    }
+
+    /** 重命名卡片盒；名字为空或与其他盒子重名时抛 [BoxNameConflict]。 */
+    suspend fun renameBox(boxId: String, newName: String): NoteBox? {
+        val normalized = newName.trim()
+        if (normalized.isEmpty()) return null
+        val existing = boxes.getById(boxId) ?: return null
+        if (existing.name == normalized) return existing
+        if (boxes.getByName(normalized) != null) throw BoxNameConflict(normalized)
+        boxes.update(existing.copy(name = normalized))
+        return boxes.getById(boxId)
+    }
+
+    /**
+     * 删除卡片盒：盒内笔记全部移入「暂存箱」（同一事务），笔记内容、
+     * 标签、链接都不受影响。「暂存箱」本身不可删除，返回 false。
+     */
+    suspend fun deleteBox(boxId: String): Boolean {
+        val box = boxes.getById(boxId) ?: return false
+        if (boxId == NoteBox.DEFAULT_ID) return false
+        val fallback = ensureDefaultBox()
+        db.withTransaction {
+            notes.moveNotes(boxId, fallback.id)
+            boxes.delete(boxId)
+        }
+        return true
+    }
+
+    /** 把笔记分配到卡片盒；boxId 必须已存在（空串 = 取消分配）。 */
+    suspend fun assignNoteToBox(noteId: String, boxId: String) {
+        if (boxId.isNotEmpty() && boxes.getById(boxId) == null) return
+        notes.assignBox(noteId, boxId)
+    }
+
+    /**
+     * AI 自动分配的落地：只接受一个已存在卡片盒的名字（大小敏感、去空白）；
+     * 匹配不到就返回 null，绝不新建盒子。
+     */
+    suspend fun assignNoteToBoxByName(noteId: String, boxName: String): NoteBox? {
+        val box = boxes.getByName(boxName.trim()) ?: return null
+        notes.assignBox(noteId, box.id)
+        return box
+    }
+
+    class BoxNameConflict(val name: String) : Exception("卡片盒名称已存在：$name")
+
 
     suspend fun getAllNotes(): List<Note> = notes.getAll()
 
@@ -534,7 +624,8 @@ class NoteRepository(
                 else -> remote.body.replace("\r\n", "\n").trimEnd('\n')
             }
             val mdPath = remote.mdPath.ifBlank { markdownStore.relativePathFor(remote.id) }
-            val remoteMarkdown = remote.copy(body = content, mdPath = mdPath)
+            // 卡片盒是本地组织概念：远端覆盖时保留本地原归属（远端没有该概念）。
+            val remoteMarkdown = remote.copy(body = content, mdPath = mdPath, boxId = local?.boxId ?: remote.boxId)
             val isNewer = local == null || remote.updatedAt > local.updatedAt
             if (isNewer) {
                 markdownStore.writeDocument(mdPath, documentOf(remoteMarkdown, content))
@@ -598,6 +689,7 @@ class NoteRepository(
             tagIds: Set<String> = emptySet(),
             startMs: Long? = null,
             endMs: Long? = null,
+            boxId: String? = null,
         ): List<NoteWithDetails> {
             val q = keyword.trim()
             return items.filter { item ->
@@ -607,7 +699,9 @@ class NoteRepository(
                     item.tags.any { it.path.contains(q, ignoreCase = true) }
                 val tagOk = tagIds.isEmpty() || item.tags.any { it.id in tagIds }
                 val dateOk = dateMatches(item.note, startMs, endMs)
-                keywordOk && tagOk && dateOk
+                // boxId 非空 = 按卡片盒过滤；空串只匹配「未分配」的笔记。
+                val boxOk = boxId == null || item.note.boxId == boxId
+                keywordOk && tagOk && dateOk && boxOk
             }
         }
 

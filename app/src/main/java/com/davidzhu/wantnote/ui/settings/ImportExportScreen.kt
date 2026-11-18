@@ -38,10 +38,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private val TransferTabs = listOf("导入", "导出")
-
-/** 「数据管理」外层 Tab：导入&导出 / 生态互联（Dinox 等第三方同步）。 */
-private val DataTabs = listOf("导入&导出", "生态互联")
+/** 0.10.0：「数据管理」外层 Tab 拆为 导入 / 导出 / 生态互联 三个。 */
+private val DataTabs = listOf("导入", "导出", "生态互联")
 
 @Composable
 fun ImportExportScreen(onBack: () -> Unit) {
@@ -62,27 +60,26 @@ fun ImportExportScreen(onBack: () -> Unit) {
                     )
                 }
             }
-            if (dataTabState == 1) {
-                EcosystemTab(snackbar = snackbar)
-                return@Column
+            when (dataTabState) {
+                0 -> ImportTab(snackbar = snackbar)
+                1 -> ExportTab(snackbar = snackbar)
+                else -> EcosystemTab(snackbar = snackbar)
             }
-            ImportExportTab(snackbar = snackbar)
         }
     }
 }
 
+/** 导入 Tab：本地 Markdown / HTML / ZIP 文件导入（原「导入&导出」的导入半边）。 */
 @Composable
-private fun ImportExportTab(snackbar: SnackbarHostState) {
+private fun ImportTab(snackbar: SnackbarHostState) {
     val transfer = LocalTransfer.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var tab by remember { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf(false) }
     var done by remember { mutableIntStateOf(0) }
     var total by remember { mutableIntStateOf(0) }
     var currentFile by remember { mutableStateOf("") }
     var failures by remember { mutableStateOf<List<ImportFailure>>(emptyList()) }
-    var pendingExport by remember { mutableStateOf<ExportBundle?>(null) }
 
     fun beginImport(uris: List<Uri>) {
         if (busy || uris.isEmpty()) {
@@ -134,6 +131,98 @@ private fun ImportExportTab(snackbar: SnackbarHostState) {
             scope.launch { snackbar.showSnackbar("已取消选择文件") }
         }
     }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Text(
+            "支持单个或多个 .md / .markdown / .html / .htm，也支持把这些文件打成的 .zip。每个文件生成一篇笔记；zip 里的图片/附件若被引用，会一并拷入媒体库。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 16.dp),
+        )
+        SectionTitle("选择文件")
+        OutlinedButton(
+            onClick = {
+                if (busy) return@OutlinedButton
+                multiLauncher.launch(arrayOf("*/*"))
+            },
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("选择 Markdown / HTML 文件") }
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = {
+                if (busy) return@OutlinedButton
+                zipLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
+            },
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("选择 ZIP 压缩包") }
+
+        if (busy) {
+            Spacer(modifier = Modifier.height(20.dp))
+            if (total > 0) {
+                LinearProgressIndicator(
+                    progress = { done.toFloat() / total.toFloat() },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "已处理 $done / $total",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            } else {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+            if (currentFile.isNotBlank()) {
+                Text(
+                    "当前：$currentFile",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        SectionTitle("说明")
+        Text(
+            "Markdown 块映射：# 标题、段落、- [ ] / - [x] 任务、1. 有序列表、- 无序列表、--- 分割线、缩进；行内 **粗体**、*斜体*、==高亮==、~~删除线~~ 会原样保留。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    if (failures.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { failures = emptyList() },
+            title = { Text("部分文件导入失败") },
+            text = {
+                Text(
+                    failures.take(10).joinToString("\n") { "${it.fileName}：${it.reason}" } +
+                        if (failures.size > 10) "\n…另有 ${failures.size - 10} 个文件失败" else "",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { failures = emptyList() }) { Text("知道了") }
+            },
+        )
+    }
+}
+
+/** 导出 Tab：全部笔记导出为 Markdown / ZIP（原「导入&导出」的导出半边）。 */
+@Composable
+private fun ExportTab(snackbar: SnackbarHostState) {
+    val transfer = LocalTransfer.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var currentFile by remember { mutableStateOf("") }
+    var pendingExport by remember { mutableStateOf<ExportBundle?>(null) }
 
     fun writeExport(bundle: ExportBundle, uri: Uri?, asZip: Boolean) {
         if (uri == null) {
@@ -202,120 +291,33 @@ private fun ImportExportTab(snackbar: SnackbarHostState) {
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = tab) {
-            TransferTabs.forEachIndexed { index, label ->
-                Tab(
-                    selected = tab == index,
-                    onClick = { tab = index },
-                    text = { Text(label) },
-                )
-            }
-        }
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-        ) {
-                if (tab == 0) {
-                    Text(
-                        "支持单个或多个 .md / .markdown / .html / .htm，也支持把这些文件打成的 .zip。每个文件生成一篇笔记；zip 里的图片/附件若被引用，会一并拷入媒体库。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 16.dp),
-                    )
-                    SectionTitle("选择文件")
-                    OutlinedButton(
-                        onClick = {
-                            if (busy) return@OutlinedButton
-                            multiLauncher.launch(arrayOf("*/*"))
-                        },
-                        enabled = !busy,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("选择 Markdown / HTML 文件") }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = {
-                            if (busy) return@OutlinedButton
-                            zipLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
-                        },
-                        enabled = !busy,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("选择 ZIP 压缩包") }
-
-                    if (busy) {
-                        Spacer(modifier = Modifier.height(20.dp))
-                        if (total > 0) {
-                            LinearProgressIndicator(
-                                progress = { done.toFloat() / total.toFloat() },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            Text(
-                                "已处理 $done / $total",
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.padding(top = 8.dp),
-                            )
-                        } else {
-                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        }
-                        if (currentFile.isNotBlank()) {
-                            Text(
-                                "当前：$currentFile",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 4.dp),
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(24.dp))
-                    SectionTitle("说明")
-                    Text(
-                        "Markdown 块映射：# 标题、段落、- [ ] / - [x] 任务、1. 有序列表、- 无序列表、--- 分割线、缩进；行内 **粗体**、*斜体*、==高亮==、~~删除线~~ 会原样保留。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    Text(
-                        "导出格式为 Markdown：每篇笔记一个 .md。多篇笔记或含本地附件时会打成 zip（附件放在 media/，用相对路径引用）；只有一篇且无附件时直接保存 .md。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 16.dp),
-                    )
-                    SectionTitle("导出全部笔记")
-                    Button(
-                        onClick = { startExport() },
-                        enabled = !busy,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("导出 Markdown") }
-                    if (busy) {
-                        Spacer(modifier = Modifier.height(20.dp))
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        Text(
-                            currentFile.ifBlank { "正在导出…" },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 8.dp),
-                        )
-                    }
-                }
-        }
-    }
-
-    if (failures.isNotEmpty()) {
-        AlertDialog(
-            onDismissRequest = { failures = emptyList() },
-            title = { Text("部分文件导入失败") },
-            text = {
-                Text(
-                    failures.take(10).joinToString("\n") { "${it.fileName}：${it.reason}" } +
-                        if (failures.size > 10) "\n…另有 ${failures.size - 10} 个文件失败" else "",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { failures = emptyList() }) { Text("知道了") }
-            },
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Text(
+            "导出格式为 Markdown：每篇笔记一个 .md。多篇笔记或含本地附件时会打成 zip（附件放在 media/，用相对路径引用）；只有一篇且无附件时直接保存 .md。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 16.dp),
         )
+        SectionTitle("导出全部笔记")
+        Button(
+            onClick = { startExport() },
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("导出 Markdown") }
+        if (busy) {
+            Spacer(modifier = Modifier.height(20.dp))
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            Text(
+                currentFile.ifBlank { "正在导出…" },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
     }
 }

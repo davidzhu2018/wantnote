@@ -1,6 +1,7 @@
 package com.davidzhu.wantnote.sync.dinox
 
 import com.davidzhu.wantnote.data.Note
+import com.davidzhu.wantnote.data.NoteBox
 import com.davidzhu.wantnote.data.NoteRepository
 import com.davidzhu.wantnote.data.SearchText
 import com.davidzhu.wantnote.data.SettingsRepository
@@ -116,6 +117,122 @@ class DinoxSyncService(
         return pull(lastSyncIso = if (cursor > 0L) DinoxModels.isoFromEpochMs(cursor) else null)
     }
 
+    /**
+     * 实时拉取 Dinox 当前的卡片盒名单（0.10.0 M16）。
+     *
+     * Dinox 端卡片盒随时可能新增/删除，开放接口没有单独的「列卡片盒」
+     * 端点，所以这里做一次全新量 `listNotes`，汇总所有未删除笔记的
+     * `zettelBoxes` 去重返回。每次向用户展示 Dinox 卡片盒选择器之前都
+     * 必须调用本方法现拉，绝不使用缓存。
+     */
+    suspend fun fetchRemoteBoxes(): Result<List<String>> = withContext(Dispatchers.IO) {
+        val token = vault.load()
+            ?: return@withContext Result.failure(DinoxApiException("尚未保存 Dinox Token，请先测试并保存"))
+        val json = try {
+            client.listNotes(token, DinoxModels.listNotesBody(lastSyncIso = null))
+        } catch (error: Throwable) {
+            return@withContext Result.failure(DinoxApiException(dinoxShortMessage(error)))
+        }
+        val result = try {
+            DinoxModels.parseListNotes(json)
+        } catch (error: Throwable) {
+            return@withContext Result.failure(DinoxApiException(dinoxShortMessage(error)))
+        }
+        val names = result.notes
+            .filter { !it.isDel }
+            .flatMap { it.zettelBoxes }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+        Result.success(names)
+    }
+
+    /** 从 Dinox 导入时的目标卡片盒策略。 */
+    sealed class ImportTarget {
+        /** 沿用 Dinox 卡片盒名字：来源盒叫 ABC 就导入本地 ABC（没有就建）。 */
+        data object FollowDinoxNames : ImportTarget()
+
+        /** 选中的内容全部进这一个本地卡片盒。 */
+        data class LocalBox(val boxId: String) : ImportTarget()
+    }
+
+    /**
+     * 生态互联导入（0.10.0）：把选中的 Dinox 卡片盒内容导入本机。
+     *
+     * - 来源盒在调用瞬间全新拉取（不读缓存，配合 [fetchRemoteBoxes]）。
+     * - [target] 为 [ImportTarget.FollowDinoxNames] 时按来源盒名建/找本地
+     *   同名卡片盒逐盒导入；为 [ImportTarget.LocalBox] 时全部进指定盒。
+     * - 不推进增量同步游标：导入是一次性动作，与定时同步互不影响。
+     * - 远端合并、标签挂接沿用 0.9.0 的 merge 语义（内容按 updatedAt 取新）。
+     */
+    suspend fun importFromBoxes(
+        sourceBoxes: List<String>,
+        target: ImportTarget,
+    ): Result<String> = withContext(Dispatchers.IO) {
+        if (sourceBoxes.isEmpty()) {
+            return@withContext Result.failure(DinoxApiException("请先选择至少一个 Dinox 卡片盒"))
+        }
+        val token = vault.load()
+            ?: return@withContext Result.failure(DinoxApiException("尚未保存 Dinox Token，请先测试并保存"))
+        val body = DinoxModels.listNotesBody(lastSyncIso = null, boxNames = sourceBoxes)
+        val json = try {
+            client.listNotes(token, body)
+        } catch (error: Throwable) {
+            return@withContext Result.failure(DinoxApiException(dinoxShortMessage(error)))
+        }
+        val result = try {
+            DinoxModels.parseListNotes(json)
+        } catch (error: Throwable) {
+            return@withContext Result.failure(DinoxApiException(dinoxShortMessage(error)))
+        }
+        var targetBox: NoteBox? = null
+        if (target is ImportTarget.LocalBox) {
+            targetBox = notes.getBoxById(target.boxId)
+                ?: return@withContext Result.failure(DinoxApiException("目标卡片盒不存在，请重新选择"))
+        }
+        var imported = 0
+        result.notes
+            .filter { !it.isDel }
+            .forEach { remote ->
+                val createdAt = DinoxModels.epochMsFromIso(remote.createTimeIso)
+                val updatedAt = DinoxModels.epochMsFromIso(remote.updateTimeIso)
+                val title = remote.title.ifBlank {
+                    if (remote.parentNoteId != null) "Dinox 批注" else "Dinox 笔记"
+                }
+                val content = stripLeadingTitle(title, remote.content)
+                val note = Note(
+                    id = remote.noteId,
+                    title = title,
+                    body = content,
+                    createdAt = if (createdAt > 0) createdAt else System.currentTimeMillis(),
+                    updatedAt = if (updatedAt > 0) updatedAt else System.currentTimeMillis(),
+                    mdPath = "notes/${remote.noteId}.md",
+                )
+                val merged = notes.mergeRemoteNote(note, emptyList())
+                if (merged) {
+                    val boxId = when (target) {
+                        is ImportTarget.LocalBox -> targetBox?.id ?: return@forEach
+                        ImportTarget.FollowDinoxNames -> {
+                            // 只从用户选中的来源盒里取名：一篇笔记可能同时属于未选中的其他盒。
+                            val name = resolveFollowBoxName(remote.zettelBoxes, sourceBoxes)
+                                ?: return@forEach
+                            notes.getBoxByName(name)?.id ?: notes.createBox(name)?.id ?: return@forEach
+                        }
+                    }
+                    notes.assignNoteToBox(note.id, boxId)
+                    if (remote.tags.isNotEmpty()) {
+                        notes.setNoteTagPaths(note.id, remote.tags)
+                    }
+                    imported += 1
+                }
+            }
+        val label = when (target) {
+            is ImportTarget.LocalBox -> "本地卡片盒「${targetBox?.name.orEmpty().ifBlank { "已选卡片盒" }}」"
+            ImportTarget.FollowDinoxNames -> "同名本地卡片盒"
+        }
+        Result.success("已从 ${sourceBoxes.size} 个 Dinox 卡片盒导入 $imported 篇到$label")
+    }
+
     private suspend fun pull(lastSyncIso: String?): Result<String> = withContext(Dispatchers.IO) {
         val settings = settingsRepository.get()
         val token = vault.load()
@@ -173,13 +290,16 @@ class DinoxSyncService(
 
     // ---- 本地 → Dinox ---------------------------------------------------
 
-    /** 长按卡片「发送到Dinox」：把这篇笔记按 Markdown 发送到 Dinox。 */
-    suspend fun sendNote(noteId: String): Result<String> = withContext(Dispatchers.IO) {
+    /**
+     * 长按卡片「发送到Dinox」：把这篇笔记按 Markdown 发送到 Dinox。
+     * [zettelBoxName] 是用户在发送对话框里单选的目标 Dinox 卡片盒名；
+     * 传 null 表示不放入卡片盒（Dinox 端不归盒）。
+     */
+    suspend fun sendNote(noteId: String, zettelBoxName: String? = null): Result<String> = withContext(Dispatchers.IO) {
         val token = vault.load()
             ?: return@withContext Result.failure(DinoxApiException("尚未保存 Dinox Token，请先测试并保存"))
         val note = notes.getById(noteId)
             ?: return@withContext Result.failure(DinoxApiException("笔记不存在"))
-        val settings = settingsRepository.get()
         // 双链标记转成可读文本：Dinox 端没有本地图谱，[[note:id]] 无意义。
         val titles = notes.getAllNotes().associate { it.id to SearchText.displayTitle(it) }
         val content = NoteLinkCodec.renderPlain(
@@ -192,7 +312,7 @@ class DinoxSyncService(
             content = content,
             title = SearchText.displayTitle(note).take(120),
             tags = tagPaths,
-            zettelBoxNames = DinoxModels.splitBoxNames(settings.dinoxSyncBox),
+            zettelBoxNames = listOfNotNull(zettelBoxName?.trim()?.takeIf { it.isNotEmpty() }),
             createdAtIso = DinoxModels.isoFromEpochMs(note.createdAt),
         )
         try {
@@ -200,10 +320,25 @@ class DinoxSyncService(
         } catch (error: Throwable) {
             return@withContext Result.failure(DinoxApiException(dinoxShortMessage(error)))
         }
-        Result.success("已发送到 Dinox${if (tagPaths.isNotEmpty()) "（含 ${tagPaths.size} 个标签）" else ""}")
+        val boxLabel = zettelBoxName?.trim()?.takeIf { it.isNotEmpty() }?.let { "「$it」" }
+        Result.success("已发送到 Dinox$boxLabel${if (tagPaths.isNotEmpty()) "（含 ${tagPaths.size} 个标签）" else ""}")
     }
 
     companion object {
+        /**
+         * 「沿用 Dinox 卡片盒名字」时，决定一篇远端笔记应落入哪个来源盒名。
+         * 只从用户选中的来源盒里挑：取笔记 zettelBoxes 中第一个命中的选中盒；
+         * 若没有交集但只选了一个来源盒，则用该来源盒（应对 API 过滤后未回传盒名的情况）。
+         * 绝不使用未选中的 Dinox 盒名，避免在本机误建/误导入到其他盒子。
+         */
+        fun resolveFollowBoxName(remoteBoxes: List<String>, sourceBoxes: List<String>): String? {
+            val selected = sourceBoxes.map { it.trim() }.filter { it.isNotBlank() }
+            if (selected.isEmpty()) return null
+            val selectedSet = selected.toSet()
+            return remoteBoxes.map { it.trim() }.firstOrNull { it.isNotBlank() && it in selectedSet }
+                ?: selected.singleOrNull()
+        }
+
         /** 若正文以 `# 标题` 开头且与笔记标题相同（或标题为空），剥掉该 H1，只保留正文。 */
         fun stripLeadingTitle(title: String, raw: String): String {
             val content = raw.replace("\r\n", "\n").replace('\r', '\n').trimEnd('\n')

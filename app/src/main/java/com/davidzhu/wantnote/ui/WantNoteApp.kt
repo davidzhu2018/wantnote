@@ -49,6 +49,7 @@ import com.davidzhu.wantnote.ui.settings.AboutScreen
 import com.davidzhu.wantnote.ui.settings.AiSettingsScreen
 import com.davidzhu.wantnote.ui.settings.AttachmentSettingsScreen
 import com.davidzhu.wantnote.ui.settings.BackupSyncScreen
+import com.davidzhu.wantnote.ui.settings.BoxManagementScreen
 import com.davidzhu.wantnote.ui.settings.EditorSettingsScreen
 import com.davidzhu.wantnote.ui.settings.GeneralSettingsScreen
 import com.davidzhu.wantnote.ui.settings.ImportExportScreen
@@ -148,6 +149,9 @@ fun WantNoteApp() {
             }
             composable("settings/editor") {
                 EditorSettingsScreen(onBack = { nav.popBackStack() })
+            }
+            composable("settings/boxes") {
+                BoxManagementScreen(onBack = { nav.popBackStack() })
             }
             composable("settings/tags") {
                 TagManagementScreen(onBack = { nav.popBackStack() })

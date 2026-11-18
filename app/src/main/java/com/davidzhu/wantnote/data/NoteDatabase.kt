@@ -17,8 +17,9 @@ import java.util.UUID
         NoteTagCrossRef::class,
         AiProvider::class,
         NoteLink::class,
+        NoteBox::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class NoteDatabase : RoomDatabase() {
@@ -28,6 +29,7 @@ abstract class NoteDatabase : RoomDatabase() {
     abstract fun tagDao(): TagDao
     abstract fun aiProviderDao(): AiProviderDao
     abstract fun noteLinkDao(): NoteLinkDao
+    abstract fun noteBoxDao(): NoteBoxDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -220,6 +222,34 @@ abstract class NoteDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 0.10.0: notes gain a 卡片盒 column plus a `note_boxes` table.
+         * Only additive: existing notes keep boxId = ''（未分配），the default
+         * 「暂存箱」 box is created idempotently so deleting any other box can
+         * always move its notes somewhere safe. No note content is touched.
+         */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE notes ADD COLUMN boxId TEXT NOT NULL DEFAULT ''")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS note_boxes (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_note_boxes_name ON note_boxes(name)")
+                db.execSQL(
+                    """
+                    INSERT OR IGNORE INTO note_boxes (id, name, createdAt)
+                    VALUES ('${NoteBox.DEFAULT_ID}', '${NoteBox.DEFAULT_NAME}', 0)
+                    """.trimIndent(),
+                )
+            }
+        }
+
         fun create(context: Context): NoteDatabase {
             // 0.6.0：数据库优先放在 Documents/WantNote（卸载后可找回），
             // 未授权时回退到旧私有位置；首次启动由 AppStorage.prepare 迁移旧数据。
@@ -232,7 +262,7 @@ abstract class NoteDatabase : RoomDatabase() {
             )
                 .addMigrations(
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
-                    MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
+                    MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
                 )
                 .build()
         }
