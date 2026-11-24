@@ -13,7 +13,9 @@ import java.util.concurrent.TimeUnit
  *
  * - Token 只出现在请求头 `Authorization`，绝不进 URL、日志或异常文本；
  *   异常消息只保留简短的非敏感提示（网络类型/HTTP 状态/错误码）。
- * - 限流（200 次/小时）由调用方通过增量同步控制，这里不做缓存。
+ * - 响应体读取期间的 IO 异常（如大包超时/断流）单独捕获为网络错误，
+ *   不再误报为「无法解析的数据」。
+ * - 响应信封校验委托给 [DinoxModels.validateEnvelope]，防御性兼容合法的变体响应。
  */
 class DinoxClient(
     private val baseUrl: String = DinoxModels.BASE_URL,
@@ -21,7 +23,7 @@ class DinoxClient(
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
@@ -50,16 +52,15 @@ class DinoxClient(
             throw DinoxApiException("网络错误：${error.javaClass.simpleName}，请检查网络后重试")
         }
         return response.use { resp ->
-            val bodyText = runCatching { resp.body?.string().orEmpty() }.getOrDefault("")
             if (!resp.isSuccessful) {
                 throw DinoxApiException("网络错误（HTTP ${resp.code}）")
             }
-            val root = runCatching { org.json.JSONObject(bodyText) }.getOrNull()
-                ?: throw DinoxApiException("Dinox 返回了无法解析的数据")
-            val code = root.optString("code")
-            if (code != DinoxModels.CODE_SUCCESS) {
-                throw DinoxApiException(DinoxModels.errorMessage(code), code)
+            val bodyText = try {
+                resp.body?.string().orEmpty()
+            } catch (error: IOException) {
+                throw DinoxApiException("网络超时或连接中断（${error.javaClass.simpleName}），请稍后重试")
             }
+            DinoxModels.validateEnvelope(bodyText)
             bodyText
         }
     }

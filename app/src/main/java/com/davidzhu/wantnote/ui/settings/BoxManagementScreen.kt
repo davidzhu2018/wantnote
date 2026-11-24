@@ -1,8 +1,8 @@
 package com.davidzhu.wantnote.ui.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,6 +25,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,11 +47,11 @@ private sealed class BoxDialog {
 }
 
 /**
- * 0.10.0 设置 →「卡片盒管理」：卡片盒的增删查改。
+ * 设置 →「卡片盒管理」：卡片盒的增删查改。
  *
- * - 新建：输入名称即可（重名会提示）。
- * - 重命名：铅笔按钮。
- * - 删除：需要二次确认；盒内笔记全部自动移入默认「暂存箱」，内容、标签、
+ * - 新建：输入名称点一次「确定」即关窗并提示（名称为空或重名保持弹窗并内联提示）。
+ * - 重命名：铅笔按钮，成功后先关窗再提示。
+ * - 删除：二次确认；盒内笔记全部自动移入默认「暂存箱」，内容、标签、
  *   链接都不受影响。「暂存箱」本身不可删除。
  */
 @Composable
@@ -61,10 +62,12 @@ fun BoxManagementScreen(onBack: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
     var dialog by remember { mutableStateOf<BoxDialog?>(null) }
     var draftName by remember { mutableStateOf("") }
+    var dialogError by remember { mutableStateOf<String?>(null) }
+    var submitting by remember { mutableStateOf(false) }
     var counts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
 
     // 笔记数随盒列表一起刷新（每次列表变化重算一次）。
-    androidx.compose.runtime.LaunchedEffect(boxes) {
+    LaunchedEffect(boxes) {
         counts = notes.boxNoteCounts()
     }
 
@@ -79,7 +82,7 @@ fun BoxManagementScreen(onBack: () -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 8.dp),
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -90,6 +93,7 @@ fun BoxManagementScreen(onBack: () -> Unit) {
                 TextButton(
                     onClick = {
                         draftName = ""
+                        dialogError = null
                         dialog = BoxDialog.Create
                     },
                 ) {
@@ -130,12 +134,16 @@ fun BoxManagementScreen(onBack: () -> Unit) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(onClick = {
                                     draftName = box.name
+                                    dialogError = null
                                     dialog = BoxDialog.Rename(box)
                                 }) {
                                     Icon(Icons.Outlined.DriveFileRenameOutline, contentDescription = "重命名")
                                 }
                                 IconButton(
-                                    onClick = { dialog = BoxDialog.Delete(box) },
+                                    onClick = {
+                                        dialogError = null
+                                        dialog = BoxDialog.Delete(box)
+                                    },
                                     enabled = !isDefault,
                                 ) {
                                     Icon(Icons.Outlined.Delete, contentDescription = "删除")
@@ -160,7 +168,12 @@ fun BoxManagementScreen(onBack: () -> Unit) {
             is BoxDialog.Delete -> "删除卡片盒"
         }
         AlertDialog(
-            onDismissRequest = { dialog = null },
+            onDismissRequest = {
+                if (!submitting) {
+                    dialog = null
+                    dialogError = null
+                }
+            },
             title = { Text(title) },
             text = {
                 when (current) {
@@ -172,56 +185,88 @@ fun BoxManagementScreen(onBack: () -> Unit) {
                         )
                     }
                     else -> {
-                        OutlinedTextField(
-                            value = draftName,
-                            onValueChange = { draftName = it },
-                            label = { Text("卡片盒名称") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedTextField(
+                                value = draftName,
+                                onValueChange = {
+                                    draftName = it
+                                    if (dialogError != null) dialogError = null
+                                },
+                                label = { Text("卡片盒名称") },
+                                singleLine = true,
+                                isError = dialogError != null,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            dialogError?.let { message ->
+                                Text(
+                                    text = message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
                     }
                 }
             },
             confirmButton = {
                 TextButton(
+                    enabled = !submitting,
                     onClick = {
+                        if (submitting) return@TextButton
+                        submitting = true
                         scope.launch {
-                            when (current) {
-                                BoxDialog.Create -> {
-                                    val created = notes.createBox(draftName)
-                                    if (created == null) {
-                                        snackbar.showSnackbar(
-                                            if (draftName.isBlank()) "请填写卡片盒名称" else "已存在同名卡片盒",
-                                        )
-                                    } else {
-                                        snackbar.showSnackbar("已创建「${created.name}」")
-                                        dialog = null
-                                    }
-                                }
-                                is BoxDialog.Rename -> {
-                                    try {
-                                        val renamed = notes.renameBox(current.box.id, draftName)
-                                        if (renamed == null) {
-                                            snackbar.showSnackbar("请填写卡片盒名称")
+                            try {
+                                when (current) {
+                                    BoxDialog.Create -> {
+                                        val created = notes.createBox(draftName)
+                                        if (created == null) {
+                                            dialogError = if (draftName.isBlank()) {
+                                                "请填写卡片盒名称"
+                                            } else {
+                                                "已存在同名卡片盒"
+                                            }
                                         } else {
-                                            snackbar.showSnackbar("已重命名为「${renamed.name}」")
+                                            // 0.11.0 N1：确认成功后先立即关窗，再展示 snackbar，避免挂起导致要再点一次。
                                             dialog = null
+                                            dialogError = null
+                                            submitting = false
+                                            snackbar.showSnackbar("已创建「${created.name}」")
+                                            return@launch
                                         }
-                                    } catch (error: NoteRepository.BoxNameConflict) {
-                                        snackbar.showSnackbar(error.message ?: "卡片盒名称已存在")
+                                    }
+                                    is BoxDialog.Rename -> {
+                                        try {
+                                            val renamed = notes.renameBox(current.box.id, draftName)
+                                            if (renamed == null) {
+                                                dialogError = "请填写卡片盒名称"
+                                            } else {
+                                                dialog = null
+                                                dialogError = null
+                                                submitting = false
+                                                snackbar.showSnackbar("已重命名为「${renamed.name}」")
+                                                return@launch
+                                            }
+                                        } catch (error: NoteRepository.BoxNameConflict) {
+                                            dialogError = error.message ?: "卡片盒名称已存在"
+                                        }
+                                    }
+                                    is BoxDialog.Delete -> {
+                                        val deleted = notes.deleteBox(current.box.id)
+                                        dialog = null
+                                        dialogError = null
+                                        submitting = false
+                                        snackbar.showSnackbar(
+                                            if (deleted) {
+                                                "已删除「${current.box.name}」，笔记已移入「${NoteBox.DEFAULT_NAME}」"
+                                            } else {
+                                                "默认卡片盒不能删除"
+                                            },
+                                        )
+                                        return@launch
                                     }
                                 }
-                                is BoxDialog.Delete -> {
-                                    val deleted = notes.deleteBox(current.box.id)
-                                    snackbar.showSnackbar(
-                                        if (deleted) {
-                                            "已删除「${current.box.name}」，笔记已移入「${NoteBox.DEFAULT_NAME}」"
-                                        } else {
-                                            "默认卡片盒不能删除"
-                                        },
-                                    )
-                                    dialog = null
-                                }
+                            } finally {
+                                submitting = false
                             }
                         }
                     },
@@ -230,7 +275,13 @@ fun BoxManagementScreen(onBack: () -> Unit) {
                 }
             },
             dismissButton = {
-                TextButton(onClick = { dialog = null }) { Text("取消") }
+                TextButton(
+                    enabled = !submitting,
+                    onClick = {
+                        dialog = null
+                        dialogError = null
+                    },
+                ) { Text("取消") }
             },
         )
     }

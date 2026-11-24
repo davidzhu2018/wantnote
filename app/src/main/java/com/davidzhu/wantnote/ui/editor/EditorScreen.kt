@@ -53,6 +53,8 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -148,6 +150,7 @@ import java.util.UUID
 @Composable
 fun EditorScreen(
     noteId: String,
+    initialMode: EditorMode = EditorMode.WYSIWYG,
     onBack: () -> Unit,
 ) {
     val repository = LocalNotes.current
@@ -164,8 +167,9 @@ fun EditorScreen(
     var ready by remember { mutableStateOf(false) }
     var title by remember { mutableStateOf("") }
     var blocks by remember { mutableStateOf(listOf<NoteBlock>()) }
-    // 0.9.0：编辑模式（所见即所得=块编辑 / 源码=整篇 Markdown + 预览面板）。
-    var mode by remember { mutableStateOf(settings.editorModeOption) }
+    // 0.11.0 N16-N17：编辑默认所见即所得；源码模式收进右上角「高级」按钮，不再作为默认或主切换。
+    var mode by remember(noteId, initialMode) { mutableStateOf(initialMode) }
+    var showAdvancedMenu by remember { mutableStateOf(false) }
     var sourceText by remember { mutableStateOf(TextFieldValue("")) }
     var focusedId by remember { mutableStateOf<String?>(null) }
     var noteTags by remember { mutableStateOf(listOf<Tag>()) }
@@ -246,7 +250,7 @@ fun EditorScreen(
 
     /**
      * 切换编辑模式：两种表示互转都走「内容 Markdown」，所以切换零损耗，
-     * 也不会产生额外保存。所选模式同时写进设置，作为下次的默认值。
+     * 也不会产生额外保存。仅在当前会话切换（下次进入编辑仍默认所见即所得）。
      */
     fun switchMode(target: EditorMode) {
         if (target == mode) return
@@ -256,7 +260,16 @@ fun EditorScreen(
         } else {
             val content = sourceText.text
             scope.launch {
-                blocks = repository.deriveBlocks(noteId, content)
+                blocks = repository.deriveBlocks(noteId, content).ifEmpty {
+                    listOf(
+                        NoteBlock.paragraph(
+                            id = UUID.randomUUID().toString(),
+                            noteId = noteId,
+                            text = "",
+                            sortOrder = 0,
+                        ),
+                    )
+                }
                 syncFieldsFromBlocks()
                 focusedId = blocks.firstOrNull { !it.isAttachment && it.blockType != BlockType.DIVIDER }?.id
                     ?: blocks.firstOrNull()?.id
@@ -264,9 +277,6 @@ fun EditorScreen(
         }
         mention = null
         mode = target
-        scope.launch {
-            settingsRepo.update { it.copy(editorMode = target.name) }
-        }
     }
 
     fun insertAfter(index: Int, block: NoteBlock, focus: Boolean = true) {
@@ -627,9 +637,8 @@ fun EditorScreen(
         mention = active?.let { EditorMention(SOURCE_MENTION_ANCHOR, it) }
     }
 
-    LaunchedEffect(noteId) {
-        // 恢复持久化的默认编辑模式（初始 remember 拿到的可能是未加载的默认值）。
-        mode = settingsRepo.get().editorModeOption
+    LaunchedEffect(noteId, initialMode) {
+        mode = initialMode
         val note = repository.getById(noteId)
         if (note != null) {
             title = note.title
@@ -716,6 +725,10 @@ fun EditorScreen(
      * 保存结束后才调用（保存失败也会退出，不让用户卡在编辑器）。
      */
     fun leave() {
+        if (!ready) {
+            onBack()
+            return
+        }
         val titleNow = titleState.value
         val contentNow = currentContentMarkdown()
         scope.launch {
@@ -958,22 +971,35 @@ fun EditorScreen(
                     }
                 },
                 actions = {
-                    // 模式切换：所见即所得 ⇄ 源码（内容 Markdown 互转，零损耗）。
-                    TextButton(onClick = {
-                        switchMode(
-                            if (mode == EditorMode.WYSIWYG) EditorMode.SOURCE else EditorMode.WYSIWYG,
-                        )
-                    }) {
-                        Text(
-                            if (mode == EditorMode.WYSIWYG) "源码" else "所见即所得",
-                            style = MaterialTheme.typography.labelLarge,
-                        )
-                    }
                     TextButton(onClick = { saveExplicit() }, enabled = !saving) {
                         Text("保存")
                     }
                     IconButton(onClick = { generateTitleTags() }, enabled = !generating) {
                         Icon(Icons.Outlined.AutoAwesome, contentDescription = "重新生成标题和标签")
+                    }
+                    // 0.11.0 N16-N17：源码模式收进右上角「高级」按钮，不在主工具栏/顶栏直接露出。
+                    Box {
+                        TextButton(onClick = { showAdvancedMenu = true }) {
+                            Text("高级")
+                        }
+                        DropdownMenu(
+                            expanded = showAdvancedMenu,
+                            onDismissRequest = { showAdvancedMenu = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (mode == EditorMode.WYSIWYG) "源码模式" else "所见即所得模式",
+                                    )
+                                },
+                                onClick = {
+                                    showAdvancedMenu = false
+                                    switchMode(
+                                        if (mode == EditorMode.WYSIWYG) EditorMode.SOURCE else EditorMode.WYSIWYG,
+                                    )
+                                },
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

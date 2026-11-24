@@ -249,4 +249,135 @@ class DinoxRequestTest {
             ),
         )
     }
+
+    // ---- 0.11.0 N10：listNotes 防御性解析（稍不规则但仍成功的 payload） --------
+
+    @Test
+    fun parseListNotesHandlesBomNumericCodeAndNullData() {
+        val json = "\uFEFF  {\"code\": 0, \"msg\": \"ok\", \"data\": null}  "
+        val result = DinoxModels.parseListNotes(json)
+        assertTrue(result.notes.isEmpty())
+        assertNull(result.latestUpdateIso)
+    }
+
+    @Test
+    fun parseListNotesHandlesFlatArrayAndBoxObjects() {
+        val json = """
+        {
+          "code": "200",
+          "data": [
+            {
+              "id": "n-flat-1",
+              "title": null,
+              "content": "正文内容",
+              "tags": [{"name": "读书"}, {"tagName": "摘录"}],
+              "zettelBoxes": [{"id": "b1", "name": "读书笔记"}, {"boxName": "长期知识"}],
+              "createTime": "2026-04-01 08:30:00",
+              "updateTime": "2026-04-01T09:15:00+08:00",
+              "parentNoteId": null,
+              "isDel": 0
+            },
+            {
+              "noteId": "n-flat-2",
+              "title": "已删笔记",
+              "body": "旧正文",
+              "tags": "工作、复盘",
+              "zettelBoxNames": "工作盒",
+              "createTime": 1760000000000,
+              "updateTime": 1760000005000,
+              "isDel": "true"
+            }
+          ]
+        }
+        """.trimIndent()
+        val result = DinoxModels.parseListNotes(json)
+        assertEquals(2, result.notes.size)
+
+        val first = result.notes[0]
+        assertEquals("n-flat-1", first.noteId)
+        assertEquals("", first.title) // null 字段不应被解析成字面量 "null"
+        assertEquals(listOf("读书", "摘录"), first.tags)
+        assertEquals(listOf("读书笔记", "长期知识"), first.zettelBoxes)
+        assertNull(first.parentNoteId)
+        assertFalse(first.isDel)
+
+        val second = result.notes[1]
+        assertEquals("n-flat-2", second.noteId)
+        assertEquals("旧正文", second.content)
+        assertEquals(listOf("工作", "复盘"), second.tags)
+        assertEquals(listOf("工作盒"), second.zettelBoxes)
+        assertTrue(second.isDel)
+        assertTrue(DinoxModels.epochMsFromIso(second.updateTimeIso) == 1_760_000_005_000L)
+    }
+
+    @Test
+    fun parseListNotesHandlesWrappedObjectDateMapAndRootArray() {
+        val wrapped = """
+        {
+          "success": true,
+          "data": {
+            "list": [
+              {
+                "date": "2026-05-01",
+                "notes": [
+                  {
+                    "noteId": "w-1",
+                    "title": "包裹结构",
+                    "content": "内容",
+                    "zettelBoxes": ["技术"],
+                    "updateTime": "2026-05-01T10:00:00.123456Z"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+        """.trimIndent()
+        val wrappedResult = DinoxModels.parseListNotes(wrapped)
+        assertEquals(1, wrappedResult.notes.size)
+        assertEquals(listOf("技术"), wrappedResult.notes[0].zettelBoxes)
+        assertTrue(DinoxModels.epochMsFromIso(wrappedResult.notes[0].updateTimeIso) > 0L)
+
+        val dateMap = """
+        {
+          "code": "000000",
+          "data": {
+            "2026-05-02": [
+              {"noteId": "m-1", "title": "日期映射", "content": "ok", "zettelBoxes": ["收件箱"]}
+            ]
+          }
+        }
+        """.trimIndent()
+        val mapResult = DinoxModels.parseListNotes(dateMap)
+        assertEquals(1, mapResult.notes.size)
+        assertEquals("m-1", mapResult.notes[0].noteId)
+        assertEquals(listOf("收件箱"), mapResult.notes[0].zettelBoxes)
+
+        val rootArray = """
+        [
+          {"noteId": "a-1", "title": "顶层数组", "content": "hello", "zettelBoxes": ["灵感"]}
+        ]
+        """.trimIndent()
+        val arrResult = DinoxModels.parseListNotes(rootArray)
+        assertEquals(1, arrResult.notes.size)
+        assertEquals(listOf("灵感"), arrResult.notes[0].zettelBoxes)
+    }
+
+    @Test
+    fun parseListNotesHandlesDoubleEncodedDataStringAndRejectsGarbageWithoutLeakingBody() {
+        val inner = """[{"date":"2026-05-03","notes":[{"noteId":"s-1","title":"t","content":"c","zettelBoxes":["随手记"]}]}]"""
+        val doubleEncoded = org.json.JSONObject()
+            .put("code", "000000")
+            .put("data", inner)
+            .toString()
+        val parsed = DinoxModels.parseListNotes(doubleEncoded)
+        assertEquals(1, parsed.notes.size)
+        assertEquals(listOf("随手记"), parsed.notes[0].zettelBoxes)
+
+        val secretBody = "<html>secret-token-should-never-appear</html>"
+        val error = runCatching { DinoxModels.parseListNotes(secretBody) }.exceptionOrNull()
+        assertNotNull(error)
+        assertEquals("Dinox 返回了无法解析的数据", error!!.message)
+        assertFalse(error.message.orEmpty().contains("secret-token"))
+    }
 }

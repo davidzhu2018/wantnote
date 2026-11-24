@@ -39,8 +39,10 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.davidzhu.wantnote.data.EditorMode
 import com.davidzhu.wantnote.ui.calendar.CalendarScreen
 import com.davidzhu.wantnote.ui.editor.EditorScreen
+import com.davidzhu.wantnote.ui.editor.NoteDetailScreen
 import com.davidzhu.wantnote.ui.home.HomeScreen
 import com.davidzhu.wantnote.ui.insights.InsightsScreen
 import com.davidzhu.wantnote.ui.migration.MigrationGate
@@ -85,14 +87,18 @@ fun WantNoteApp() {
         return
     }
 
-    fun openEditor(id: String) {
-        nav.navigate("editor/$id")
+    fun openDetail(id: String) {
+        nav.navigate("note/$id")
+    }
+
+    fun openEditor(id: String, mode: EditorMode = EditorMode.WYSIWYG) {
+        nav.navigate("editor/$id?mode=${mode.name}")
     }
 
     fun createAndOpen() {
         scope.launch {
             val note = notes.createBlank()
-            openEditor(note.id)
+            openEditor(note.id, EditorMode.WYSIWYG)
         }
     }
 
@@ -124,17 +130,18 @@ fun WantNoteApp() {
         ) {
             composable("home") {
                 HomeScreen(
-                    onOpenNote = { openEditor(it) },
+                    onOpenNote = { openDetail(it) },
+                    onEditNote = { openEditor(it, EditorMode.WYSIWYG) },
                     onSearch = { nav.navigate("search") },
                     onCreate = { createAndOpen() },
                 )
             }
             composable("calendar") {
-                CalendarScreen(onOpenNote = { openEditor(it) })
+                CalendarScreen(onOpenNote = { openDetail(it) })
             }
             composable("insights") {
                 InsightsScreen(
-                    onOpenNote = { openEditor(it) },
+                    onOpenNote = { openDetail(it) },
                     onOpenAiSettings = { nav.navigate("settings/ai") },
                 )
             }
@@ -172,18 +179,38 @@ fun WantNoteApp() {
                 AboutScreen(onBack = { nav.popBackStack() })
             }
             composable(
-                route = "editor/{noteId}",
+                route = "note/{noteId}",
                 arguments = listOf(navArgument("noteId") { type = NavType.StringType }),
             ) { entry ->
                 val noteId = entry.arguments?.getString("noteId") ?: return@composable
+                NoteDetailScreen(
+                    noteId = noteId,
+                    onBack = { nav.popBackStack() },
+                    onEdit = { mode -> openEditor(noteId, mode) },
+                    onOpenNote = { targetId -> openDetail(targetId) },
+                )
+            }
+            composable(
+                route = "editor/{noteId}?mode={mode}",
+                arguments = listOf(
+                    navArgument("noteId") { type = NavType.StringType },
+                    navArgument("mode") {
+                        type = NavType.StringType
+                        defaultValue = EditorMode.WYSIWYG.name
+                    },
+                ),
+            ) { entry ->
+                val noteId = entry.arguments?.getString("noteId") ?: return@composable
+                val initialMode = EditorMode.fromStorage(entry.arguments?.getString("mode"))
                 EditorScreen(
                     noteId = noteId,
+                    initialMode = initialMode,
                     onBack = { nav.popBackStack() },
                 )
             }
             composable("search") {
                 SearchScreen(
-                    onOpenNote = { openEditor(it) },
+                    onOpenNote = { openDetail(it) },
                     onBack = { nav.popBackStack() },
                 )
             }

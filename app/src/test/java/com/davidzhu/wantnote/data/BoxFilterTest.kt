@@ -55,4 +55,21 @@ class BoxFilterTest {
             NoteRepository.filterNotes(items, tagIds = setOf("tag-1"), boxId = "box-a"),
         )
     }
+
+    @Test
+    fun multiTagFilterMatchesAnySelectedTagAndClearsToAll() {
+        val n1 = noteWith("box-a", "tag-1")
+        val n2 = noteWith("box-b", "tag-2")
+        val n3 = noteWith("box-c", "tag-3")
+        val items = listOf(n1, n2, n3)
+
+        assertEquals(
+            listOf(n1, n2),
+            NoteRepository.filterNotes(items, tagIds = setOf("tag-1", "tag-2")),
+        )
+        assertEquals(
+            items,
+            NoteRepository.filterNotes(items, tagIds = emptySet()),
+        )
+    }
 }

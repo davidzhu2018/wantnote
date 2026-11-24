@@ -1,17 +1,28 @@
 package com.davidzhu.wantnote.ui.search
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Tag
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -19,6 +30,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -33,7 +45,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.davidzhu.wantnote.data.AppSettings
@@ -42,7 +57,7 @@ import com.davidzhu.wantnote.data.NoteRepository
 import com.davidzhu.wantnote.data.Tag
 import com.davidzhu.wantnote.ui.LocalNotes
 import com.davidzhu.wantnote.ui.LocalSettings
-import com.davidzhu.wantnote.ui.components.TagChip
+import com.davidzhu.wantnote.ui.components.tagColor
 import com.davidzhu.wantnote.ui.home.NoteCollection
 import java.util.Calendar
 import java.util.TimeZone
@@ -55,7 +70,7 @@ private enum class DatePreset(val label: String) {
     CUSTOM("自定义"),
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
     onOpenNote: (String) -> Unit,
@@ -69,6 +84,7 @@ fun SearchScreen(
 
     var query by rememberSaveable { mutableStateOf("") }
     var selectedTagIds by remember { mutableStateOf(setOf<String>()) }
+    var showTagDialog by remember { mutableStateOf(false) }
     var datePreset by rememberSaveable { mutableStateOf(DatePreset.ANY.name) }
     var customStart by rememberSaveable { mutableStateOf<Long?>(null) }
     var customEnd by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -124,35 +140,32 @@ fun SearchScreen(
                 colors = TextFieldDefaults.colors(),
             )
 
-            Text(
-                "标签",
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
-            )
-            if (allTags.isEmpty()) {
-                Text(
-                    "还没有标签。编辑笔记时可添加多级标签，例如 工作/项目。",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
-                )
-            } else {
-                FlowRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    allTags.forEach { tag ->
-                        val selected = tag.id in selectedTagIds
-                        TagChip(
-                            tag = tag,
-                            selected = selected,
-                            onClick = {
-                                selectedTagIds = if (selected) selectedTagIds - tag.id else selectedTagIds + tag.id
-                            },
-                        )
+            // 0.11.0 N18-N19：不再平铺全部标签，改为「标签」按钮弹出多选对话框。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(onClick = { showTagDialog = true }) {
+                    Icon(
+                        Icons.Outlined.Tag,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        if (selectedTagIds.isEmpty()) {
+                            "标签"
+                        } else {
+                            "标签（已选 ${selectedTagIds.size}）"
+                        },
+                    )
+                }
+                if (selectedTagIds.isNotEmpty()) {
+                    TextButton(onClick = { selectedTagIds = emptySet() }) {
+                        Text("清空")
                     }
                 }
             }
@@ -205,6 +218,18 @@ fun SearchScreen(
         }
     }
 
+    if (showTagDialog) {
+        SearchTagPickerDialog(
+            allTags = allTags,
+            initialSelectedIds = selectedTagIds,
+            onConfirm = { chosen ->
+                selectedTagIds = chosen
+                showTagDialog = false
+            },
+            onDismiss = { showTagDialog = false },
+        )
+    }
+
     val currentPicking = picking
     if (currentPicking != null) {
         val initial = if (currentPicking == "start") customStart else customEnd
@@ -219,6 +244,100 @@ fun SearchScreen(
             },
         )
     }
+}
+
+/**
+ * 0.11.0 N18-N19：搜索页标签多选弹窗。
+ * 列出全部标签，支持单选/多选及清空；确认后按 OR 规则（包含任意所选标签即匹配）筛选笔记。
+ */
+@Composable
+private fun SearchTagPickerDialog(
+    allTags: List<Tag>,
+    initialSelectedIds: Set<String>,
+    onConfirm: (Set<String>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var draftIds by remember(initialSelectedIds) { mutableStateOf(initialSelectedIds) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("选择标签")
+                if (draftIds.isNotEmpty()) {
+                    TextButton(onClick = { draftIds = emptySet() }) {
+                        Text("清空选择")
+                    }
+                }
+            }
+        },
+        text = {
+            if (allTags.isEmpty()) {
+                Text(
+                    "还没有标签。编辑笔记时可添加多级标签，例如 工作/项目。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "可单选或多选；筛选包含所选任意标签的笔记。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 340.dp),
+                    ) {
+                        items(allTags, key = { it.id }) { tag ->
+                            val checked = tag.id in draftIds
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        draftIds = if (checked) draftIds - tag.id else draftIds + tag.id
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(
+                                    checked = checked,
+                                    onCheckedChange = { on ->
+                                        draftIds = if (on) draftIds + tag.id else draftIds - tag.id
+                                    },
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(tagColor(tag.color)),
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = tag.path,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(draftIds) }) { Text("确定") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -259,7 +378,7 @@ private fun dateRange(
         DatePreset.WEEK -> Dates.startOfWeek(now) to Dates.endOfDay(now)
         DatePreset.MONTH -> {
             val cal = Dates.nowCalendar().apply { timeInMillis = now }
-            val start = Dates.startOfDay(cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, 1)
+            val start = Dates.startOfDay(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, 1)
             start to Dates.endOfDay(now)
         }
         DatePreset.CUSTOM -> {

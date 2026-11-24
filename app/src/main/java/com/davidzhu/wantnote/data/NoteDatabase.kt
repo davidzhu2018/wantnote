@@ -18,8 +18,10 @@ import java.util.UUID
         AiProvider::class,
         NoteLink::class,
         NoteBox::class,
+        DinoxCachedBox::class,
+        DinoxSyncRule::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class NoteDatabase : RoomDatabase() {
@@ -30,6 +32,8 @@ abstract class NoteDatabase : RoomDatabase() {
     abstract fun aiProviderDao(): AiProviderDao
     abstract fun noteLinkDao(): NoteLinkDao
     abstract fun noteBoxDao(): NoteBoxDao
+    abstract fun dinoxBoxDao(): DinoxBoxDao
+    abstract fun dinoxSyncRuleDao(): DinoxSyncRuleDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -250,6 +254,42 @@ abstract class NoteDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 0.11.0: additive migration for Dinox cached box list + last fetch timestamp
+         * and persistent 卡片盒同步 rules. Existing notes, boxes, tags and settings are untouched.
+         */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE settings ADD COLUMN dinoxBoxesFetchedAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS dinox_cached_boxes (
+                        name TEXT NOT NULL PRIMARY KEY,
+                        fetchedAt INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS dinox_sync_rules (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        ruleType TEXT NOT NULL,
+                        sourceBoxesJson TEXT NOT NULL,
+                        targetBoxId TEXT NOT NULL,
+                        followDinoxName INTEGER NOT NULL,
+                        syncMode TEXT NOT NULL,
+                        autoIntervalMinutes INTEGER NOT NULL,
+                        lastSyncAt INTEGER NOT NULL,
+                        lastRunAt INTEGER NOT NULL,
+                        lastStatus TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
+
         fun create(context: Context): NoteDatabase {
             // 0.6.0：数据库优先放在 Documents/WantNote（卸载后可找回），
             // 未授权时回退到旧私有位置；首次启动由 AppStorage.prepare 迁移旧数据。
@@ -262,7 +302,8 @@ abstract class NoteDatabase : RoomDatabase() {
             )
                 .addMigrations(
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
-                    MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+                    MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
+                    MIGRATION_7_8, MIGRATION_8_9,
                 )
                 .build()
         }

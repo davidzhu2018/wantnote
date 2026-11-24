@@ -433,6 +433,7 @@ class BackupService(
         .put("dinoxSyncBox", settings.dinoxSyncBox)
         .put("dinoxAutoSyncMinutes", settings.dinoxAutoSyncMinutes)
         .put("markdownMigrationDone", settings.markdownMigrationDone)
+        .put("dinoxBoxesFetchedAt", settings.dinoxBoxesFetchedAt)
         .toString()
 
     // ---- JSON 反序列化（缺字段用当前默认值，兼容未来/旧版备份） -------------
@@ -544,6 +545,7 @@ class BackupService(
             dinoxSyncBox = obj.optString("dinoxSyncBox", default.dinoxSyncBox),
             dinoxAutoSyncMinutes = obj.optInt("dinoxAutoSyncMinutes", default.dinoxAutoSyncMinutes),
             markdownMigrationDone = obj.optBoolean("markdownMigrationDone", default.markdownMigrationDone),
+            dinoxBoxesFetchedAt = obj.optLong("dinoxBoxesFetchedAt", default.dinoxBoxesFetchedAt),
         )
     }
 

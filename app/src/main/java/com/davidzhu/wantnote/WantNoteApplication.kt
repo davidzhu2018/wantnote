@@ -10,6 +10,7 @@ import com.davidzhu.wantnote.data.NoteRepository
 import com.davidzhu.wantnote.data.SettingsRepository
 import com.davidzhu.wantnote.sync.CloudSyncService
 import com.davidzhu.wantnote.sync.dinox.DinoxAutoSyncWorker
+import com.davidzhu.wantnote.sync.dinox.DinoxBoxSyncWorker
 import com.davidzhu.wantnote.sync.dinox.DinoxSyncService
 import com.davidzhu.wantnote.sync.dinox.DinoxTokenVault
 import com.davidzhu.wantnote.transfer.BackupService
@@ -33,6 +34,8 @@ class WantNoteApplication : Application() {
             notes = repository,
             settingsRepository = settingsRepository,
             vault = dinoxTokenVault,
+            boxDao = database.dinoxBoxDao(),
+            ruleDao = database.dinoxSyncRuleDao(),
         )
     }
     val aiService by lazy {
@@ -84,11 +87,18 @@ class WantNoteApplication : Application() {
             AppStorage.prepare(this@WantNoteApplication)
         }
         applicationScope.launch {
-            // 恢复设置 / 换机后重建 Dinox 自动同步任务（间隔在设置里）。
+            // 0.11.0：取消已移除的旧全局定时拉取；按 Room 中保存的「卡片盒同步」规则重建周期任务。
+            runCatching {
+                DinoxAutoSyncWorker.cancelLegacy(this@WantNoteApplication)
+                val rules = dinoxSync.getSyncRules()
+                DinoxBoxSyncWorker.syncAllSchedules(this@WantNoteApplication, rules)
+            }
+        }
+        applicationScope.launch {
+            // 0.11.0：冷启动后台预加载 Dinox 卡片盒到本地库（最多每两小时刷新，不卡第一帧）。
             runCatching {
                 settingsRepository.ensureDefault()
-                val settings = settingsRepository.get()
-                DinoxAutoSyncWorker.schedule(this@WantNoteApplication, settings.dinoxAutoSyncMinutes)
+                dinoxSync.preloadBoxesIfNeeded()
             }
         }
     }

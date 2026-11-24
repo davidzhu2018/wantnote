@@ -130,6 +130,8 @@ data class AppSettings(
     val dinoxAutoSyncMinutes: Int = 0,
     /** 0.9.0：历史数据 → Markdown 的强制迁移是否已完成（完成后不再拦截启动）。 */
     val markdownMigrationDone: Boolean = false,
+    /** 0.11.0：上次成功拉取 Dinox 卡片盒列表的时间（epoch ms，0 = 从未成功）。 */
+    val dinoxBoxesFetchedAt: Long = 0L,
 ) {
     val palette: ThemePalette get() = ThemePalette.fromStorage(themeName)
     val fontScaleOption: FontScaleOption get() = FontScaleOption.fromStorage(fontScale)

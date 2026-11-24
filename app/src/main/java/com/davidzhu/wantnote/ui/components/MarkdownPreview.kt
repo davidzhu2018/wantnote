@@ -67,6 +67,7 @@ fun MarkdownPreview(
     modifier: Modifier = Modifier,
     linkTitles: Map<String, String> = emptyMap(),
     onOpenAttachment: (String) -> Unit = {},
+    scrollable: Boolean = true,
 ) {
     val blocks = remember(content) {
         MarkdownCodec.parseMarkdown(
@@ -78,11 +79,18 @@ fun MarkdownPreview(
     }
     val linkColor = MaterialTheme.colorScheme.primary
     val highlight = MaterialTheme.colorScheme.primary.copy(alpha = 0.24f)
-    Column(
-        modifier = modifier
+    val columnModifier = if (scrollable) {
+        modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    } else {
+        modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+    }
+    Column(
+        modifier = columnModifier,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (blocks.isEmpty()) {
