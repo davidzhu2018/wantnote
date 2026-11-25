@@ -2,7 +2,6 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
 }
@@ -30,14 +29,15 @@ val hasExternalKeystore = releaseStoreFile != null && releaseStorePassword != nu
 
 android {
     namespace = "com.davidzhu.wantnote"
-    compileSdk = 36
+    // 0.13.0：Miuix 0.9.4 / Compose 1.12 的 AAR 元数据要求 compileSdk ≥ 37。
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.davidzhu.wantnote"
         minSdk = 24
         targetSdk = 36
-        versionCode = 12
-        versionName = "0.12.0"
+        versionCode = 13
+        versionName = "0.13.0"
     }
 
     signingConfigs {
@@ -67,22 +67,32 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
     buildFeatures {
         compose = true
         buildConfig = true
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
+    // 0.13.0：Compose BOM 2026.08.00 = androidx Compose foundation 1.12.0，
+    // 与 Miuix 0.9.4 依赖的 Compose Multiplatform foundation 1.12.0 对齐。
+    val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    // 0.13.0：整套外观换成 Miuix（小米 HyperOS 风），固定最新稳定版 0.9.4。
+    // 不引入 miuix-nav（导航仍是 androidx.navigation）与 miuix-blur（需 API 33）。
+    implementation("top.yukonga.miuix.kmp:miuix-ui:0.9.4")
+    implementation("top.yukonga.miuix.kmp:miuix-preference:0.9.4")
+    implementation("top.yukonga.miuix.kmp:miuix-icons:0.9.4")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     implementation("androidx.core:core-ktx:1.15.0")
@@ -92,15 +102,15 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.navigation:navigation-compose:2.8.3")
 
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
+    implementation("androidx.room:room-runtime:2.8.5")
+    implementation("androidx.room:room-ktx:2.8.5")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     // OkHttp 可以发送任意 HTTP 动词（PROPFIND/MKCOL），避免
     // HttpURLConnection 在 doOutput 时把非标准方法悄悄改成 POST。
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // Dinox 自动同步的周期性后台任务。
     implementation("androidx.work:work-runtime-ktx:2.9.1")
-    ksp("androidx.room:room-compiler:2.6.1")
+    ksp("androidx.room:room-compiler:2.8.5")
 
     testImplementation("junit:junit:4.13.2")
     // JVM 单测里用真实的 org.json 实现（android.jar 里的 stub 不可用）。

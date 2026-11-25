@@ -21,24 +21,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Tag
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.davidzhu.wantnote.ui.components.WantAlertDialog
+import com.davidzhu.wantnote.ui.components.WantCheckbox
+import com.davidzhu.wantnote.ui.components.WantFilterChip
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberDatePickerState
+import com.davidzhu.wantnote.ui.components.WantTextButton
+import com.davidzhu.wantnote.ui.components.WantScaffold
+import top.yukonga.miuix.kmp.basic.Text
+import com.davidzhu.wantnote.ui.components.WantTextField
+import com.davidzhu.wantnote.ui.components.WantTopBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,7 +53,7 @@ import com.davidzhu.wantnote.ui.LocalSettings
 import com.davidzhu.wantnote.ui.components.tagColor
 import com.davidzhu.wantnote.ui.home.NoteCollection
 import java.util.Calendar
-import java.util.TimeZone
+import com.davidzhu.wantnote.ui.components.WantDatePickerDialog
 
 private enum class DatePreset(val label: String) {
     ANY("不限日期"),
@@ -70,7 +63,6 @@ private enum class DatePreset(val label: String) {
     CUSTOM("自定义"),
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
     onOpenNote: (String) -> Unit,
@@ -108,19 +100,16 @@ fun SearchScreen(
 
     val hasFilter = query.isNotBlank() || selectedTagIds.isNotEmpty() || preset != DatePreset.ANY
 
-    Scaffold(
+    WantScaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                title = { Text("搜索") },
+            WantTopBar(
+                title = "搜索",
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
             )
         },
     ) { padding ->
@@ -129,15 +118,14 @@ fun SearchScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            TextField(
+            WantTextField(
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
-                placeholder = { Text("按关键字搜标题、正文或标签") },
+                placeholder = "按关键字搜标题、正文或标签",
                 singleLine = true,
-                colors = TextFieldDefaults.colors(),
             )
 
             // 0.11.0 N18-N19：不再平铺全部标签，改为「标签」按钮弹出多选对话框。
@@ -148,7 +136,7 @@ fun SearchScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedButton(onClick = { showTagDialog = true }) {
+                WantTextButton(onClick = { showTagDialog = true }) {
                     Icon(
                         Icons.Outlined.Tag,
                         contentDescription = null,
@@ -164,7 +152,7 @@ fun SearchScreen(
                     )
                 }
                 if (selectedTagIds.isNotEmpty()) {
-                    TextButton(onClick = { selectedTagIds = emptySet() }) {
+                    WantTextButton(onClick = { selectedTagIds = emptySet() }) {
                         Text("清空")
                     }
                 }
@@ -183,7 +171,7 @@ fun SearchScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 DatePreset.entries.forEach { option ->
-                    FilterChip(
+                    WantFilterChip(
                         selected = preset == option,
                         onClick = { datePreset = option.name },
                         label = { Text(option.label) },
@@ -195,10 +183,10 @@ fun SearchScreen(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    TextButton(onClick = { picking = "start" }) {
+                    WantTextButton(onClick = { picking = "start" }) {
                         Text(customStart?.let { "从 ${Dates.dayKey(it)}" } ?: "起始日期")
                     }
-                    TextButton(onClick = { picking = "end" }) {
+                    WantTextButton(onClick = { picking = "end" }) {
                         Text(customEnd?.let { "到 ${Dates.dayKey(it)}" } ?: "结束日期")
                     }
                 }
@@ -233,13 +221,12 @@ fun SearchScreen(
     val currentPicking = picking
     if (currentPicking != null) {
         val initial = if (currentPicking == "start") customStart else customEnd
-        DatePickerDialogSheet(
-            initial = initial,
+        WantDatePickerDialog(
+            initialMillis = initial,
             onDismiss = { picking = null },
             onConfirm = { millis ->
-                // DatePicker uses UTC midnight; convert to local day start.
-                val local = utcMillisToLocalDayStart(millis)
-                if (currentPicking == "start") customStart = local else customEnd = Dates.endOfDay(local)
+                // WantDatePickerDialog 直接返回本地零点毫秒。
+                if (currentPicking == "start") customStart = millis else customEnd = Dates.endOfDay(millis)
                 picking = null
             },
         )
@@ -259,7 +246,7 @@ private fun SearchTagPickerDialog(
 ) {
     var draftIds by remember(initialSelectedIds) { mutableStateOf(initialSelectedIds) }
 
-    AlertDialog(
+    WantAlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(
@@ -269,7 +256,7 @@ private fun SearchTagPickerDialog(
             ) {
                 Text("选择标签")
                 if (draftIds.isNotEmpty()) {
-                    TextButton(onClick = { draftIds = emptySet() }) {
+                    WantTextButton(onClick = { draftIds = emptySet() }) {
                         Text("清空选择")
                     }
                 }
@@ -305,7 +292,7 @@ private fun SearchTagPickerDialog(
                                     .padding(vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Checkbox(
+                                WantCheckbox(
                                     checked = checked,
                                     onCheckedChange = { on ->
                                         draftIds = if (on) draftIds + tag.id else draftIds - tag.id
@@ -332,38 +319,12 @@ private fun SearchTagPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(draftIds) }) { Text("确定") }
+            WantTextButton(onClick = { onConfirm(draftIds) }) { Text("确定") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            WantTextButton(onClick = onDismiss) { Text("取消") }
         },
     )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DatePickerDialogSheet(
-    initial: Long?,
-    onDismiss: () -> Unit,
-    onConfirm: (Long) -> Unit,
-) {
-    val state = rememberDatePickerState(initialSelectedDateMillis = initial)
-    DatePickerDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val value = state.selectedDateMillis
-                    if (value != null) onConfirm(value) else onDismiss()
-                },
-            ) { Text("确定") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        },
-    ) {
-        DatePicker(state = state)
-    }
 }
 
 private fun dateRange(
@@ -393,13 +354,4 @@ private fun dateRange(
             }
         }
     }
-}
-
-private fun utcMillisToLocalDayStart(utcMidnight: Long): Long {
-    val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMidnight }
-    return Dates.startOfDay(
-        utc.get(Calendar.YEAR),
-        utc.get(Calendar.MONTH) + 1,
-        utc.get(Calendar.DAY_OF_MONTH),
-    )
 }

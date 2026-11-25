@@ -23,12 +23,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.PlayCircle
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -52,6 +50,7 @@ import com.davidzhu.wantnote.ui.LocalMedia
 import com.davidzhu.wantnote.ui.theme.LocalFontScale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.davidzhu.wantnote.ui.components.NoteImage
 
 /**
  * Markdown 预览面板（0.9.0 源码模式的下半屏）。
@@ -208,7 +207,7 @@ private fun PreviewQuote(
 
 @Composable
 private fun PreviewCode(block: MarkdownBlock) {
-    Surface(
+    WantSurface(
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(8.dp),
         modifier = Modifier.fillMaxWidth(),
@@ -236,7 +235,7 @@ private fun PreviewTask(
         modifier = Modifier.padding(start = (block.indent * 16).dp),
     ) {
         // 预览只展示勾选状态；勾选编辑回源码里改 [ ] / [x]。
-        Checkbox(checked = block.checked, onCheckedChange = null)
+        WantCheckbox(checked = block.checked, onCheckedChange = null)
         MarkdownText(
             text = block.text,
             style = MaterialTheme.typography.bodyLarge,
@@ -285,7 +284,7 @@ private fun PreviewImage(path: String) {
 
 @Composable
 private fun PreviewVideo(path: String, onOpen: () -> Unit) {
-    Surface(
+    WantSurface(
         onClick = onOpen,
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -308,7 +307,7 @@ private fun PreviewVideo(path: String, onOpen: () -> Unit) {
 
 @Composable
 private fun PreviewFile(path: String, label: String, onOpen: () -> Unit) {
-    Surface(
+    WantSurface(
         onClick = onOpen,
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,

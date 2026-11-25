@@ -11,9 +11,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.davidzhu.wantnote.ui.components.WantAlertDialog
+import top.yukonga.miuix.kmp.basic.Text
+import com.davidzhu.wantnote.ui.components.WantTextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -118,7 +118,7 @@ private fun StorageAccessGate() {
     }
 
     if (!hasAccess && showPrompt) {
-        AlertDialog(
+        WantAlertDialog(
             onDismissRequest = { showPrompt = false },
             title = { Text("允许想记访问文件吗？") },
             text = {
@@ -130,13 +130,13 @@ private fun StorageAccessGate() {
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                WantTextButton(onClick = {
                     showPrompt = false
                     goToGrant()
                 }) { Text("去授权") }
             },
             dismissButton = {
-                TextButton(onClick = { showPrompt = false }) { Text("暂不") }
+                WantTextButton(onClick = { showPrompt = false }) { Text("暂不") }
             },
         )
     }

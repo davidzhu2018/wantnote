@@ -6,6 +6,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import top.yukonga.miuix.kmp.theme.Colors as MiuixColors
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.TextStyles
+import top.yukonga.miuix.kmp.theme.defaultTextStyles
+import top.yukonga.miuix.kmp.theme.darkColorScheme as miuixDarkColorScheme
+import top.yukonga.miuix.kmp.theme.lightColorScheme as miuixLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
@@ -14,7 +20,9 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.davidzhu.wantnote.data.AppSettings
@@ -224,15 +232,125 @@ fun WantNoteTheme(
         }
     }
 
+    // 0.13.0：整套 chrome 换成 Miuix（小米 HyperOS 风）。MiuixTheme 是应用主题，
+    // 用户主题（配色 / 日夜 / 字体缩放）先解析成同一套 palette，再映射进 Miuix 的
+    // Colors；MaterialTheme 留在内层只作为自定义版面（Markdown / 图谱 / 卡片）
+    // 的 typography 与色值 token，保证两者永远一致，不会出现两套视觉语言。
+    val miuixColors = remember(palette, dark) { miuixColorsFor(palette, dark) }
+    val miuixTextStyles = remember(scale, fontFamily) { scaledTextStyles(scale, fontFamily) }
     CompositionLocalProvider(
         LocalWantNoteColors provides WantNoteColors(highlight = palette.highlight),
         LocalFontScale provides scale,
         LocalEditorFontFamily provides fontFamily,
     ) {
-        MaterialTheme(
-            colorScheme = scheme,
-            typography = scaledTypography(scale, fontFamily),
-            content = content,
+        MiuixTheme(colors = miuixColors, textStyles = miuixTextStyles) {
+            MaterialTheme(
+                colorScheme = scheme,
+                typography = scaledTypography(scale, fontFamily),
+                content = content,
+            )
+        }
+    }
+}
+
+/**
+ * WantNote palette → Miuix [MiuixColors]。
+ *
+ * Miuix 的语义槽位（primary 用于开关 / 按钮 / 聚焦描边，secondaryVariant 是默认
+ * 按钮底色，surfaceContainer 是卡片 / 弹窗底色，secondaryContainer 是输入框底色）
+ * 全部从用户当前主题解析出来的 palette 取值，所以换肤、日夜、字体缩放都不受影响。
+ */
+private fun miuixColorsFor(palette: Palette, dark: Boolean): MiuixColors {
+    val bg = if (dark) palette.darkBg else palette.lightBg
+    val ink = if (dark) palette.darkInk else palette.lightInk
+    val muted = if (dark) palette.darkMuted else palette.lightMuted
+    val variant = if (dark) palette.darkVariant else palette.lightVariant
+    val outline = if (dark) palette.darkOutline else palette.lightOutline
+    val error = if (dark) Color(0xFFF2B8B5) else Color(0xFFB3261E)
+    val onError = if (dark) Color(0xFF601410) else Color.White
+    return if (dark) {
+        miuixDarkColorScheme(
+            primary = ink,
+            onPrimary = bg,
+            primaryVariant = ink,
+            onPrimaryVariant = bg,
+            primaryContainer = variant,
+            onPrimaryContainer = ink,
+            error = error,
+            onError = onError,
+            errorContainer = variant,
+            onErrorContainer = ink,
+            secondary = variant,
+            onSecondary = ink,
+            secondaryVariant = variant,
+            onSecondaryVariant = ink,
+            secondaryContainer = variant,
+            onSecondaryContainer = muted,
+            secondaryContainerVariant = variant,
+            onSecondaryContainerVariant = muted,
+            tertiaryContainer = variant,
+            onTertiaryContainer = palette.highlight,
+            tertiaryContainerVariant = variant,
+            background = bg,
+            onBackground = ink,
+            onBackgroundVariant = muted,
+            surface = bg,
+            onSurface = ink,
+            surfaceVariant = variant,
+            onSurfaceSecondary = muted,
+            onSurfaceVariantSummary = muted,
+            onSurfaceVariantActions = muted,
+            surfaceContainer = variant,
+            onSurfaceContainer = ink,
+            onSurfaceContainerVariant = muted,
+            surfaceContainerHigh = variant,
+            onSurfaceContainerHigh = ink,
+            surfaceContainerHighest = variant,
+            onSurfaceContainerHighest = ink,
+            outline = outline,
+            dividerLine = outline.copy(alpha = 0.6f),
+        )
+    } else {
+        miuixLightColorScheme(
+            primary = ink,
+            onPrimary = bg,
+            primaryVariant = ink,
+            onPrimaryVariant = bg,
+            primaryContainer = variant,
+            onPrimaryContainer = ink,
+            error = error,
+            onError = onError,
+            errorContainer = variant,
+            onErrorContainer = ink,
+            secondary = variant,
+            onSecondary = ink,
+            secondaryVariant = variant,
+            onSecondaryVariant = ink,
+            secondaryContainer = variant,
+            onSecondaryContainer = muted,
+            secondaryContainerVariant = variant,
+            onSecondaryContainerVariant = muted,
+            tertiaryContainer = variant,
+            onTertiaryContainer = palette.highlight,
+            tertiaryContainerVariant = variant,
+            background = bg,
+            onBackground = ink,
+            onBackgroundVariant = muted,
+            surface = bg,
+            onSurface = ink,
+            surfaceVariant = variant,
+            onSurfaceSecondary = muted,
+            onSurfaceVariantSummary = muted,
+            onSurfaceVariantActions = muted,
+            surfaceContainer = variant,
+            onSurfaceContainer = ink,
+            onSurfaceContainerVariant = muted,
+            surfaceContainerHigh = variant,
+            onSurfaceContainerHigh = ink,
+            surfaceContainerHighest = variant,
+            onSurfaceContainerHighest = ink,
+            outline = outline,
+            dividerLine = outline.copy(alpha = 0.6f),
         )
     }
 }
@@ -260,5 +378,38 @@ private fun scaledTypography(scale: Float, fontFamily: FontFamily): Typography {
         labelLarge = base.labelLarge.scaled(),
         labelMedium = base.labelMedium.scaled(),
         labelSmall = base.labelSmall.scaled(),
+    )
+}
+
+/**
+ * Miuix 的字体令牌同样吃用户字号缩放与自定义字体，
+ * 保证 chrome（顶栏 / 按钮 / 弹窗 / 列表）与自绘版面字重字号一致。
+ */
+private fun scaledTextStyles(scale: Float, fontFamily: FontFamily): TextStyles {
+    val base = defaultTextStyles()
+    fun TextStyle.scaled() = copy(
+        fontFamily = fontFamily,
+        fontSize = (fontSize.value * scale).sp,
+        lineHeight = if (lineHeight == TextUnit.Unspecified) {
+            lineHeight
+        } else {
+            (lineHeight.value * scale).sp
+        },
+    )
+    return base.copy(
+        main = base.main.scaled(),
+        paragraph = base.paragraph.scaled(),
+        body1 = base.body1.scaled(),
+        body2 = base.body2.scaled(),
+        button = base.button.scaled(),
+        footnote1 = base.footnote1.scaled(),
+        footnote2 = base.footnote2.scaled(),
+        headline1 = base.headline1.scaled(),
+        headline2 = base.headline2.scaled(),
+        subtitle = base.subtitle.scaled(),
+        title1 = base.title1.scaled(),
+        title2 = base.title2.scaled(),
+        title3 = base.title3.scaled(),
+        title4 = base.title4.scaled(),
     )
 }

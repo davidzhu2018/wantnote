@@ -14,12 +14,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import com.davidzhu.wantnote.ui.components.WantAlertDialog
+import com.davidzhu.wantnote.ui.components.WantButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
+import com.davidzhu.wantnote.ui.components.WantTextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -79,9 +79,9 @@ fun AboutScreen(onBack: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(24.dp))
-            Button(
+            WantButton(
                 onClick = {
-                    if (checking) return@Button
+                    if (checking) return@WantButton
                     checking = true
                     scope.launch {
                         when (val result = UpdateCheck.check()) {
@@ -106,12 +106,12 @@ fun AboutScreen(onBack: () -> Unit) {
 
     val info = prompt
     if (info != null) {
-        AlertDialog(
+        WantAlertDialog(
             onDismissRequest = { prompt = null },
             title = { Text("发现新版本 ${info.versionName}") },
             text = { Text("GitHub 上的 ${info.releaseName} 新于当前的 ${BuildConfig.VERSION_NAME}。要下载吗？") },
             confirmButton = {
-                TextButton(
+                WantTextButton(
                     onClick = {
                         openUrl(info.apkUrl ?: info.htmlUrl)
                         prompt = null
@@ -119,7 +119,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 ) { Text("下载") }
             },
             dismissButton = {
-                TextButton(onClick = { prompt = null }) { Text("稍后") }
+                WantTextButton(onClick = { prompt = null }) { Text("稍后") }
             },
         )
     }

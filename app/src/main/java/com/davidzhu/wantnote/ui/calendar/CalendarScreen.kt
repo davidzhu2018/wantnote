@@ -20,16 +20,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.davidzhu.wantnote.ui.components.WantCheckbox
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import com.davidzhu.wantnote.ui.components.WantScaffold
+import top.yukonga.miuix.kmp.basic.Text
+import com.davidzhu.wantnote.ui.components.WantTopBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,7 +50,6 @@ import com.davidzhu.wantnote.data.YearMonth
 import com.davidzhu.wantnote.ui.LocalNotes
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalendarScreen(onOpenNote: (String) -> Unit) {
     val repository = LocalNotes.current
@@ -72,14 +69,11 @@ fun CalendarScreen(onOpenNote: (String) -> Unit) {
         items.map { it.note }.flatMap { listOf(Dates.startOfDay(it.createdAt), Dates.startOfDay(it.updatedAt)) }.toSet()
     }
 
-    Scaffold(
+    WantScaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                title = { Text("日历") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
+            WantTopBar(
+                title = "日历",
             )
         },
     ) { padding ->
@@ -294,7 +288,7 @@ private fun DayTaskRow(
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Checkbox(checked = task.block.checked, onCheckedChange = { onToggle() })
+        WantCheckbox(checked = task.block.checked, onCheckedChange = { onToggle() })
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = task.block.text.ifBlank { "未命名任务" },

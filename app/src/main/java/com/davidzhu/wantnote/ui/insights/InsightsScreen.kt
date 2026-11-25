@@ -12,24 +12,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
+import com.davidzhu.wantnote.ui.components.WantButton
+import com.davidzhu.wantnote.ui.components.WantFilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberDatePickerState
+import com.davidzhu.wantnote.ui.components.WantTextField
+import com.davidzhu.wantnote.ui.components.WantScaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHost
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import com.davidzhu.wantnote.ui.components.WantSurface
+import com.davidzhu.wantnote.ui.components.WantTab
+import com.davidzhu.wantnote.ui.components.WantTabRow
+import top.yukonga.miuix.kmp.basic.Text
+import com.davidzhu.wantnote.ui.components.WantTextButton
+import com.davidzhu.wantnote.ui.components.WantTopBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,8 +53,8 @@ import com.davidzhu.wantnote.ui.LocalSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.util.Calendar
+import com.davidzhu.wantnote.ui.components.WantDatePickerDialog
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InsightsScreen(onOpenNote: (String) -> Unit, onOpenAiSettings: () -> Unit = {}) {
     val repository = LocalNotes.current
@@ -73,15 +68,12 @@ fun InsightsScreen(onOpenNote: (String) -> Unit, onOpenAiSettings: () -> Unit = 
     val snackbar = remember { SnackbarHostState() }
     var tabIndex by remember { mutableStateOf(0) }
 
-    Scaffold(
+    WantScaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            TopAppBar(
-                title = { Text("洞察") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
+            WantTopBar(
+                title = "洞察",
             )
         },
     ) { padding ->
@@ -90,10 +82,10 @@ fun InsightsScreen(onOpenNote: (String) -> Unit, onOpenAiSettings: () -> Unit = 
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            TabRow(selectedTabIndex = tabIndex) {
-                Tab(selected = tabIndex == 0, onClick = { tabIndex = 0 }, text = { Text("回顾") })
-                Tab(selected = tabIndex == 1, onClick = { tabIndex = 1 }, text = { Text("总结") })
-                Tab(selected = tabIndex == 2, onClick = { tabIndex = 2 }, text = { Text("图谱") })
+            WantTabRow(selectedTabIndex = tabIndex) {
+                WantTab(selected = tabIndex == 0, onClick = { tabIndex = 0 }, text = { Text("回顾") })
+                WantTab(selected = tabIndex == 1, onClick = { tabIndex = 1 }, text = { Text("总结") })
+                WantTab(selected = tabIndex == 2, onClick = { tabIndex = 2 }, text = { Text("图谱") })
             }
             when (tabIndex) {
                 0 -> ReviewTab(
@@ -133,7 +125,6 @@ private enum class ReviewRange(val label: String) {
     CUSTOM("自定义"),
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReviewTab(
     items: List<NoteWithDetails>,
@@ -180,7 +171,7 @@ private fun ReviewTab(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             ReviewRange.entries.forEach { candidate ->
-                FilterChip(
+                WantFilterChip(
                     selected = range == candidate,
                     onClick = { range = candidate },
                     label = { Text(candidate.label) },
@@ -195,18 +186,18 @@ private fun ReviewTab(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = { pickingDate = "start" }) {
+                WantTextButton(onClick = { pickingDate = "start" }) {
                     Text(
                         customStart?.let { "起：${Dates.formatDayShort(it)}" } ?: "选择起始日",
                     )
                 }
-                TextButton(onClick = { pickingDate = "end" }) {
+                WantTextButton(onClick = { pickingDate = "end" }) {
                     Text(
                         customEnd?.let { "止：${Dates.formatDayShort(it)}" } ?: "截止至今",
                     )
                 }
                 if (customStart != null || customEnd != null) {
-                    TextButton(onClick = {
+                    WantTextButton(onClick = {
                         customStart = null
                         customEnd = null
                     }) { Text("重置") }
@@ -231,7 +222,7 @@ private fun ReviewTab(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 allTags.forEach { tag ->
-                    FilterChip(
+                    WantFilterChip(
                         selected = tag.id in selectedTagIds,
                         onClick = {
                             selectedTagIds = if (tag.id in selectedTagIds) {
@@ -261,7 +252,7 @@ private fun ReviewTab(
             )
         } else {
             reviewNotes.forEach { item ->
-                Surface(
+                WantSurface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 8.dp)
@@ -305,27 +296,18 @@ private fun ReviewTab(
     if (picking != null) {
         val initial = (if (picking == "start") customStart else customEnd)
             ?: System.currentTimeMillis()
-        val pickerState = rememberDatePickerState(initialSelectedDateMillis = initial)
-        DatePickerDialog(
-            onDismissRequest = { pickingDate = null },
-            confirmButton = {
-                TextButton(onClick = {
-                    pickerState.selectedDateMillis?.let { sel ->
-                        if (picking == "start") {
-                            customStart = Dates.startOfDay(sel)
-                        } else {
-                            customEnd = Dates.endOfDay(sel)
-                        }
-                    }
-                    pickingDate = null
-                }) { Text("确定") }
+        WantDatePickerDialog(
+            initialMillis = initial,
+            onDismiss = { pickingDate = null },
+            onConfirm = { sel ->
+                if (picking == "start") {
+                    customStart = Dates.startOfDay(sel)
+                } else {
+                    customEnd = Dates.endOfDay(sel)
+                }
+                pickingDate = null
             },
-            dismissButton = {
-                TextButton(onClick = { pickingDate = null }) { Text("取消") }
-            },
-        ) {
-            DatePicker(state = pickerState)
-        }
+        )
     }
 }
 
@@ -412,7 +394,7 @@ private fun SummaryTab(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             SummaryScope.entries.forEach { candidate ->
-                FilterChip(
+                WantFilterChip(
                     selected = summaryScope == candidate,
                     onClick = { summaryScope = candidate },
                     label = { Text(candidate.label) },
@@ -437,7 +419,7 @@ private fun SummaryTab(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         allTags.forEach { tag ->
-                            FilterChip(
+                            WantFilterChip(
                                 selected = scopeTagId == tag.id,
                                 onClick = { scopeTagId = if (scopeTagId == tag.id) null else tag.id },
                                 label = { Text(tag.path) },
@@ -447,11 +429,11 @@ private fun SummaryTab(
                 }
             }
             SummaryScope.TOPIC -> {
-                OutlinedTextField(
+                WantTextField(
                     value = topic,
                     onValueChange = { topic = it },
-                    label = { Text("主题关键字") },
-                    placeholder = { Text("例如 复习计划，会匹配标题、正文和标签") },
+                    label = "主题关键字",
+                    placeholder = "例如 复习计划，会匹配标题、正文和标签",
                     singleLine = true,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -473,13 +455,13 @@ private fun SummaryTab(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Button(
+            WantButton(
                 onClick = {
                     if (settings.aiSummaryProviderId.isBlank() || settings.aiSummaryModelId.isBlank()) {
                         onOpenAiSettings()
-                        return@Button
+                        return@WantButton
                     }
-                    if (running) return@Button
+                    if (running) return@WantButton
                     running = true
                     scope.launch {
                         val corpus = scopedItems.take(40).joinToString("\n\n") { item ->
@@ -513,7 +495,7 @@ private fun SummaryTab(
                 )
             }
             if (settings.aiSummaryText.isNotBlank()) {
-                TextButton(
+                WantTextButton(
                     onClick = {
                         scope.launch {
                             settingsRepo.update {
@@ -525,7 +507,7 @@ private fun SummaryTab(
             }
         }
         if (settings.aiSummaryText.isNotBlank()) {
-            Surface(
+            WantSurface(
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                 shape = MaterialTheme.shapes.medium,
                 color = MaterialTheme.colorScheme.surfaceVariant,
@@ -555,7 +537,7 @@ private fun SummaryTab(
             }
         }
 
-        Surface(
+        WantSurface(
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             shape = MaterialTheme.shapes.medium,
             color = MaterialTheme.colorScheme.surfaceVariant,
@@ -589,7 +571,7 @@ private fun SummaryTab(
             Spacer(modifier = Modifier.height(16.dp))
             Text("高亮摘录", style = MaterialTheme.typography.titleMedium)
             summary.highlights.forEach { highlight ->
-                Surface(
+                WantSurface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 8.dp),
@@ -618,7 +600,7 @@ private fun SummaryTab(
 
 @Composable
 private fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
-    Surface(
+    WantSurface(
         modifier = modifier,
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceVariant,

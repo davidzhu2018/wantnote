@@ -9,13 +9,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
+import com.davidzhu.wantnote.ui.components.WantButton
+import com.davidzhu.wantnote.ui.components.WantCircularProgressIndicator
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import com.davidzhu.wantnote.ui.components.WantLinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import com.davidzhu.wantnote.ui.components.WantSurface
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -78,11 +78,11 @@ fun MigrationGate(onDone: () -> Unit) {
 
     if (phase == MigrationPhase.FINISHED) {
         LaunchedEffect(Unit) { onDone() }
-        Surface(modifier = Modifier.fillMaxSize()) {}
+        WantSurface(modifier = Modifier.fillMaxSize()) {}
         return
     }
 
-    Surface(
+    WantSurface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
     ) {
@@ -93,7 +93,7 @@ fun MigrationGate(onDone: () -> Unit) {
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    CircularProgressIndicator()
+                    WantCircularProgressIndicator()
                     Spacer(modifier = Modifier.height(16.dp))
                     Text("正在检查数据…", style = MaterialTheme.typography.bodyMedium)
                 }
@@ -122,7 +122,7 @@ fun MigrationGate(onDone: () -> Unit) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline)
                     when (phase) {
                         MigrationPhase.PROMPT -> {
-                            Button(
+                            WantButton(
                                 onClick = {
                                     phase = MigrationPhase.RUNNING
                                     errorMessage = null
@@ -153,7 +153,7 @@ fun MigrationGate(onDone: () -> Unit) {
                         }
                         MigrationPhase.RUNNING -> {
                             val progress = if (total > 0) done.toFloat() / total else 0f
-                            LinearProgressIndicator(
+                            WantLinearProgressIndicator(
                                 progress = { progress },
                                 modifier = Modifier.fillMaxWidth(),
                             )
@@ -175,7 +175,7 @@ fun MigrationGate(onDone: () -> Unit) {
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.error,
                             )
-                            Button(
+                            WantButton(
                                 onClick = {
                                     phase = MigrationPhase.RUNNING
                                     errorMessage = null

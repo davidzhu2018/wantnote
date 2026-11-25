@@ -24,8 +24,8 @@ import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import com.davidzhu.wantnote.ui.components.WantSurface
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,7 +71,7 @@ private fun NoteCard(
     elevation: Int = 8,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Surface(
+    WantSurface(
         modifier = modifier
             .fillMaxWidth()
             .noteCardShadow(elevation)

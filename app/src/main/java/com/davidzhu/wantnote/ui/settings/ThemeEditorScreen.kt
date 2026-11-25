@@ -18,15 +18,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
+import com.davidzhu.wantnote.ui.components.WantAlertDialog
+import com.davidzhu.wantnote.ui.components.WantButton
+import com.davidzhu.wantnote.ui.components.WantFilterChip
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.davidzhu.wantnote.ui.components.WantTextButton
+import com.davidzhu.wantnote.ui.components.WantTextField
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -115,14 +114,14 @@ fun ThemeEditorScreen(onBack: () -> Unit) {
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                     ) {
                         ThemePalette.entries.forEach { palette ->
-                            FilterChip(
+                            WantFilterChip(
                                 selected = selected == palette.name,
                                 onClick = { selected = palette.name },
                                 label = { Text(palette.label) },
                             )
                         }
                         customs.keys.filter { ThemeCustoms.isUserTheme(it) }.forEach { key ->
-                            FilterChip(
+                            WantFilterChip(
                                 selected = selected == key,
                                 onClick = { selected = key },
                                 label = { Text(ThemeCustoms.displayName(key)) },
@@ -167,7 +166,7 @@ fun ThemeEditorScreen(onBack: () -> Unit) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        TextButton(onClick = { editingField = field }) {
+                        WantTextButton(onClick = { editingField = field }) {
                             Text("修改")
                         }
                     }
@@ -178,7 +177,7 @@ fun ThemeEditorScreen(onBack: () -> Unit) {
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
                     ) {
-                        Button(onClick = {
+                        WantButton(onClick = {
                             val base = effectiveSet(selected)
                             val updated = customs.toMutableMap()
                             // 只保存与出厂色不同的字段（覆盖语义）。
@@ -200,7 +199,7 @@ fun ThemeEditorScreen(onBack: () -> Unit) {
                         }) {
                             Text("保存修改")
                         }
-                        OutlinedButton(onClick = { saveAsDialog = true }) {
+                        WantTextButton(onClick = { saveAsDialog = true }) {
                             Text("另存为新主题")
                         }
                     }
@@ -209,7 +208,7 @@ fun ThemeEditorScreen(onBack: () -> Unit) {
                         modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp),
                     ) {
                         if (!ThemeCustoms.isUserTheme(selected)) {
-                            OutlinedButton(onClick = {
+                            WantTextButton(onClick = {
                                 val updated = customs.toMutableMap()
                                 updated.remove(selected)
                                 persist(updated)
@@ -218,7 +217,7 @@ fun ThemeEditorScreen(onBack: () -> Unit) {
                                 Text("重置此主题")
                             }
                         } else {
-                            OutlinedButton(onClick = {
+                            WantTextButton(onClick = {
                                 val updated = customs.toMutableMap()
                                 updated.remove(selected)
                                 persist(updated, themeName = ThemePalette.PAPER.name)
@@ -237,7 +236,7 @@ fun ThemeEditorScreen(onBack: () -> Unit) {
     editingField?.let { field ->
         val current = draft[field] ?: 0xFF000000L
         var hexInput by remember(field) { mutableStateOf("#%08X".format(current)) }
-        AlertDialog(
+        WantAlertDialog(
             onDismissRequest = { editingField = null },
             title = { Text(ThemeColorSet.LABELS[field] ?: field) },
             text = {
@@ -260,38 +259,38 @@ fun ThemeEditorScreen(onBack: () -> Unit) {
                             )
                         }
                     }
-                    OutlinedTextField(
+                    WantTextField(
                         value = hexInput,
                         onValueChange = { hexInput = it },
-                        label = { Text("ARGB 十六进制，如 #FF3F2A1A") },
+                        label = "ARGB 十六进制，如 #FF3F2A1A",
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
+                WantTextButton(onClick = {
                     parseArgb(hexInput)?.let { draft[field] = it }
                     editingField = null
                 }) { Text("确定") }
             },
             dismissButton = {
-                TextButton(onClick = { editingField = null }) { Text("取消") }
+                WantTextButton(onClick = { editingField = null }) { Text("取消") }
             },
         )
     }
 
     if (saveAsDialog) {
         var name by remember { mutableStateOf("") }
-        AlertDialog(
+        WantAlertDialog(
             onDismissRequest = { saveAsDialog = false },
             title = { Text("另存为新主题") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
+                    WantTextField(
                         value = name,
                         onValueChange = { name = it },
-                        label = { Text("主题名称") },
+                        label = "主题名称",
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -313,9 +312,9 @@ fun ThemeEditorScreen(onBack: () -> Unit) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
+                WantTextButton(onClick = {
                     val clean = name.trim()
-                    if (clean.isEmpty()) return@TextButton
+                    if (clean.isEmpty()) return@WantTextButton
                     val key = ThemeCustoms.userKey(clean)
                     val updated = customs.toMutableMap()
                     updated[key] = ThemeColorSet(
@@ -338,17 +337,17 @@ fun ThemeEditorScreen(onBack: () -> Unit) {
                 }) { Text("创建") }
             },
             dismissButton = {
-                TextButton(onClick = { saveAsDialog = false }) { Text("取消") }
+                WantTextButton(onClick = { saveAsDialog = false }) { Text("取消") }
             },
         )
     }
 
     snackbarMessage.value?.let { message ->
-        AlertDialog(
+        WantAlertDialog(
             onDismissRequest = { snackbarMessage.value = null },
             title = { Text(message) },
             confirmButton = {
-                TextButton(onClick = { snackbarMessage.value = null }) { Text("好") }
+                WantTextButton(onClick = { snackbarMessage.value = null }) { Text("好") }
             },
         )
     }

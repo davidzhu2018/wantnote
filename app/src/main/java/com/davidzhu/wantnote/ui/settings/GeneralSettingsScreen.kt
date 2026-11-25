@@ -7,10 +7,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.FilterChip
+import com.davidzhu.wantnote.ui.components.WantFilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
+import com.davidzhu.wantnote.ui.components.WantTextButton
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,7 +48,7 @@ fun GeneralSettingsScreen(onBack: () -> Unit) {
             SectionTitle("主题")
             ChipRow {
                 ThemePalette.entries.forEach { palette ->
-                    FilterChip(
+                    WantFilterChip(
                         selected = settings.palette == palette,
                         onClick = {
                             scope.launch { settingsRepo.update { it.copy(themeName = palette.name) } }
@@ -61,7 +61,7 @@ fun GeneralSettingsScreen(onBack: () -> Unit) {
             SectionTitle("日夜")
             ChipRow {
                 DayNightMode.entries.forEach { mode ->
-                    FilterChip(
+                    WantFilterChip(
                         selected = settings.dayNightMode == mode,
                         onClick = {
                             scope.launch { settingsRepo.update { it.copy(dayNight = mode.name) } }
@@ -88,7 +88,7 @@ fun GeneralSettingsScreen(onBack: () -> Unit) {
                 modifier = Modifier.padding(top = 4.dp),
             )
             if (!hasStorageAccess) {
-                OutlinedButton(
+                WantTextButton(
                     onClick = {
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
                             runCatching {

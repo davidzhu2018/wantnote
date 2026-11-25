@@ -15,14 +15,14 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.AccountTree
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.davidzhu.wantnote.ui.components.WantAlertDialog
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.davidzhu.wantnote.ui.components.WantTextField
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
+import com.davidzhu.wantnote.ui.components.WantTextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,13 +69,13 @@ fun TagManagementScreen(onBack: () -> Unit) {
                 .padding(padding)
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
-            OutlinedTextField(
+            WantTextField(
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                label = { Text("搜索标签") },
-                placeholder = { Text("路径或关键字") },
+                label = "搜索标签",
+                placeholder = "路径或关键字",
             )
             Row(
                 modifier = Modifier
@@ -85,7 +85,7 @@ fun TagManagementScreen(onBack: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("共 ${visible.size} 个", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(
+                WantTextButton(
                     onClick = {
                         draftPath = ""
                         draftColor = Tag.defaultColor()
@@ -146,7 +146,7 @@ fun TagManagementScreen(onBack: () -> Unit) {
             is TagDialog.Child -> "添加子标签"
             is TagDialog.Delete -> "删除标签"
         }
-        AlertDialog(
+        WantAlertDialog(
             onDismissRequest = { dialog = null },
             title = { Text(title) },
             text = {
@@ -157,10 +157,10 @@ fun TagManagementScreen(onBack: () -> Unit) {
                     is TagDialog.Child -> {
                         Column {
                             Text("父标签：${current.parent.path}", modifier = Modifier.padding(bottom = 8.dp))
-                            OutlinedTextField(
+                            WantTextField(
                                 value = draftPath,
                                 onValueChange = { draftPath = it },
-                                label = { Text("子标签名称") },
+                                label = "子标签名称",
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                             )
@@ -170,10 +170,10 @@ fun TagManagementScreen(onBack: () -> Unit) {
                     }
                     else -> {
                         Column {
-                            OutlinedTextField(
+                            WantTextField(
                                 value = draftPath,
                                 onValueChange = { draftPath = it },
-                                label = { Text(if (current is TagDialog.Rename) "路径（可用斜杠表示层级）" else "路径（例如 工作/项目）") },
+                                label = if (current is TagDialog.Rename) "路径（可用斜杠表示层级）" else "路径（例如 工作/项目）",
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                             )
@@ -184,7 +184,7 @@ fun TagManagementScreen(onBack: () -> Unit) {
                 }
             },
             confirmButton = {
-                TextButton(
+                WantTextButton(
                     onClick = {
                         scope.launch {
                             try {
@@ -214,7 +214,7 @@ fun TagManagementScreen(onBack: () -> Unit) {
                 }
             },
             dismissButton = {
-                TextButton(onClick = { dialog = null }) { Text("取消") }
+                WantTextButton(onClick = { dialog = null }) { Text("取消") }
             },
         )
     }

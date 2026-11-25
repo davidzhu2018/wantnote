@@ -51,25 +51,23 @@ import androidx.compose.material.icons.outlined.Title
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Videocam
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.davidzhu.wantnote.ui.components.WantAlertDialog
+import com.davidzhu.wantnote.ui.components.WantCheckbox
+import com.davidzhu.wantnote.ui.components.WantDropdownMenu
+import com.davidzhu.wantnote.ui.components.WantDropdownMenuItem
+import com.davidzhu.wantnote.ui.components.WantFilterChip
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import com.davidzhu.wantnote.ui.components.WantTextField
+import com.davidzhu.wantnote.ui.components.WantScaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHost
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import com.davidzhu.wantnote.ui.components.WantSurface
+import top.yukonga.miuix.kmp.basic.Text
+import com.davidzhu.wantnote.ui.components.WantTextButton
+import com.davidzhu.wantnote.ui.components.WantTopBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -145,8 +143,11 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import com.davidzhu.wantnote.ui.components.BoxPickerDialog
+import com.davidzhu.wantnote.ui.components.TagAddDialog
+import com.davidzhu.wantnote.data.NoteBoxActions
+import com.davidzhu.wantnote.data.BoxCreateResult
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorScreen(
     noteId: String,
@@ -958,20 +959,20 @@ fun EditorScreen(
 
     val currentFontLabel = blocks.getOrNull(focusedIndex())?.blockFontSize?.label ?: BlockFontSize.NORMAL.label
 
-    Scaffold(
+    WantScaffold(
         containerColor = MaterialTheme.colorScheme.background,
         modifier = Modifier.imePadding(),
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            TopAppBar(
-                title = { Text("$charCount 字") },
+            WantTopBar(
+                title = "$charCount 字",
                 navigationIcon = {
                     IconButton(onClick = { leave() }) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回")
                     }
                 },
                 actions = {
-                    TextButton(onClick = { saveExplicit() }, enabled = !saving) {
+                    WantTextButton(onClick = { saveExplicit() }, enabled = !saving) {
                         Text("保存")
                     }
                     IconButton(onClick = { generateTitleTags() }, enabled = !generating) {
@@ -979,14 +980,14 @@ fun EditorScreen(
                     }
                     // 0.11.0 N16-N17：源码模式收进右上角「高级」按钮，不在主工具栏/顶栏直接露出。
                     Box {
-                        TextButton(onClick = { showAdvancedMenu = true }) {
+                        WantTextButton(onClick = { showAdvancedMenu = true }) {
                             Text("高级")
                         }
-                        DropdownMenu(
+                        WantDropdownMenu(
                             expanded = showAdvancedMenu,
                             onDismissRequest = { showAdvancedMenu = false },
                         ) {
-                            DropdownMenuItem(
+                            WantDropdownMenuItem(
                                 text = {
                                     Text(
                                         if (mode == EditorMode.WYSIWYG) "源码模式" else "所见即所得模式",
@@ -1002,9 +1003,6 @@ fun EditorScreen(
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
             )
         },
         bottomBar = {
@@ -1160,7 +1158,8 @@ fun EditorScreen(
     }
 
     if (showTagPicker) {
-        TagPickerDialog(
+        // 与阅读态共用同一个加标签弹窗。
+        TagAddDialog(
             allTags = allTags,
             selectedIds = noteTags.map { it.id }.toSet(),
             onToggle = { tag ->
@@ -1189,18 +1188,36 @@ fun EditorScreen(
     }
 
     if (showBoxPicker) {
+        // 与阅读态共用同一个弹窗（可搜索、无匹配可新建并归入本篇）。
         BoxPickerDialog(
             boxes = boxes,
             currentBoxId = noteRow?.boxId,
-            onPick = { boxId ->
-                scope.launch { repository.assignNoteToBox(noteId, boxId) }
+            onPick = { box ->
+                showBoxPicker = false
+                scope.launch {
+                    repository.assignNoteToBox(noteId, box.id)
+                    snackbar.showSnackbar("已归入「${box.name}」")
+                }
+            },
+            onCreate = { name ->
+                NoteBoxActions.createAndAssign(
+                    createBox = repository::createBox,
+                    assignNoteToBox = repository::assignNoteToBox,
+                    noteId = noteId,
+                    name = name,
+                ).also { result ->
+                    if (result is BoxCreateResult.Created) {
+                        val box = result.box
+                        scope.launch { snackbar.showSnackbar("已新建「${box.name}」并归入本篇") }
+                    }
+                }
             },
             onDismiss = { showBoxPicker = false },
         )
     }
 
     if (showOverwriteDialog) {
-        AlertDialog(
+        WantAlertDialog(
             onDismissRequest = { showOverwriteDialog = false },
             title = { Text("重新生成标题和标签") },
             text = {
@@ -1209,19 +1226,19 @@ fun EditorScreen(
                         "这篇笔记已有标题或标签。选择应用方式：",
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    TextButton(onClick = {
+                    WantTextButton(onClick = {
                         showOverwriteDialog = false
                         runAiGeneration(overwrite = false)
                     }, modifier = Modifier.fillMaxWidth()) {
                         Text("只补充空位（不动已有内容）")
                     }
-                    TextButton(onClick = {
+                    WantTextButton(onClick = {
                         showOverwriteDialog = false
                         runAiGeneration(overwrite = true)
                     }, modifier = Modifier.fillMaxWidth()) {
                         Text("覆盖标题和标签", color = MaterialTheme.colorScheme.error)
                     }
-                    TextButton(onClick = { showOverwriteDialog = false }, modifier = Modifier.fillMaxWidth()) {
+                    WantTextButton(onClick = { showOverwriteDialog = false }, modifier = Modifier.fillMaxWidth()) {
                         Text("取消")
                     }
                 }
@@ -1230,102 +1247,6 @@ fun EditorScreen(
         )
     }
 }
-
-/**
- * Manual tag add/select dialog, opened from the editor toolbar # button
- * (and from 选择标签). Existing tags can be attached/detached by tapping;
- * a new tag can be typed (slash paths allowed) and created on the fly with
- * a color, then attached to the current note.
- */
-@Composable
-private fun TagPickerDialog(
-    allTags: List<Tag>,
-    selectedIds: Set<String>,
-    onToggle: (Tag) -> Unit,
-    onCreate: (String, Long) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var query by remember { mutableStateOf("") }
-    var draftColor by remember { mutableStateOf(Tag.defaultColor()) }
-    val newPath = Tag.normalizePath(query)
-    val exists = allTags.any { it.path == newPath }
-    val canCreate = newPath.isNotEmpty() && !exists
-    val filtered = if (query.isBlank()) allTags else allTags.filter { it.path.contains(query.trim(), ignoreCase = true) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("选择标签") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    label = { Text("搜索或输入新标签") },
-                    placeholder = { Text("例如 工作/项目") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (canCreate) {
-                    Text(
-                        text = "新标签：$newPath",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        TagColorPicker(
-                            selected = draftColor,
-                            onSelect = { draftColor = it },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    TextButton(
-                        onClick = {
-                            onCreate(newPath, draftColor)
-                            query = ""
-                            draftColor = Tag.defaultColor()
-                        },
-                        modifier = Modifier.padding(top = 2.dp),
-                    ) {
-                        Text("创建并附加")
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                if (allTags.isEmpty()) {
-                    Text(
-                        "还没有标签。在上方输入名称即可创建并附加到本笔记。",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else if (filtered.isEmpty()) {
-                    Text(
-                        "没有匹配「${query.trim()}」的标签，可以新建。",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    androidx.compose.foundation.lazy.LazyColumn {
-                        items(filtered.size) { index ->
-                            val tag = filtered[index]
-                            val on = tag.id in selectedIds
-                            FilterChip(
-                                selected = on,
-                                onClick = { onToggle(tag) },
-                                label = { Text(tag.path) },
-                                modifier = Modifier.padding(end = 6.dp, bottom = 6.dp),
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("完成") }
-        },
-    )
-}
-
 
 internal fun guessedMime(path: String): String {
     val ext = path.substringAfterLast('.', "").lowercase()
@@ -1410,7 +1331,7 @@ private fun OutlineBlockRow(
     ) {
         when (block.blockType) {
             BlockType.TASK -> {
-                Checkbox(
+                WantCheckbox(
                     checked = block.checked,
                     onCheckedChange = onCheckedChange,
                     modifier = Modifier.size(32.dp),
@@ -1456,7 +1377,7 @@ private fun OutlineBlockRow(
             BlockType.TABLE -> {
                 // 表格块的编辑面是原始竖线行（多行），所见即所得模式下
                 // 直接改单元格内容；渲染交给源码模式的预览面板。
-                Surface(
+                WantSurface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth(),
@@ -1539,7 +1460,7 @@ private fun LocalImageBlock(path: String, modifier: Modifier = Modifier) {
 private fun LocalVideoBlock(path: String, onOpen: () -> Unit) {
     val media = LocalMedia.current
     val file = media.fileFor(path)
-    Surface(
+    WantSurface(
         onClick = onOpen,
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -1616,7 +1537,7 @@ private fun OutlineToolbar(
 
 @Composable
 private fun ToolButton(label: String, icon: ImageVector, onClick: () -> Unit) {
-    TextButton(onClick = onClick, modifier = Modifier.padding(horizontal = 0.dp)) {
+    WantTextButton(onClick = onClick, modifier = Modifier.padding(horizontal = 0.dp)) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(icon, contentDescription = label, modifier = Modifier.size(20.dp))
             Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
@@ -1641,7 +1562,7 @@ private fun EditorTagBar(
             tags.forEach { tag ->
                 TagChip(tag = tag, onRemove = { onRemove(tag) })
             }
-            TextButton(onClick = onPick) {
+            WantTextButton(onClick = onPick) {
                 Text("选择标签")
             }
         }
@@ -1654,7 +1575,7 @@ private fun EditorBoxBar(
     boxName: String?,
     onPick: () -> Unit,
 ) {
-    TextButton(onClick = onPick, modifier = Modifier.padding(bottom = 4.dp)) {
+    WantTextButton(onClick = onPick, modifier = Modifier.padding(bottom = 4.dp)) {
         Icon(
             Icons.Outlined.Folder,
             contentDescription = null,
@@ -1668,65 +1589,11 @@ private fun EditorBoxBar(
     }
 }
 
-/**
- * 0.10.0 卡片盒选择对话框：只列已存在的卡片盒（含默认「暂存箱」）。
- * 点选即写库；不做任何新建——新建入口在设置 → 卡片盒管理。
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun BoxPickerDialog(
-    boxes: List<NoteBox>,
-    currentBoxId: String?,
-    onPick: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("选择卡片盒") },
-        text = {
-            Column {
-                Text(
-                    "点选后立即保存到该卡片盒；不选择时，点「保存」会由 AI 自动分配到一个已存在的卡片盒。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                if (boxes.isEmpty()) {
-                    Text(
-                        "还没有卡片盒。可到 设置 → 卡片盒管理 创建。",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        boxes.forEach { box ->
-                            FilterChip(
-                                selected = box.id == currentBoxId,
-                                onClick = {
-                                    onPick(box.id)
-                                    onDismiss()
-                                },
-                                label = { Text(box.name) },
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("完成") }
-        },
-    )
-}
-
 @Composable
 private fun LocalFileBlock(path: String, label: String, onOpen: () -> Unit) {
     val media = LocalMedia.current
     val file = media.fileFor(path)
-    Surface(
+    WantSurface(
         onClick = onOpen,
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -1843,7 +1710,7 @@ private fun MentionListPopup(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
+    WantSurface(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(max = 232.dp),
@@ -1865,7 +1732,7 @@ private fun MentionListPopup(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = onDismiss) { Text("关闭") }
+                WantTextButton(onClick = onDismiss) { Text("关闭") }
             }
             if (candidates.isEmpty()) {
                 Text(
@@ -1943,16 +1810,16 @@ private fun NoteLinkPickerDialog(
             pool.filter { it.title.contains(trimmed, ignoreCase = true) || it.body.contains(trimmed, ignoreCase = true) }
         }
     }
-    AlertDialog(
+    WantAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("@ 链接到笔记") },
         text = {
             Column {
-                OutlinedTextField(
+                WantTextField(
                     value = query,
                     onValueChange = { query = it },
-                    label = { Text("搜索笔记") },
-                    placeholder = { Text("留空显示最近笔记") },
+                    label = "搜索笔记",
+                    placeholder = "留空显示最近笔记",
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -1978,7 +1845,7 @@ private fun NoteLinkPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            WantTextButton(onClick = onDismiss) { Text("取消") }
         },
     )
 }

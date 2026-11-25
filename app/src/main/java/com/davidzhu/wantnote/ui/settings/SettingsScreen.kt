@@ -10,16 +10,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
+import com.davidzhu.wantnote.ui.components.WantListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import com.davidzhu.wantnote.ui.components.WantScaffold
+import top.yukonga.miuix.kmp.basic.Text
+import com.davidzhu.wantnote.ui.components.WantTopBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -43,17 +40,13 @@ val SettingsEntries = listOf(
     SettingsEntry("关于", "版本与检查更新", "settings/about"),
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(onOpen: (String) -> Unit) {
-    Scaffold(
+    WantScaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                title = { Text("设置") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
+            WantTopBar(
+                title = "设置",
             )
         },
     ) { padding ->
@@ -64,13 +57,12 @@ fun SettingsScreen(onOpen: (String) -> Unit) {
             contentPadding = PaddingValues(vertical = 8.dp),
         ) {
             items(SettingsEntries) { entry ->
-                ListItem(
+                WantListItem(
                     headlineContent = { Text(entry.title) },
                     supportingContent = { Text(entry.subtitle) },
                     trailingContent = {
                         Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null)
                     },
-                    colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.background),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onOpen(entry.route) },

@@ -14,22 +14,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.LinearProgressIndicator
+import com.davidzhu.wantnote.ui.components.WantAlertDialog
+import com.davidzhu.wantnote.ui.components.WantButton
+import com.davidzhu.wantnote.ui.components.WantDropdownMenuItem
+import com.davidzhu.wantnote.ui.components.WantFilterChip
+import com.davidzhu.wantnote.ui.components.WantLinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.davidzhu.wantnote.ui.components.WantTextButton
+import com.davidzhu.wantnote.ui.components.WantTextField
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import com.davidzhu.wantnote.ui.components.WantTab
+import com.davidzhu.wantnote.ui.components.WantTabRow
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,6 +51,7 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.davidzhu.wantnote.ui.components.WantDropdownMenu
 
 private val BackupSyncTabs = listOf("备份", "云同步")
 
@@ -74,9 +71,9 @@ fun BackupSyncScreen(onBack: () -> Unit) {
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            TabRow(selectedTabIndex = tab) {
+            WantTabRow(selectedTabIndex = tab) {
                 BackupSyncTabs.forEachIndexed { index, label ->
-                    Tab(
+                    WantTab(
                         selected = tab == index,
                         onClick = { tab = index },
                         text = { Text(label) },
@@ -163,9 +160,9 @@ private fun BackupTab(snackbar: SnackbarHostState) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 8.dp),
         )
-        Button(
+        WantButton(
             onClick = {
-                if (busy) return@Button
+                if (busy) return@WantButton
                 busy = true
                 progress = "正在准备备份…"
                 pendingBackupName = defaultBackupName
@@ -183,9 +180,9 @@ private fun BackupTab(snackbar: SnackbarHostState) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 8.dp),
         )
-        OutlinedButton(
+        WantTextButton(
             onClick = {
-                if (busy) return@OutlinedButton
+                if (busy) return@WantTextButton
                 busy = true
                 progress = "正在选择备份文件…"
                 openLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
@@ -196,7 +193,7 @@ private fun BackupTab(snackbar: SnackbarHostState) {
 
         if (busy) {
             Spacer(modifier = Modifier.height(16.dp))
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            WantLinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             if (progress.isNotBlank()) {
                 Text(
                     progress,
@@ -217,7 +214,7 @@ private fun BackupTab(snackbar: SnackbarHostState) {
     }
 
     pendingRestore?.let { uri ->
-        AlertDialog(
+        WantAlertDialog(
             onDismissRequest = {
                 pendingRestore = null
                 busy = false
@@ -230,7 +227,7 @@ private fun BackupTab(snackbar: SnackbarHostState) {
                 )
             },
             confirmButton = {
-                TextButton(
+                WantTextButton(
                     onClick = {
                         pendingRestore = null
                         scope.launch {
@@ -258,7 +255,7 @@ private fun BackupTab(snackbar: SnackbarHostState) {
                 ) { Text("恢复") }
             },
             dismissButton = {
-                TextButton(onClick = {
+                WantTextButton(onClick = {
                     pendingRestore = null
                     busy = false
                     progress = ""
@@ -268,7 +265,6 @@ private fun BackupTab(snackbar: SnackbarHostState) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CloudSyncTab(snackbar: SnackbarHostState) {
     val settingsRepo = LocalSettings.current
@@ -339,20 +335,17 @@ private fun CloudSyncTab(snackbar: SnackbarHostState) {
             modifier = Modifier.padding(bottom = 16.dp),
         )
         SectionTitle("同步方式")
-        ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
-            OutlinedTextField(
-                value = method.label,
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("默认同步方式") },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                modifier = Modifier
-                    .menuAnchor()
-                    .fillMaxWidth(),
-            )
-            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        Box {
+            WantTextButton(
+                onClick = { expanded = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("默认同步方式：${method.label}", modifier = Modifier.weight(1f))
+                Text("▾", style = MaterialTheme.typography.labelLarge)
+            }
+            WantDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 SyncMethod.entries.forEach { option ->
-                    DropdownMenuItem(
+                    WantDropdownMenuItem(
                         text = { Text(option.label) },
                         onClick = {
                             method = option
@@ -366,7 +359,7 @@ private fun CloudSyncTab(snackbar: SnackbarHostState) {
         Spacer(modifier = Modifier.height(8.dp))
         Row {
             SyncMethod.entries.forEach { option ->
-                FilterChip(
+                WantFilterChip(
                     selected = method == option,
                     onClick = {
                         method = option
@@ -381,12 +374,12 @@ private fun CloudSyncTab(snackbar: SnackbarHostState) {
         Spacer(modifier = Modifier.height(20.dp))
         if (method == SyncMethod.WEBDAV) {
             SectionTitle("WebDAV")
-            OutlinedTextField(value = webdavUrl, onValueChange = { webdavUrl = it }, label = { Text("服务器地址") }, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), singleLine = true)
-            OutlinedTextField(value = webdavUser, onValueChange = { webdavUser = it }, label = { Text("用户名") }, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), singleLine = true)
-            OutlinedTextField(
+            WantTextField(value = webdavUrl, onValueChange = { webdavUrl = it }, label = "服务器地址", modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), singleLine = true)
+            WantTextField(value = webdavUser, onValueChange = { webdavUser = it }, label = "用户名", modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), singleLine = true)
+            WantTextField(
                 value = webdavPassword,
                 onValueChange = { webdavPassword = it },
-                label = { Text("密码") },
+                label = "密码",
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
@@ -394,30 +387,30 @@ private fun CloudSyncTab(snackbar: SnackbarHostState) {
             )
         } else {
             SectionTitle("S3")
-            OutlinedTextField(value = s3Endpoint, onValueChange = { s3Endpoint = it }, label = { Text("Endpoint") }, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), singleLine = true)
-            OutlinedTextField(value = s3Bucket, onValueChange = { s3Bucket = it }, label = { Text("Bucket") }, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), singleLine = true)
-            OutlinedTextField(value = s3Region, onValueChange = { s3Region = it }, label = { Text("Region") }, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), singleLine = true)
-            OutlinedTextField(value = s3Access, onValueChange = { s3Access = it }, label = { Text("Access Key") }, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), singleLine = true)
-            OutlinedTextField(
+            WantTextField(value = s3Endpoint, onValueChange = { s3Endpoint = it }, label = "Endpoint", modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), singleLine = true)
+            WantTextField(value = s3Bucket, onValueChange = { s3Bucket = it }, label = "Bucket", modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), singleLine = true)
+            WantTextField(value = s3Region, onValueChange = { s3Region = it }, label = "Region", modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), singleLine = true)
+            WantTextField(value = s3Access, onValueChange = { s3Access = it }, label = "Access Key", modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), singleLine = true)
+            WantTextField(
                 value = s3Secret,
                 onValueChange = { s3Secret = it },
-                label = { Text("Secret Key") },
+                label = "Secret Key",
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             )
-            OutlinedTextField(value = s3Prefix, onValueChange = { s3Prefix = it }, label = { Text("Prefix（可选）") }, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), singleLine = true)
+            WantTextField(value = s3Prefix, onValueChange = { s3Prefix = it }, label = "Prefix（可选）", modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), singleLine = true)
         }
 
         Spacer(modifier = Modifier.height(12.dp))
-        Button(
+        WantButton(
             onClick = { runAction { sync.testAndSave(draft()) } },
             enabled = !busy,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("测试并保存") }
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedButton(
+        WantTextButton(
             onClick = {
                 runAction {
                     settingsRepo.update { draft() }
@@ -428,7 +421,7 @@ private fun CloudSyncTab(snackbar: SnackbarHostState) {
             modifier = Modifier.fillMaxWidth(),
         ) { Text("上传") }
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedButton(
+        WantTextButton(
             onClick = { runAction { sync.download() } },
             enabled = !busy,
             modifier = Modifier.fillMaxWidth(),

@@ -14,16 +14,15 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
+import com.davidzhu.wantnote.ui.components.WantAlertDialog
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import com.davidzhu.wantnote.ui.components.WantListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.davidzhu.wantnote.ui.components.WantTextField
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
+import com.davidzhu.wantnote.ui.components.WantTextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -90,7 +89,7 @@ fun BoxManagementScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(
+                WantTextButton(
                     onClick = {
                         draftName = ""
                         dialogError = null
@@ -110,7 +109,7 @@ fun BoxManagementScreen(onBack: () -> Unit) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(boxes, key = { it.id }) { box ->
                     val isDefault = box.id == NoteBox.DEFAULT_ID
-                    ListItem(
+                    WantListItem(
                         headlineContent = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
@@ -150,7 +149,6 @@ fun BoxManagementScreen(onBack: () -> Unit) {
                                 }
                             }
                         },
-                        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.background),
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable(enabled = false) { },
@@ -167,7 +165,7 @@ fun BoxManagementScreen(onBack: () -> Unit) {
             is BoxDialog.Rename -> "重命名卡片盒"
             is BoxDialog.Delete -> "删除卡片盒"
         }
-        AlertDialog(
+        WantAlertDialog(
             onDismissRequest = {
                 if (!submitting) {
                     dialog = null
@@ -186,13 +184,13 @@ fun BoxManagementScreen(onBack: () -> Unit) {
                     }
                     else -> {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            OutlinedTextField(
+                            WantTextField(
                                 value = draftName,
                                 onValueChange = {
                                     draftName = it
                                     if (dialogError != null) dialogError = null
                                 },
-                                label = { Text("卡片盒名称") },
+                                label = "卡片盒名称",
                                 singleLine = true,
                                 isError = dialogError != null,
                                 modifier = Modifier.fillMaxWidth(),
@@ -209,10 +207,10 @@ fun BoxManagementScreen(onBack: () -> Unit) {
                 }
             },
             confirmButton = {
-                TextButton(
+                WantTextButton(
                     enabled = !submitting,
                     onClick = {
-                        if (submitting) return@TextButton
+                        if (submitting) return@WantTextButton
                         submitting = true
                         scope.launch {
                             try {
@@ -275,7 +273,7 @@ fun BoxManagementScreen(onBack: () -> Unit) {
                 }
             },
             dismissButton = {
-                TextButton(
+                WantTextButton(
                     enabled = !submitting,
                     onClick = {
                         dialog = null

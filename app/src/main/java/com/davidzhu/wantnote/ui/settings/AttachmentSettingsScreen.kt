@@ -10,15 +10,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
+import com.davidzhu.wantnote.ui.components.WantAlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.davidzhu.wantnote.ui.components.WantTextButton
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import com.davidzhu.wantnote.ui.components.WantSwitch
+import com.davidzhu.wantnote.ui.components.WantTab
+import com.davidzhu.wantnote.ui.components.WantTabRow
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -114,7 +113,7 @@ fun AttachmentSettingsScreen(onBack: () -> Unit) {
                         Text("图片压缩", style = MaterialTheme.typography.titleMedium)
                         Text("开启后，从相册插入的图片会缩小并转成 JPEG。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Switch(
+                    WantSwitch(
                         checked = settings.compressImages,
                         onCheckedChange = { checked ->
                             scope.launch { settingsRepo.update { it.copy(compressImages = checked) } }
@@ -131,7 +130,7 @@ fun AttachmentSettingsScreen(onBack: () -> Unit) {
                         Text("视频压缩", style = MaterialTheme.typography.titleMedium)
                         Text("开关会保存在本机。本包导入视频时仍按原文件保存（完整转码未接入）。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Switch(
+                    WantSwitch(
                         checked = settings.compressVideos,
                         onCheckedChange = { checked ->
                             scope.launch { settingsRepo.update { it.copy(compressVideos = checked) } }
@@ -139,16 +138,16 @@ fun AttachmentSettingsScreen(onBack: () -> Unit) {
                     )
                 }
                 Spacer(modifier = Modifier.height(12.dp))
-                OutlinedButton(
+                WantTextButton(
                     onClick = { confirmClear = true },
                     enabled = unused.isNotEmpty(),
                 ) {
                     Text("清理未引用附件（${unused.size}）")
                 }
             }
-            TabRow(selectedTabIndex = tab) {
+            WantTabRow(selectedTabIndex = tab) {
                 TabLabels.forEachIndexed { index, label ->
-                    Tab(
+                    WantTab(
                         selected = tab == index,
                         onClick = { tab = index },
                         text = { Text(label) },
@@ -183,12 +182,12 @@ fun AttachmentSettingsScreen(onBack: () -> Unit) {
     }
 
     if (confirmClear) {
-        AlertDialog(
+        WantAlertDialog(
             onDismissRequest = { confirmClear = false },
             title = { Text("清理未引用附件") },
             text = { Text("将删除 ${unused.size} 个没有任何笔记引用的文件，此操作不可撤销。") },
             confirmButton = {
-                TextButton(
+                WantTextButton(
                     onClick = {
                         scope.launch {
                             var deleted = 0
@@ -203,7 +202,7 @@ fun AttachmentSettingsScreen(onBack: () -> Unit) {
                 ) { Text("删除") }
             },
             dismissButton = {
-                TextButton(onClick = { confirmClear = false }) { Text("取消") }
+                WantTextButton(onClick = { confirmClear = false }) { Text("取消") }
             },
         )
     }

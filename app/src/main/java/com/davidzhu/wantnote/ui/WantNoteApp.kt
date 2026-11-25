@@ -13,15 +13,13 @@ import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.FloatingActionButtonDefaults
-import androidx.compose.material3.Icon
+import com.davidzhu.wantnote.ui.components.WantFab
+import top.yukonga.miuix.kmp.basic.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import com.davidzhu.wantnote.ui.components.WantNavigationBar
+import com.davidzhu.wantnote.ui.components.WantNavigationBarItem
+import com.davidzhu.wantnote.ui.components.WantScaffold
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -102,7 +100,7 @@ fun WantNoteApp() {
         }
     }
 
-    Scaffold(
+    WantScaffold(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
@@ -224,26 +222,21 @@ private fun WantNoteBottomBar(
     onTab: (String) -> Unit,
     onPlus: () -> Unit,
 ) {
-    val colors = NavigationBarItemDefaults.colors(
-        indicatorColor = MaterialTheme.colorScheme.surfaceVariant,
-    )
-    NavigationBar(
+    WantNavigationBar(
         containerColor = MaterialTheme.colorScheme.surface,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        NavigationBarItem(
+        WantNavigationBarItem(
             selected = currentRoute == MainTab.Home.route,
             onClick = { onTab(MainTab.Home.route) },
-            icon = { Icon(MainTab.Home.icon, contentDescription = MainTab.Home.label) },
-            label = { Text(MainTab.Home.label) },
-            colors = colors,
+            icon = MainTab.Home.icon,
+            label = MainTab.Home.label,
         )
-        NavigationBarItem(
+        WantNavigationBarItem(
             selected = currentRoute == MainTab.Calendar.route,
             onClick = { onTab(MainTab.Calendar.route) },
-            icon = { Icon(MainTab.Calendar.icon, contentDescription = MainTab.Calendar.label) },
-            label = { Text(MainTab.Calendar.label) },
-            colors = colors,
+            icon = MainTab.Calendar.icon,
+            label = MainTab.Calendar.label,
         )
         Box(
             modifier = Modifier
@@ -251,32 +244,28 @@ private fun WantNoteBottomBar(
                 .padding(top = 4.dp),
             contentAlignment = Alignment.TopCenter,
         ) {
-            FloatingActionButton(
+            WantFab(
                 onClick = onPlus,
                 modifier = Modifier
                     .size(52.dp)
                     .offset(y = (-6).dp),
                 shape = CircleShape,
                 containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp),
             ) {
                 Icon(Icons.Outlined.Add, contentDescription = "新建笔记")
             }
         }
-        NavigationBarItem(
+        WantNavigationBarItem(
             selected = currentRoute == MainTab.Insights.route,
             onClick = { onTab(MainTab.Insights.route) },
-            icon = { Icon(MainTab.Insights.icon, contentDescription = MainTab.Insights.label) },
-            label = { Text(MainTab.Insights.label) },
-            colors = colors,
+            icon = MainTab.Insights.icon,
+            label = MainTab.Insights.label,
         )
-        NavigationBarItem(
+        WantNavigationBarItem(
             selected = currentRoute == MainTab.Settings.route,
             onClick = { onTab(MainTab.Settings.route) },
-            icon = { Icon(MainTab.Settings.icon, contentDescription = MainTab.Settings.label) },
-            label = { Text(MainTab.Settings.label) },
-            colors = colors,
+            icon = MainTab.Settings.icon,
+            label = MainTab.Settings.label,
         )
     }
 }

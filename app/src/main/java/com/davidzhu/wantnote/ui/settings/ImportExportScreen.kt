@@ -11,16 +11,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.LinearProgressIndicator
+import com.davidzhu.wantnote.ui.components.WantAlertDialog
+import com.davidzhu.wantnote.ui.components.WantButton
+import com.davidzhu.wantnote.ui.components.WantLinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.davidzhu.wantnote.ui.components.WantTextButton
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import com.davidzhu.wantnote.ui.components.WantTab
+import com.davidzhu.wantnote.ui.components.WantTabRow
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -51,9 +50,9 @@ fun ImportExportScreen(onBack: () -> Unit) {
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            TabRow(selectedTabIndex = dataTabState) {
+            WantTabRow(selectedTabIndex = dataTabState) {
                 DataTabs.forEachIndexed { index, label ->
-                    Tab(
+                    WantTab(
                         selected = dataTabState == index,
                         onClick = { dataTabState = index },
                         text = { Text(label) },
@@ -145,18 +144,18 @@ private fun ImportTab(snackbar: SnackbarHostState) {
             modifier = Modifier.padding(bottom = 16.dp),
         )
         SectionTitle("选择文件")
-        OutlinedButton(
+        WantTextButton(
             onClick = {
-                if (busy) return@OutlinedButton
+                if (busy) return@WantTextButton
                 multiLauncher.launch(arrayOf("*/*"))
             },
             enabled = !busy,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("选择 Markdown / HTML 文件") }
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedButton(
+        WantTextButton(
             onClick = {
-                if (busy) return@OutlinedButton
+                if (busy) return@WantTextButton
                 zipLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
             },
             enabled = !busy,
@@ -166,7 +165,7 @@ private fun ImportTab(snackbar: SnackbarHostState) {
         if (busy) {
             Spacer(modifier = Modifier.height(20.dp))
             if (total > 0) {
-                LinearProgressIndicator(
+                WantLinearProgressIndicator(
                     progress = { done.toFloat() / total.toFloat() },
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -176,7 +175,7 @@ private fun ImportTab(snackbar: SnackbarHostState) {
                     modifier = Modifier.padding(top = 8.dp),
                 )
             } else {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                WantLinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
             if (currentFile.isNotBlank()) {
                 Text(
@@ -198,7 +197,7 @@ private fun ImportTab(snackbar: SnackbarHostState) {
     }
 
     if (failures.isNotEmpty()) {
-        AlertDialog(
+        WantAlertDialog(
             onDismissRequest = { failures = emptyList() },
             title = { Text("部分文件导入失败") },
             text = {
@@ -208,7 +207,7 @@ private fun ImportTab(snackbar: SnackbarHostState) {
                 )
             },
             confirmButton = {
-                TextButton(onClick = { failures = emptyList() }) { Text("知道了") }
+                WantTextButton(onClick = { failures = emptyList() }) { Text("知道了") }
             },
         )
     }
@@ -304,14 +303,14 @@ private fun ExportTab(snackbar: SnackbarHostState) {
             modifier = Modifier.padding(bottom = 16.dp),
         )
         SectionTitle("导出全部笔记")
-        Button(
+        WantButton(
             onClick = { startExport() },
             enabled = !busy,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("导出 Markdown") }
         if (busy) {
             Spacer(modifier = Modifier.height(20.dp))
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            WantLinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             Text(
                 currentFile.ifBlank { "正在导出…" },
                 style = MaterialTheme.typography.bodySmall,

@@ -1,4 +1,3 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
 
 package com.davidzhu.wantnote.ui.home
 
@@ -13,22 +12,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.davidzhu.wantnote.ui.components.WantAlertDialog
+import com.davidzhu.wantnote.ui.components.WantCircularProgressIndicator
+import com.davidzhu.wantnote.ui.components.WantDropdownMenu
+import com.davidzhu.wantnote.ui.components.WantDropdownMenuItem
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import com.davidzhu.wantnote.ui.components.WantTextButton
+import com.davidzhu.wantnote.ui.components.WantScaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHost
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
+import com.davidzhu.wantnote.ui.components.WantTopBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,7 +56,6 @@ private sealed interface HomeFilter {
     data class ByTag(val tagId: String) : HomeFilter
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     onOpenNote: (String) -> Unit,
@@ -97,20 +92,17 @@ fun HomeScreen(
         }
     }
 
-    Scaffold(
+    WantScaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            TopAppBar(
-                title = { Text("想记") },
+            WantTopBar(
+                title = "想记",
                 actions = {
                     IconButton(onClick = onSearch) {
                         Icon(Icons.Outlined.Search, contentDescription = "搜索")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
             )
         },
     ) { padding ->
@@ -235,7 +227,7 @@ fun HomeScreen(
     }
 
     menuNote?.let { target ->
-        AlertDialog(
+        WantAlertDialog(
             onDismissRequest = { if (!busy) menuNote = null },
             title = { Text(SearchText.displayTitle(target.note), maxLines = 2) },
             text = {
@@ -264,7 +256,7 @@ fun HomeScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { menuNote = null }, enabled = !busy) { Text("取消") }
+                WantTextButton(onClick = { menuNote = null }, enabled = !busy) { Text("取消") }
             },
         )
     }
@@ -292,14 +284,14 @@ fun HomeScreen(
     }
 
     deleteTarget?.let { target ->
-        AlertDialog(
+        WantAlertDialog(
             onDismissRequest = { deleteTarget = null },
             title = { Text("删除这条笔记？") },
             text = {
                 Text("「${SearchText.displayTitle(target.note)}」及其所有内容、标签关联和笔记链接都会被永久删除，无法撤销。")
             },
             confirmButton = {
-                TextButton(
+                WantTextButton(
                     onClick = {
                         val id = target.note.id
                         deleteTarget = null
@@ -311,7 +303,7 @@ fun HomeScreen(
                 ) { Text("永久删除", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+                WantTextButton(onClick = { deleteTarget = null }) { Text("取消") }
             },
         )
     }
@@ -323,7 +315,7 @@ private fun HomeMenuAction(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
-    TextButton(
+    WantTextButton(
         onClick = onClick,
         enabled = enabled,
         modifier = Modifier.fillMaxWidth(),
@@ -335,7 +327,7 @@ private fun HomeMenuAction(
 /** 下拉触发按钮：标签 + 右侧小箭头，统一样式。 */
 @Composable
 private fun DropdownTrigger(label: String, onClick: () -> Unit) {
-    TextButton(onClick = onClick) {
+    WantTextButton(onClick = onClick) {
         Text(label, style = MaterialTheme.typography.labelLarge)
         Icon(
             Icons.Outlined.ArrowDropDown,
@@ -354,9 +346,9 @@ private fun ViewModeDropdown(
     var expanded by remember { mutableStateOf(false) }
     androidx.compose.foundation.layout.Box {
         DropdownTrigger(label = selected.label) { expanded = true }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        WantDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             HomeViewMode.entries.forEach { mode ->
-                DropdownMenuItem(
+                WantDropdownMenuItem(
                     text = { Text(mode.label) },
                     onClick = {
                         expanded = false
@@ -385,15 +377,15 @@ private fun FilterDropdown(
     }
     androidx.compose.foundation.layout.Box {
         DropdownTrigger(label = label) { expanded = true }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
+        WantDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            WantDropdownMenuItem(
                 text = { Text("全部笔记") },
                 onClick = {
                     expanded = false
                     onSelect(HomeFilter.All)
                 },
             )
-            DropdownMenuItem(
+            WantDropdownMenuItem(
                 text = { Text("未分配（无卡片盒）") },
                 onClick = {
                     expanded = false
@@ -402,7 +394,7 @@ private fun FilterDropdown(
             )
             if (boxes.isNotEmpty()) {
                 boxes.forEach { box ->
-                    DropdownMenuItem(
+                    WantDropdownMenuItem(
                         text = { Text("卡片盒：${box.name}") },
                         onClick = {
                             expanded = false
@@ -413,7 +405,7 @@ private fun FilterDropdown(
             }
             if (tags.isNotEmpty()) {
                 tags.forEach { tag ->
-                    DropdownMenuItem(
+                    WantDropdownMenuItem(
                         text = { Text("#${tag.path}") },
                         onClick = {
                             expanded = false
@@ -467,7 +459,7 @@ private fun SendToDinoxDialog(
 
     val pickerReady = cacheChecked && (displayBoxes.isNotEmpty() || (!refreshState.refreshing && refreshState.lastError == null))
 
-    AlertDialog(
+    WantAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("发送到Dinox", maxLines = 1) },
         text = {
@@ -480,7 +472,7 @@ private fun SendToDinoxDialog(
                 when {
                     displayBoxes.isEmpty() && (!cacheChecked || refreshState.refreshing) -> {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(
+                            WantCircularProgressIndicator(
                                 modifier = Modifier.padding(end = 10.dp).size(18.dp),
                                 strokeWidth = 2.dp,
                             )
@@ -489,13 +481,13 @@ private fun SendToDinoxDialog(
                     }
                     displayBoxes.isEmpty() && refreshState.lastError != null -> {
                         Text(refreshState.lastError.orEmpty(), color = MaterialTheme.colorScheme.error)
-                        OutlinedButton(onClick = { requestBoxes(forceRetry = true) }) {
+                        WantTextButton(onClick = { requestBoxes(forceRetry = true) }) {
                             Text("重试")
                         }
                     }
                     else -> {
                         androidx.compose.foundation.layout.Box {
-                            OutlinedButton(onClick = { menuOpen = true }, modifier = Modifier.fillMaxWidth()) {
+                            WantTextButton(onClick = { menuOpen = true }, modifier = Modifier.fillMaxWidth()) {
                                 Text(
                                     when {
                                         selected == null -> "选择目标卡片盒"
@@ -506,8 +498,8 @@ private fun SendToDinoxDialog(
                                 )
                                 Icon(Icons.Outlined.ArrowDropDown, contentDescription = null)
                             }
-                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                                DropdownMenuItem(
+                            WantDropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                WantDropdownMenuItem(
                                     text = { Text("不放入卡片盒") },
                                     onClick = {
                                         selected = ""
@@ -515,7 +507,7 @@ private fun SendToDinoxDialog(
                                     },
                                 )
                                 displayBoxes.forEach { name ->
-                                    DropdownMenuItem(
+                                    WantDropdownMenuItem(
                                         text = { Text(name) },
                                         onClick = {
                                             selected = name
@@ -543,7 +535,7 @@ private fun SendToDinoxDialog(
                                     color = MaterialTheme.colorScheme.error,
                                     modifier = Modifier.weight(1f),
                                 )
-                                TextButton(onClick = { requestBoxes(forceRetry = true) }) {
+                                WantTextButton(onClick = { requestBoxes(forceRetry = true) }) {
                                     Text("重试")
                                 }
                             }
@@ -559,7 +551,7 @@ private fun SendToDinoxDialog(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.weight(1f),
                                 )
-                                TextButton(onClick = { requestBoxes(forceRetry = true) }) {
+                                WantTextButton(onClick = { requestBoxes(forceRetry = true) }) {
                                     Text("刷新")
                                 }
                             }
@@ -569,9 +561,9 @@ private fun SendToDinoxDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            WantTextButton(
                 onClick = {
-                    val chosen = selected ?: return@TextButton
+                    val chosen = selected ?: return@WantTextButton
                     sending = true
                     onSend(chosen.takeIf { it.isNotBlank() })
                 },
@@ -579,7 +571,7 @@ private fun SendToDinoxDialog(
             ) { Text(if (sending) "发送中…" else "发送") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !sending) { Text("取消") }
+            WantTextButton(onClick = onDismiss, enabled = !sending) { Text("取消") }
         },
     )
 }

@@ -20,24 +20,21 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.ArrowDropUp
 import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.davidzhu.wantnote.ui.components.WantButton
+import com.davidzhu.wantnote.ui.components.WantCheckbox
+import com.davidzhu.wantnote.ui.components.WantDropdownMenu
+import com.davidzhu.wantnote.ui.components.WantDropdownMenuItem
+import com.davidzhu.wantnote.ui.components.WantFilterChip
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import com.davidzhu.wantnote.ui.components.WantTextButton
+import com.davidzhu.wantnote.ui.components.WantTextField
+import com.davidzhu.wantnote.ui.components.WantScaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHost
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
+import com.davidzhu.wantnote.ui.components.WantTopBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,7 +57,6 @@ import com.davidzhu.wantnote.ui.LocalAi
 import com.davidzhu.wantnote.ui.LocalSettings
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AiSettingsScreen(onBack: () -> Unit) {
     val ai = LocalAi.current
@@ -85,20 +81,17 @@ fun AiSettingsScreen(onBack: () -> Unit) {
         ordered.map { model -> Triple(provider, model.id, "${provider.name} / ${model.name}") }
     }
 
-    Scaffold(
+    WantScaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            TopAppBar(
-                title = { Text("AI 设置") },
+            WantTopBar(
+                title = "AI 设置",
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
             )
         },
     ) { padding ->
@@ -160,7 +153,7 @@ fun AiSettingsScreen(onBack: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     row.forEach { preset ->
-                        FilterChip(
+                        WantFilterChip(
                             selected = addingPreset == preset.id,
                             onClick = { addingPreset = if (addingPreset == preset.id) null else preset.id },
                             label = { Text(preset.name) },
@@ -278,7 +271,7 @@ private fun ModelDropdown(
     var expanded by remember { mutableStateOf(false) }
     val selected = choices.firstOrNull { it.first.id == providerId && it.second == modelId }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
-        OutlinedButton(
+        WantTextButton(
             onClick = { expanded = !expanded },
             modifier = Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
@@ -306,14 +299,14 @@ private fun ModelDropdown(
                 )
             }
         }
-        DropdownMenu(
+        WantDropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
             modifier = Modifier.fillMaxWidth(0.9f),
         ) {
             choices.forEach { (provider, id, displayLabel) ->
                 val isCurrent = provider.id == providerId && id == modelId
-                DropdownMenuItem(
+                WantDropdownMenuItem(
                     text = { Text(displayLabel, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                     trailingIcon = {
                         if (isCurrent) {
@@ -353,8 +346,8 @@ private fun ProviderCard(
             onOpenKeyUrl = onOpenKeyUrl,
             onSave = onSave,
             extraActions = {
-                Button(onClick = onFetch) { Text("获取可用模型") }
-                TextButton(onClick = onDelete) { Text("删除") }
+                WantButton(onClick = onFetch) { Text("获取可用模型") }
+                WantTextButton(onClick = onDelete) { Text("删除") }
             },
         )
         val models = provider.availableModels()
@@ -372,7 +365,7 @@ private fun ProviderCard(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Checkbox(
+                    WantCheckbox(
                         checked = model.id in enabled,
                         onCheckedChange = { checked -> onToggleModel(model.id, checked) },
                     )
@@ -404,24 +397,24 @@ private fun ProviderEditor(
             modifier = Modifier.padding(bottom = 8.dp),
         )
     }
-    OutlinedTextField(
+    WantTextField(
         value = name,
         onValueChange = { name = it },
-        label = { Text("名称") },
+        label = "名称",
         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
         singleLine = true,
     )
-    OutlinedTextField(
+    WantTextField(
         value = baseUrl,
         onValueChange = { baseUrl = it },
-        label = { Text("接口地址") },
+        label = "接口地址",
         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
         singleLine = true,
     )
-    OutlinedTextField(
+    WantTextField(
         value = apiKey,
         onValueChange = { apiKey = it },
-        label = { Text("API Key") },
+        label = "API Key",
         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
         singleLine = true,
         visualTransformation = PasswordVisualTransformation(),
@@ -433,7 +426,7 @@ private fun ProviderEditor(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Button(
+        WantButton(
             onClick = {
                 onSave(
                     initial.copy(
@@ -447,7 +440,7 @@ private fun ProviderEditor(
             Text(if (isNew) "保存提供商" else "保存")
         }
         if (keyUrl.isNotBlank()) {
-            OutlinedButton(onClick = { onOpenKeyUrl(keyUrl) }) {
+            WantTextButton(onClick = { onOpenKeyUrl(keyUrl) }) {
                 Text("打开申请页面")
             }
         }

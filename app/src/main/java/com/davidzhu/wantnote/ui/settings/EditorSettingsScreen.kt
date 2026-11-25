@@ -12,11 +12,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.FilterChip
+import com.davidzhu.wantnote.ui.components.WantFilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
+import com.davidzhu.wantnote.ui.components.WantTextButton
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -84,7 +84,7 @@ fun EditorSettingsScreen(onBack: () -> Unit) {
                 verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
             ) {
                 EditorFontOption.entries.filter { it != EditorFontOption.CUSTOM }.forEach { option ->
-                    FilterChip(
+                    WantFilterChip(
                         selected = settings.editorFont == option,
                         onClick = {
                             scope.launch { settingsRepo.update { it.copy(editorFontId = option.id) } }
@@ -92,7 +92,7 @@ fun EditorSettingsScreen(onBack: () -> Unit) {
                         label = { Text(option.label) },
                     )
                 }
-                FilterChip(
+                WantFilterChip(
                     selected = settings.editorFont == EditorFontOption.CUSTOM,
                     onClick = {
                         if (settings.customFontPath.isNotBlank()) {
@@ -113,7 +113,7 @@ fun EditorSettingsScreen(onBack: () -> Unit) {
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(
+            WantTextButton(
                 onClick = {
                     picker.launch(arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/font-sfnt", "*/*"))
                 },
@@ -134,7 +134,7 @@ fun EditorSettingsScreen(onBack: () -> Unit) {
             SectionTitle("字体大小")
             ChipRow {
                 FontScaleOption.entries.forEach { option ->
-                    FilterChip(
+                    WantFilterChip(
                         selected = settings.fontScaleOption == option,
                         onClick = {
                             scope.launch { settingsRepo.update { it.copy(fontScale = option.name) } }

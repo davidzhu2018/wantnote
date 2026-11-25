@@ -20,24 +20,22 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.davidzhu.wantnote.ui.components.WantAlertDialog
+import com.davidzhu.wantnote.ui.components.WantButton
+import com.davidzhu.wantnote.ui.components.WantCheckbox
+import com.davidzhu.wantnote.ui.components.WantCircularProgressIndicator
+import com.davidzhu.wantnote.ui.components.WantDropdownMenu
+import com.davidzhu.wantnote.ui.components.WantDropdownMenuItem
+import com.davidzhu.wantnote.ui.components.WantFilterChip
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.davidzhu.wantnote.ui.components.WantTextButton
+import com.davidzhu.wantnote.ui.components.WantTextField
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import com.davidzhu.wantnote.ui.components.WantSurface
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -86,7 +84,6 @@ private val AutoSyncIntervalPresets = listOf(
  *   可手动全量/增量同步或按用户设定间隔自动同步（WorkManager + Room 持久化）。
  * - 已移除旧版重复的「从 Dinox 同步到本机」入口。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EcosystemTab(snackbar: SnackbarHostState) {
     val notesRepo = LocalNotes.current
@@ -177,17 +174,17 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        OutlinedTextField(
+        WantTextField(
             value = tokenInput,
             onValueChange = { tokenInput = it },
-            label = { Text("粘贴 Dinox API Token") },
+            label = "粘贴 Dinox API Token",
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth(),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
+            WantButton(
                 onClick = {
                     runOperation {
                         dinox.testAndSaveToken(tokenInput).also { result ->
@@ -202,10 +199,10 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                 enabled = !busy && tokenInput.isNotBlank(),
             ) { Text("测试并保存") }
             if (hasToken) {
-                OutlinedButton(onClick = { runOperation { dinox.testSavedToken() } }, enabled = !busy) {
+                WantTextButton(onClick = { runOperation { dinox.testSavedToken() } }, enabled = !busy) {
                     Text("重新测试")
                 }
-                OutlinedButton(
+                WantTextButton(
                     onClick = {
                         runOperation {
                             dinox.clearToken()
@@ -235,7 +232,7 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Box {
-            OutlinedButton(
+            WantTextButton(
                 onClick = {
                     sourceMenuOpen = true
                     requestRemoteBoxes(forceRetry = false)
@@ -249,12 +246,12 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                 )
                 Text("▾", style = MaterialTheme.typography.labelLarge)
             }
-            DropdownMenu(expanded = sourceMenuOpen, onDismissRequest = { sourceMenuOpen = false }) {
+            WantDropdownMenu(expanded = sourceMenuOpen, onDismissRequest = { sourceMenuOpen = false }) {
                 when {
-                    cachedRemoteBoxes.isEmpty() && boxRefresh.refreshing -> DropdownMenuItem(
+                    cachedRemoteBoxes.isEmpty() && boxRefresh.refreshing -> WantDropdownMenuItem(
                         text = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(
+                                WantCircularProgressIndicator(
                                     modifier = Modifier.padding(end = 10.dp).size(16.dp),
                                     strokeWidth = 2.dp,
                                 )
@@ -263,13 +260,13 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                         },
                         onClick = {},
                     )
-                    cachedRemoteBoxes.isEmpty() && boxRefresh.lastError != null -> DropdownMenuItem(
+                    cachedRemoteBoxes.isEmpty() && boxRefresh.lastError != null -> WantDropdownMenuItem(
                         text = { Text("${boxRefresh.lastError.orEmpty()}（点此重试）", color = MaterialTheme.colorScheme.error) },
                         onClick = { requestRemoteBoxes(forceRetry = true) },
                     )
                     else -> {
                         if (boxRefresh.refreshing) {
-                            DropdownMenuItem(
+                            WantDropdownMenuItem(
                                 text = {
                                     Text(
                                         "正在后台更新卡片盒列表…",
@@ -281,7 +278,7 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                             )
                         }
                         if (boxRefresh.lastError != null && cachedRemoteBoxes.isNotEmpty()) {
-                            DropdownMenuItem(
+                            WantDropdownMenuItem(
                                 text = {
                                     Text(
                                         "刷新失败：${boxRefresh.lastError.orEmpty()}（已保留缓存，点此重试）",
@@ -293,16 +290,16 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                             )
                         }
                         if (cachedRemoteBoxes.isEmpty()) {
-                            DropdownMenuItem(
+                            WantDropdownMenuItem(
                                 text = { Text("Dinox 里还没有卡片盒（点此刷新）") },
                                 onClick = { requestRemoteBoxes(forceRetry = true) },
                             )
                         }
                         cachedRemoteBoxes.forEach { name ->
-                            DropdownMenuItem(
+                            WantDropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Checkbox(
+                                        WantCheckbox(
                                             checked = name in selectedSources,
                                             onCheckedChange = null,
                                             modifier = Modifier.padding(end = 4.dp),
@@ -335,18 +332,18 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { requestRemoteBoxes(forceRetry = true) }) {
+                WantTextButton(onClick = { requestRemoteBoxes(forceRetry = true) }) {
                     Text("重试")
                 }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(
+            WantFilterChip(
                 selected = followDinoxNames,
                 onClick = { followDinoxNames = true },
                 label = { Text("沿用 Dinox 卡片盒名字") },
             )
-            FilterChip(
+            WantFilterChip(
                 selected = !followDinoxNames,
                 onClick = { followDinoxNames = false },
                 label = { Text("导入到指定卡片盒") },
@@ -354,7 +351,7 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
         }
         if (!followDinoxNames) {
             Box {
-                OutlinedButton(
+                WantTextButton(
                     onClick = { targetMenuOpen = true },
                     enabled = !busy,
                     modifier = Modifier.fillMaxWidth(),
@@ -366,15 +363,15 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                     )
                     Text("▾", style = MaterialTheme.typography.labelLarge)
                 }
-                DropdownMenu(expanded = targetMenuOpen, onDismissRequest = { targetMenuOpen = false }) {
+                WantDropdownMenu(expanded = targetMenuOpen, onDismissRequest = { targetMenuOpen = false }) {
                     if (localBoxes.isEmpty()) {
-                        DropdownMenuItem(
+                        WantDropdownMenuItem(
                             text = { Text("还没有本地卡片盒，可到 设置 → 卡片盒管理 创建") },
                             onClick = {},
                         )
                     }
                     localBoxes.forEach { box ->
-                        DropdownMenuItem(
+                        WantDropdownMenuItem(
                             text = { Text(if (box.id == NoteBox.DEFAULT_ID) "${box.name}（默认）" else box.name) },
                             onClick = {
                                 targetBoxId = box.id
@@ -385,16 +382,16 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                 }
             }
         }
-        Button(
+        WantButton(
             onClick = {
                 val target = if (followDinoxNames) {
                     DinoxSyncService.ImportTarget.FollowDinoxNames
                 } else {
-                    val id = targetBoxId ?: return@Button
+                    val id = targetBoxId ?: return@WantButton
                     DinoxSyncService.ImportTarget.LocalBox(id)
                 }
                 val sources = selectedSources
-                if (sources.isEmpty()) return@Button
+                if (sources.isEmpty()) return@WantButton
                 busy = true
                 lastError = null
                 scope.launch {
@@ -419,7 +416,7 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             SectionTitle("卡片盒同步")
-            TextButton(
+            WantTextButton(
                 onClick = {
                     editingRule = null
                     showRuleEditor = true
@@ -520,7 +517,7 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
     }
 
     deleteRuleTarget?.let { target ->
-        AlertDialog(
+        WantAlertDialog(
             onDismissRequest = { deleteRuleTarget = null },
             title = { Text("删除同步规则？") },
             text = {
@@ -530,7 +527,7 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                 )
             },
             confirmButton = {
-                TextButton(
+                WantTextButton(
                     onClick = {
                         val id = target.id
                         deleteRuleTarget = null
@@ -543,7 +540,7 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                 ) { Text("删除", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { deleteRuleTarget = null }) { Text("取消") }
+                WantTextButton(onClick = { deleteRuleTarget = null }) { Text("取消") }
             },
         )
     }
@@ -576,7 +573,7 @@ private fun SyncRuleCard(
         DinoxRuleSyncMode.AUTO -> "自动同步 · 每 ${DinoxSyncRuleCodec.formatInterval(rule.autoIntervalMinutes)}"
     }
 
-    Surface(
+    WantSurface(
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier.fillMaxWidth(),
@@ -623,17 +620,17 @@ private fun SyncRuleCard(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (rule.modeOption == DinoxRuleSyncMode.MANUAL) {
-                    Button(onClick = onRunFull, enabled = !busy) {
+                    WantButton(onClick = onRunFull, enabled = !busy) {
                         Text(if (isRunningThis) "同步中…" else "全量同步")
                     }
-                    OutlinedButton(onClick = onRunIncremental, enabled = !busy) {
+                    WantTextButton(onClick = onRunIncremental, enabled = !busy) {
                         Text("增量同步")
                     }
                 } else {
-                    OutlinedButton(onClick = onRunIncremental, enabled = !busy) {
+                    WantTextButton(onClick = onRunIncremental, enabled = !busy) {
                         Text(if (isRunningThis) "同步中…" else "立即增量")
                     }
-                    OutlinedButton(onClick = onRunFull, enabled = !busy) {
+                    WantTextButton(onClick = onRunFull, enabled = !busy) {
                         Text("立即全量")
                     }
                 }
@@ -680,7 +677,7 @@ private fun SyncRuleEditorDialog(
         (remoteBoxes + selectedSources).distinct().sorted()
     }
 
-    AlertDialog(
+    WantAlertDialog(
         onDismissRequest = { if (!saving) onDismiss() },
         title = { Text(if (initial == null) "新建同步规则" else "编辑同步规则") },
         text = {
@@ -693,7 +690,7 @@ private fun SyncRuleEditorDialog(
                 Text("规则类型", style = MaterialTheme.typography.labelLarge)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     DinoxRuleType.entries.forEach { option ->
-                        FilterChip(
+                        WantFilterChip(
                             selected = ruleType == option,
                             onClick = {
                                 ruleType = option
@@ -715,7 +712,7 @@ private fun SyncRuleEditorDialog(
                     style = MaterialTheme.typography.labelLarge,
                 )
                 Box {
-                    OutlinedButton(
+                    WantTextButton(
                         onClick = {
                             sourceMenuOpen = true
                             onRequestBoxes(false)
@@ -734,12 +731,12 @@ private fun SyncRuleEditorDialog(
                         Text(label, modifier = Modifier.weight(1f), maxLines = 1)
                         Text("▾", style = MaterialTheme.typography.labelLarge)
                     }
-                    DropdownMenu(expanded = sourceMenuOpen, onDismissRequest = { sourceMenuOpen = false }) {
+                    WantDropdownMenu(expanded = sourceMenuOpen, onDismissRequest = { sourceMenuOpen = false }) {
                         when {
-                            availableRemoteBoxes.isEmpty() && boxRefresh.refreshing -> DropdownMenuItem(
+                            availableRemoteBoxes.isEmpty() && boxRefresh.refreshing -> WantDropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        CircularProgressIndicator(
+                                        WantCircularProgressIndicator(
                                             modifier = Modifier.padding(end = 10.dp).size(16.dp),
                                             strokeWidth = 2.dp,
                                         )
@@ -748,13 +745,13 @@ private fun SyncRuleEditorDialog(
                                 },
                                 onClick = {},
                             )
-                            availableRemoteBoxes.isEmpty() && boxRefresh.lastError != null -> DropdownMenuItem(
+                            availableRemoteBoxes.isEmpty() && boxRefresh.lastError != null -> WantDropdownMenuItem(
                                 text = { Text("${boxRefresh.lastError.orEmpty()}（点此重试）", color = MaterialTheme.colorScheme.error) },
                                 onClick = { onRequestBoxes(true) },
                             )
                             else -> {
                                 if (boxRefresh.refreshing) {
-                                    DropdownMenuItem(
+                                    WantDropdownMenuItem(
                                         text = {
                                             Text(
                                                 "正在后台更新卡片盒列表…",
@@ -766,7 +763,7 @@ private fun SyncRuleEditorDialog(
                                     )
                                 }
                                 if (boxRefresh.lastError != null && availableRemoteBoxes.isNotEmpty()) {
-                                    DropdownMenuItem(
+                                    WantDropdownMenuItem(
                                         text = {
                                             Text(
                                                 "刷新失败：${boxRefresh.lastError.orEmpty()}（已保留缓存，点此重试）",
@@ -778,17 +775,17 @@ private fun SyncRuleEditorDialog(
                                     )
                                 }
                                 if (availableRemoteBoxes.isEmpty()) {
-                                    DropdownMenuItem(
+                                    WantDropdownMenuItem(
                                         text = { Text("Dinox 里还没有卡片盒（点此刷新）") },
                                         onClick = { onRequestBoxes(true) },
                                     )
                                 }
                                 availableRemoteBoxes.forEach { name ->
-                                    DropdownMenuItem(
+                                    WantDropdownMenuItem(
                                         text = {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 if (ruleType == DinoxRuleType.MANY_TO_ONE) {
-                                                    Checkbox(
+                                                    WantCheckbox(
                                                         checked = name in selectedSources,
                                                         onCheckedChange = null,
                                                         modifier = Modifier.padding(end = 4.dp),
@@ -828,7 +825,7 @@ private fun SyncRuleEditorDialog(
                             color = MaterialTheme.colorScheme.error,
                             modifier = Modifier.weight(1f),
                         )
-                        TextButton(onClick = { onRequestBoxes(true) }) {
+                        WantTextButton(onClick = { onRequestBoxes(true) }) {
                             Text("重试")
                         }
                     }
@@ -840,7 +837,7 @@ private fun SyncRuleEditorDialog(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        FilterChip(
+                        WantFilterChip(
                             selected = followDinoxName,
                             onClick = {
                                 followDinoxName = true
@@ -848,7 +845,7 @@ private fun SyncRuleEditorDialog(
                             },
                             label = { Text("沿用 Dinox 卡片盒名称") },
                         )
-                        FilterChip(
+                        WantFilterChip(
                             selected = !followDinoxName,
                             onClick = {
                                 followDinoxName = false
@@ -866,7 +863,7 @@ private fun SyncRuleEditorDialog(
                     )
                 } else {
                     Box {
-                        OutlinedButton(
+                        WantTextButton(
                             onClick = { targetMenuOpen = true },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
@@ -878,15 +875,15 @@ private fun SyncRuleEditorDialog(
                             )
                             Text("▾", style = MaterialTheme.typography.labelLarge)
                         }
-                        DropdownMenu(expanded = targetMenuOpen, onDismissRequest = { targetMenuOpen = false }) {
+                        WantDropdownMenu(expanded = targetMenuOpen, onDismissRequest = { targetMenuOpen = false }) {
                             if (localBoxes.isEmpty()) {
-                                DropdownMenuItem(
+                                WantDropdownMenuItem(
                                     text = { Text("还没有本机卡片盒，请先到 设置 → 卡片盒管理 创建") },
                                     onClick = {},
                                 )
                             }
                             localBoxes.forEach { box ->
-                                DropdownMenuItem(
+                                WantDropdownMenuItem(
                                     text = {
                                         Text(if (box.id == NoteBox.DEFAULT_ID) "${box.name}（默认）" else box.name)
                                     },
@@ -904,7 +901,7 @@ private fun SyncRuleEditorDialog(
                 Text("同步方式", style = MaterialTheme.typography.labelLarge)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     DinoxRuleSyncMode.entries.forEach { option ->
-                        FilterChip(
+                        WantFilterChip(
                             selected = syncMode == option,
                             onClick = {
                                 syncMode = option
@@ -928,7 +925,7 @@ private fun SyncRuleEditorDialog(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         AutoSyncIntervalPresets.forEach { (minutes, label) ->
-                            FilterChip(
+                            WantFilterChip(
                                 selected = parsedMinutes == minutes,
                                 onClick = {
                                     intervalText = minutes.toString()
@@ -938,13 +935,13 @@ private fun SyncRuleEditorDialog(
                             )
                         }
                     }
-                    OutlinedTextField(
+                    WantTextField(
                         value = intervalText,
                         onValueChange = { raw ->
                             intervalText = raw.filter { it.isDigit() }.take(5)
                             errorText = null
                         },
-                        label = { Text("自定义间隔（分钟，至少 ${DinoxSyncRuleTargetResolver.MIN_AUTO_INTERVAL_MINUTES}）") },
+                        label = "自定义间隔（分钟，至少 ${DinoxSyncRuleTargetResolver.MIN_AUTO_INTERVAL_MINUTES}）",
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
@@ -961,7 +958,7 @@ private fun SyncRuleEditorDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            WantTextButton(
                 enabled = !saving,
                 onClick = {
                     val minutes = if (syncMode == DinoxRuleSyncMode.AUTO) {
@@ -971,7 +968,7 @@ private fun SyncRuleEditorDialog(
                     }
                     if (syncMode == DinoxRuleSyncMode.AUTO && minutes < DinoxSyncRuleTargetResolver.MIN_AUTO_INTERVAL_MINUTES) {
                         errorText = "自动同步间隔至少为 ${DinoxSyncRuleTargetResolver.MIN_AUTO_INTERVAL_MINUTES} 分钟"
-                        return@TextButton
+                        return@WantTextButton
                     }
                     val draft = DinoxSyncRule(
                         id = initial?.id.orEmpty(),
@@ -985,7 +982,7 @@ private fun SyncRuleEditorDialog(
                     val validationError = DinoxSyncRuleTargetResolver.validate(draft)
                     if (validationError != null) {
                         errorText = validationError
-                        return@TextButton
+                        return@WantTextButton
                     }
                     saving = true
                     scope.launch {
@@ -999,7 +996,7 @@ private fun SyncRuleEditorDialog(
             ) { Text("保存") }
         },
         dismissButton = {
-            TextButton(enabled = !saving, onClick = onDismiss) { Text("取消") }
+            WantTextButton(enabled = !saving, onClick = onDismiss) { Text("取消") }
         },
     )
 }
