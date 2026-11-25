@@ -23,6 +23,7 @@ object DinoxModels {
     const val BASE_URL = "https://aisdk.chatgo.pro"
     const val PATH_LIST_NOTES = "/api/openapi/listNotes"
     const val PATH_TEXT_INPUT = "/api/openapi/text/input"
+    const val PATH_ZETTEL_BOXES = "/api/openapi/zettelboxes"
 
     const val CODE_SUCCESS = "000000"
     const val CODE_AUTH_FAILED = "000008"
@@ -76,8 +77,12 @@ object DinoxModels {
                     val looksLikeSuccess = parsed.has("data") ||
                         parsed.has("notes") ||
                         parsed.has("list") ||
+                        parsed.has("boxes") ||
+                        parsed.has("zettelBoxes") ||
+                        parsed.has("zettelboxes") ||
                         parsed.has("records") ||
                         parsed.has("items") ||
+                        parsed.has("rows") ||
                         parsed.safeBoolean("success") ||
                         parsed.safeBoolean("ok")
                     if (!looksLikeSuccess) {
@@ -136,6 +141,179 @@ object DinoxModels {
         val root = runCatching { validateEnvelope(json) }.getOrNull() as? JSONObject ?: return null
         val data = root.optJSONObject("data") ?: return root.safeString("noteId", "id").takeIf { it.isNotBlank() }
         return data.safeString("noteId", "id").takeIf { it.isNotBlank() }
+    }
+
+    /** GET /api/openapi/zettelboxes 返回的单个卡片盒（含空盒）。 */
+    data class DinoxBox(
+        val name: String,
+        val id: String = "",
+    )
+
+    /**
+     * 解析 `GET /api/openapi/zettelboxes` 响应（防御性兼容多种合法成功形态）：
+     * - 顶层信封校验复用 [validateEnvelope]（000000/0/200/ok/success 或顶层数组）；
+     * - `data` 可为直接数组、对象包裹（list / boxes / zettelBoxes / zettelboxes / items / records / rows / data）、
+     *   双层 JSON 字符串、单个盒对象，或 null/空数组/空对象（返回空列表，不抛错）；
+     * - 元素兼容字符串（盒名）与对象（名称取 name/boxName/zettelBoxName/path/title/label，
+     *   ID 取 id/boxId/zettelBoxId/_id），包含空盒，过滤明确标记已删除（isDel/isDeleted/deleted）的项；
+     * - 按盒名去重（同名保留首个非空 ID）并按名称升序返回。
+     */
+    fun parseZettelBoxes(json: String): List<DinoxBox> {
+        val envelope = validateEnvelope(json)
+        val rawBoxes = ArrayList<DinoxBox>()
+        when (envelope) {
+            is JSONObject -> {
+                if (envelope.has("data")) {
+                    if (!envelope.isNull("data")) {
+                        extractZettelBoxes(envelope.opt("data"), rawBoxes, depth = 0, inArray = false)
+                    }
+                } else {
+                    extractZettelBoxes(envelope, rawBoxes, depth = 0, inArray = false)
+                }
+            }
+            is JSONArray -> {
+                extractZettelBoxes(envelope, rawBoxes, depth = 0, inArray = true)
+            }
+        }
+        val byName = LinkedHashMap<String, DinoxBox>()
+        for (box in rawBoxes) {
+            val trimmedName = box.name.trim()
+            if (trimmedName.isEmpty()) continue
+            val trimmedId = box.id.trim()
+            val existing = byName[trimmedName]
+            if (existing == null) {
+                byName[trimmedName] = DinoxBox(name = trimmedName, id = trimmedId)
+            } else if (existing.id.isEmpty() && trimmedId.isNotEmpty()) {
+                byName[trimmedName] = existing.copy(id = trimmedId)
+            }
+        }
+        return byName.values.sortedBy { it.name }
+    }
+
+    private val boxWrapperKeys = listOf(
+        "list",
+        "boxes",
+        "zettelBoxes",
+        "zettelboxes",
+        "items",
+        "records",
+        "rows",
+        "data",
+    )
+
+    private val boxNameKeys = arrayOf(
+        "name",
+        "boxName",
+        "zettelBoxName",
+        "path",
+        "title",
+        "label",
+    )
+
+    private val boxIdKeys = arrayOf(
+        "id",
+        "boxId",
+        "zettelBoxId",
+        "_id",
+    )
+
+    private val boxChildKeys = listOf("children", "subBoxes", "childBoxes")
+
+    private val envelopeMetaKeys = setOf(
+        "code",
+        "msg",
+        "message",
+        "success",
+        "ok",
+        "total",
+        "count",
+        "page",
+        "pageSize",
+        "hasMore",
+    )
+
+    private fun extractZettelBoxes(
+        node: Any?,
+        out: MutableList<DinoxBox>,
+        depth: Int,
+        inArray: Boolean,
+    ) {
+        if (node == null || node === JSONObject.NULL || depth > 6) return
+        when (node) {
+            is String -> {
+                val trimmed = stripBomAndTrim(node)
+                if (trimmed.isEmpty()) return
+                if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+                    val inner = runCatching { JSONTokener(trimmed).nextValue() }.getOrNull()
+                    if (inner is JSONObject || inner is JSONArray) {
+                        extractZettelBoxes(inner, out, depth + 1, inArray = false)
+                        return
+                    }
+                }
+                if (inArray) {
+                    out += DinoxBox(name = trimmed)
+                }
+            }
+            is JSONArray -> {
+                for (i in 0 until node.length()) {
+                    if (node.isNull(i)) continue
+                    val item = node.opt(i) ?: continue
+                    extractZettelBoxes(item, out, depth + 1, inArray = true)
+                }
+            }
+            is JSONObject -> {
+                extractZettelBoxesFromObject(node, out, depth)
+            }
+        }
+    }
+
+    private fun extractZettelBoxesFromObject(
+        obj: JSONObject,
+        out: MutableList<DinoxBox>,
+        depth: Int,
+    ) {
+        if (depth > 6) return
+        val name = obj.safeString(*boxNameKeys).trim()
+        val hasWrapper = boxWrapperKeys.any { key ->
+            if (!obj.has(key) || obj.isNull(key)) return@any false
+            val v = obj.opt(key)
+            v is JSONArray || v is JSONObject || (v is String && stripBomAndTrim(v).let { it.startsWith("[") || it.startsWith("{") })
+        }
+        if (name.isNotEmpty() && !hasWrapper) {
+            if (!obj.safeBoolean("isDel", "isDeleted", "deleted")) {
+                val id = obj.safeString(*boxIdKeys).trim()
+                out += DinoxBox(name = name, id = id)
+                for (childKey in boxChildKeys) {
+                    if (obj.has(childKey) && !obj.isNull(childKey)) {
+                        val children = obj.opt(childKey)
+                        if (children is JSONArray) {
+                            extractZettelBoxes(children, out, depth + 1, inArray = true)
+                        }
+                    }
+                }
+            }
+            return
+        }
+        if (hasWrapper) {
+            for (key in boxWrapperKeys) {
+                if (!obj.has(key) || obj.isNull(key)) continue
+                val candidate = obj.opt(key)
+                if (candidate is JSONArray || candidate is JSONObject || candidate is String) {
+                    extractZettelBoxes(candidate, out, depth + 1, inArray = false)
+                }
+            }
+            return
+        }
+        // 兜底：映射形态（如按分组键挂载的数组/对象），忽略元信息键与笔记列表键。
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            if (key in envelopeMetaKeys || key == "notes" || obj.isNull(key)) continue
+            val value = obj.opt(key)
+            if (value is JSONArray || value is JSONObject) {
+                extractZettelBoxes(value, out, depth + 1, inArray = false)
+            }
+        }
     }
 
     /** listNotes 响应里的一条笔记。 */

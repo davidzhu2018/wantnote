@@ -59,7 +59,7 @@ import com.davidzhu.wantnote.data.DinoxRuleType
 import com.davidzhu.wantnote.data.DinoxSyncRule
 import com.davidzhu.wantnote.data.DinoxSyncRuleCodec
 import com.davidzhu.wantnote.data.NoteBox
-import com.davidzhu.wantnote.sync.dinox.DinoxBoxCachePolicy
+import com.davidzhu.wantnote.sync.dinox.DinoxBoxRefreshState
 import com.davidzhu.wantnote.sync.dinox.DinoxBoxSyncWorker
 import com.davidzhu.wantnote.sync.dinox.DinoxSyncRuleTargetResolver
 import com.davidzhu.wantnote.sync.dinox.DinoxSyncService
@@ -101,12 +101,8 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
 
     val localBoxes by notesRepo.observeBoxes().collectAsStateWithLifecycle(initialValue = emptyList())
     val cachedRemoteBoxes by dinox.observeCachedBoxes().collectAsStateWithLifecycle(initialValue = emptyList())
+    val boxRefresh by dinox.boxRefreshState.collectAsStateWithLifecycle()
     val syncRules by dinox.observeSyncRules().collectAsStateWithLifecycle(initialValue = emptyList())
-
-    // ---- Dinox 卡片盒缓存刷新状态（导入与规则选择器共用两小时策略） ----
-    var blockingLoadingBoxes by remember { mutableStateOf(false) }
-    var backgroundRefreshingBoxes by remember { mutableStateOf(false) }
-    var boxesError by remember { mutableStateOf<String?>(null) }
 
     // ---- 单向导入状态 ----
     var sourceMenuOpen by remember { mutableStateOf(false) }
@@ -122,46 +118,15 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
     var runningRuleId by remember { mutableStateOf<String?>(null) }
 
     /**
-     * 0.11.0 N11-N13：打开 Dinox 卡片盒选择器时按两小时缓存策略处理：
-     * - 缓存新鲜（< 2h）：直接展示缓存，不发请求；
-     * - 缓存超过 2h：立刻展示缓存并在后台刷新，成功后列表自动更新；
-     * - 缓存为空且从未成功：拉取一次并展示短加载态；
-     * - 刷新失败：保留上次缓存并展示不含敏感信息的短错误。
+     * 0.12.0：打开 Dinox 卡片盒选择器或点击「重试」时，通过轻量 `GET /api/openapi/zettelboxes`
+     * 与两小时缓存 + 失败冷却策略处理：
+     * - 有缓存：立刻展示列表；过期时后台轻量刷新；
+     * - 无缓存且轻量请求进行中：仅短加载；
+     * - 失败且无缓存：立即给出不含敏感信息的短错误和「重试」，重开不自动循环阻塞。
      */
-    fun checkOrRefreshRemoteBoxes(forceRetry: Boolean = false) {
-        if (blockingLoadingBoxes || backgroundRefreshingBoxes) return
+    fun requestRemoteBoxes(forceRetry: Boolean = false) {
         scope.launch {
-            val state = dinox.getBoxCacheState()
-            val action = if (forceRetry) {
-                if (state.names.isEmpty() && state.lastFetchedAt <= 0L) {
-                    DinoxBoxCachePolicy.CacheAction.FETCH_BLOCKING
-                } else {
-                    DinoxBoxCachePolicy.CacheAction.SHOW_CACHE_AND_REFRESH
-                }
-            } else {
-                DinoxBoxCachePolicy.decide(state.names, state.lastFetchedAt, System.currentTimeMillis())
-            }
-            when (action) {
-                DinoxBoxCachePolicy.CacheAction.USE_CACHE_ONLY -> {
-                    boxesError = null
-                }
-                DinoxBoxCachePolicy.CacheAction.FETCH_BLOCKING -> {
-                    blockingLoadingBoxes = true
-                    boxesError = null
-                    dinox.refreshRemoteBoxes().onFailure { error ->
-                        boxesError = error.message ?: "无法获取 Dinox 卡片盒"
-                    }
-                    blockingLoadingBoxes = false
-                }
-                DinoxBoxCachePolicy.CacheAction.SHOW_CACHE_AND_REFRESH -> {
-                    backgroundRefreshingBoxes = true
-                    boxesError = null
-                    dinox.refreshRemoteBoxes().onFailure { error ->
-                        boxesError = error.message ?: "刷新 Dinox 卡片盒失败"
-                    }
-                    backgroundRefreshingBoxes = false
-                }
-            }
+            dinox.ensureBoxesForPicker(forceRetry = forceRetry)
         }
     }
 
@@ -245,7 +210,6 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                         runOperation {
                             dinox.clearToken()
                             selectedSources = emptyList()
-                            boxesError = null
                             Result.success("已清除本机 Token")
                         }
                     },
@@ -274,7 +238,7 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
             OutlinedButton(
                 onClick = {
                     sourceMenuOpen = true
-                    checkOrRefreshRemoteBoxes()
+                    requestRemoteBoxes(forceRetry = false)
                 },
                 enabled = !busy,
                 modifier = Modifier.fillMaxWidth(),
@@ -287,24 +251,24 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
             }
             DropdownMenu(expanded = sourceMenuOpen, onDismissRequest = { sourceMenuOpen = false }) {
                 when {
-                    blockingLoadingBoxes -> DropdownMenuItem(
+                    cachedRemoteBoxes.isEmpty() && boxRefresh.refreshing -> DropdownMenuItem(
                         text = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.padding(end = 10.dp).size(16.dp),
                                     strokeWidth = 2.dp,
                                 )
-                                Text("正在加载 Dinox 卡片盒…")
+                                Text("正在获取卡片盒…")
                             }
                         },
                         onClick = {},
                     )
-                    cachedRemoteBoxes.isEmpty() && boxesError != null -> DropdownMenuItem(
-                        text = { Text("${boxesError.orEmpty()}（点此重试）", color = MaterialTheme.colorScheme.error) },
-                        onClick = { checkOrRefreshRemoteBoxes(forceRetry = true) },
+                    cachedRemoteBoxes.isEmpty() && boxRefresh.lastError != null -> DropdownMenuItem(
+                        text = { Text("${boxRefresh.lastError.orEmpty()}（点此重试）", color = MaterialTheme.colorScheme.error) },
+                        onClick = { requestRemoteBoxes(forceRetry = true) },
                     )
                     else -> {
-                        if (backgroundRefreshingBoxes) {
+                        if (boxRefresh.refreshing) {
                             DropdownMenuItem(
                                 text = {
                                     Text(
@@ -316,20 +280,23 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                                 onClick = {},
                             )
                         }
-                        if (boxesError != null && cachedRemoteBoxes.isNotEmpty()) {
+                        if (boxRefresh.lastError != null && cachedRemoteBoxes.isNotEmpty()) {
                             DropdownMenuItem(
                                 text = {
                                     Text(
-                                        "刷新失败：${boxesError.orEmpty()}（已保留缓存，点此重试）",
+                                        "刷新失败：${boxRefresh.lastError.orEmpty()}（已保留缓存，点此重试）",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.error,
                                     )
                                 },
-                                onClick = { checkOrRefreshRemoteBoxes(forceRetry = true) },
+                                onClick = { requestRemoteBoxes(forceRetry = true) },
                             )
                         }
                         if (cachedRemoteBoxes.isEmpty()) {
-                            DropdownMenuItem(text = { Text("Dinox 里还没有卡片盒") }, onClick = {})
+                            DropdownMenuItem(
+                                text = { Text("Dinox 里还没有卡片盒（点此刷新）") },
+                                onClick = { requestRemoteBoxes(forceRetry = true) },
+                            )
                         }
                         cachedRemoteBoxes.forEach { name ->
                             DropdownMenuItem(
@@ -353,6 +320,23 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                             )
                         }
                     }
+                }
+            }
+        }
+        if (cachedRemoteBoxes.isEmpty() && !boxRefresh.refreshing && boxRefresh.lastError != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    boxRefresh.lastError.orEmpty(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { requestRemoteBoxes(forceRetry = true) }) {
+                    Text("重试")
                 }
             }
         }
@@ -439,7 +423,7 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                 onClick = {
                     editingRule = null
                     showRuleEditor = true
-                    checkOrRefreshRemoteBoxes()
+                    requestRemoteBoxes(forceRetry = false)
                 },
                 enabled = !busy,
             ) {
@@ -492,7 +476,7 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                     onEdit = {
                         editingRule = rule
                         showRuleEditor = true
-                        checkOrRefreshRemoteBoxes()
+                        requestRemoteBoxes(forceRetry = false)
                     },
                     onDelete = { deleteRuleTarget = rule },
                 )
@@ -516,10 +500,8 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
             initial = editingRule,
             remoteBoxes = cachedRemoteBoxes,
             localBoxes = localBoxes,
-            blockingLoadingBoxes = blockingLoadingBoxes,
-            backgroundRefreshingBoxes = backgroundRefreshingBoxes,
-            boxesError = boxesError,
-            onRequestBoxes = { force -> checkOrRefreshRemoteBoxes(forceRetry = force) },
+            boxRefresh = boxRefresh,
+            onRequestBoxes = { force -> requestRemoteBoxes(forceRetry = force) },
             onSave = { draft ->
                 val result = dinox.saveSyncRule(draft)
                 result.onSuccess { saved ->
@@ -666,9 +648,7 @@ private fun SyncRuleEditorDialog(
     initial: DinoxSyncRule?,
     remoteBoxes: List<String>,
     localBoxes: List<NoteBox>,
-    blockingLoadingBoxes: Boolean,
-    backgroundRefreshingBoxes: Boolean,
-    boxesError: String?,
+    boxRefresh: DinoxBoxRefreshState,
     onRequestBoxes: (Boolean) -> Unit,
     onSave: suspend (DinoxSyncRule) -> String?,
     onDismiss: () -> Unit,
@@ -756,24 +736,24 @@ private fun SyncRuleEditorDialog(
                     }
                     DropdownMenu(expanded = sourceMenuOpen, onDismissRequest = { sourceMenuOpen = false }) {
                         when {
-                            blockingLoadingBoxes -> DropdownMenuItem(
+                            availableRemoteBoxes.isEmpty() && boxRefresh.refreshing -> DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         CircularProgressIndicator(
                                             modifier = Modifier.padding(end = 10.dp).size(16.dp),
                                             strokeWidth = 2.dp,
                                         )
-                                        Text("正在加载 Dinox 卡片盒…")
+                                        Text("正在获取卡片盒…")
                                     }
                                 },
                                 onClick = {},
                             )
-                            availableRemoteBoxes.isEmpty() && boxesError != null -> DropdownMenuItem(
-                                text = { Text("${boxesError.orEmpty()}（点此重试）", color = MaterialTheme.colorScheme.error) },
+                            availableRemoteBoxes.isEmpty() && boxRefresh.lastError != null -> DropdownMenuItem(
+                                text = { Text("${boxRefresh.lastError.orEmpty()}（点此重试）", color = MaterialTheme.colorScheme.error) },
                                 onClick = { onRequestBoxes(true) },
                             )
                             else -> {
-                                if (backgroundRefreshingBoxes) {
+                                if (boxRefresh.refreshing) {
                                     DropdownMenuItem(
                                         text = {
                                             Text(
@@ -785,11 +765,11 @@ private fun SyncRuleEditorDialog(
                                         onClick = {},
                                     )
                                 }
-                                if (boxesError != null && availableRemoteBoxes.isNotEmpty()) {
+                                if (boxRefresh.lastError != null && availableRemoteBoxes.isNotEmpty()) {
                                     DropdownMenuItem(
                                         text = {
                                             Text(
-                                                "刷新失败：${boxesError.orEmpty()}（点此重试）",
+                                                "刷新失败：${boxRefresh.lastError.orEmpty()}（已保留缓存，点此重试）",
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.error,
                                             )
@@ -798,7 +778,10 @@ private fun SyncRuleEditorDialog(
                                     )
                                 }
                                 if (availableRemoteBoxes.isEmpty()) {
-                                    DropdownMenuItem(text = { Text("Dinox 里还没有卡片盒") }, onClick = {})
+                                    DropdownMenuItem(
+                                        text = { Text("Dinox 里还没有卡片盒（点此刷新）") },
+                                        onClick = { onRequestBoxes(true) },
+                                    )
                                 }
                                 availableRemoteBoxes.forEach { name ->
                                     DropdownMenuItem(
@@ -830,6 +813,23 @@ private fun SyncRuleEditorDialog(
                                     )
                                 }
                             }
+                        }
+                    }
+                }
+                if (availableRemoteBoxes.isEmpty() && !boxRefresh.refreshing && boxRefresh.lastError != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            boxRefresh.lastError.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { onRequestBoxes(true) }) {
+                            Text("重试")
                         }
                     }
                 }

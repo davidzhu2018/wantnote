@@ -10,9 +10,9 @@ import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 /**
- * 0.11.0：本地持久化的 Dinox 卡片盒名称缓存。
+ * 0.11.0 / 0.12.0：本地持久化的 Dinox 卡片盒缓存（名称 + 可选远端 ID）。
  *
- * - 冷启动预加载与每两小时后台刷新结果写入本表；
+ * - 冷启动预加载与每两小时后台刷新通过轻量 `GET /api/openapi/zettelboxes` 写入本表（含空盒）；
  * - 所有 Dinox 卡片盒选择器（导入、发送到Dinox、卡片盒同步规则）优先直接读本表；
  * - 刷新失败绝不清空本表，保留上次成功的卡片盒列表。
  */
@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.Flow
 data class DinoxCachedBox(
     @PrimaryKey val name: String,
     val fetchedAt: Long,
+    val remoteId: String = "",
 )
 
 @Dao

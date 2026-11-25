@@ -13,6 +13,9 @@ import com.davidzhu.wantnote.data.SettingsRepository
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -23,6 +26,19 @@ import java.util.UUID
 data class DinoxBoxCacheState(
     val names: List<String> = emptyList(),
     val lastFetchedAt: Long = 0L,
+)
+
+/**
+ * 0.12.0：Dinox 卡片盒轻量拉取的会话级共享状态（供所有选盒 UI 实时观察）。
+ *
+ * - [refreshing] 仅在轻量 `GET /api/openapi/zettelboxes` 请求在途时为 true；
+ * - [lastError] / [lastFailedAt] 记录最近一次失败（不含敏感信息），用于
+ *   在冷却期内避免每次重开选择器都自动进入加载循环，用户可随时点击「重试」。
+ */
+data class DinoxBoxRefreshState(
+    val refreshing: Boolean = false,
+    val lastError: String? = null,
+    val lastFailedAt: Long = 0L,
 )
 
 /**
@@ -48,6 +64,8 @@ class DinoxSyncService(
 ) {
     private val boxRefreshMutex = Mutex()
     private var inFlightBoxRefresh: CompletableDeferred<Result<List<String>>>? = null
+    private val _boxRefreshState = MutableStateFlow(DinoxBoxRefreshState())
+    val boxRefreshState: StateFlow<DinoxBoxRefreshState> = _boxRefreshState.asStateFlow()
 
     private val localBoxLookup = object : LocalBoxLookup {
         override suspend fun findById(id: String): NoteBox? = notes.getBoxById(id)
@@ -73,6 +91,7 @@ class DinoxSyncService(
         }
         vault.save(token)
         sealTokenForSync(token)
+        _boxRefreshState.value = DinoxBoxRefreshState()
         Result.success("连接成功，Token 已加密保存")
     }
 
@@ -94,6 +113,7 @@ class DinoxSyncService(
     suspend fun clearToken() = withContext(Dispatchers.IO) {
         vault.clear()
         boxDao.deleteAll()
+        _boxRefreshState.value = DinoxBoxRefreshState()
         settingsRepository.update {
             it.copy(
                 dinoxTokenSealed = "",
@@ -116,7 +136,10 @@ class DinoxSyncService(
             settings.s3SecretKey,
         )
         val token = DinoxPortableCipher.open(settings.dinoxTokenSealed, secret) ?: return@withContext
-        runCatching { vault.save(token) }
+        runCatching {
+            vault.save(token)
+            _boxRefreshState.value = DinoxBoxRefreshState()
+        }
     }
 
     private suspend fun sealTokenForSync(token: String) {
@@ -164,9 +187,55 @@ class DinoxSyncService(
     }
 
     /**
-     * 从 Dinox 拉取最新卡片盒名单并持久化到本地数据库。
+     * 选择器打开或用户点击「重试」时调用（导入来源多选 / 发送到Dinox / 卡片盒同步规则共用）：
+     * - 未配置 Token：不进入加载态，直接记录短错误并返回失败；
+     * - 若已有在途的轻量列盒请求：复用该在途请求；
+     * - `forceRetry = true`：用户主动点重试，绕过冷却期立即触发一次轻量列盒请求；
+     * - 否则按 [DinoxBoxCachePolicy.decide] 决定使用缓存、后台刷新、首次轻量拉取，或冷却期内等待重试。
+     */
+    suspend fun ensureBoxesForPicker(
+        forceRetry: Boolean = false,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Result<List<String>> {
+        if (!hasToken()) {
+            val message = "尚未保存 Dinox Token，请先测试并保存"
+            _boxRefreshState.value = DinoxBoxRefreshState(
+                refreshing = false,
+                lastError = message,
+                lastFailedAt = nowMs,
+            )
+            return Result.failure(DinoxApiException(message))
+        }
+        val active = boxRefreshMutex.withLock { inFlightBoxRefresh?.takeIf { it.isActive } }
+        if (active != null) {
+            return active.await()
+        }
+        if (forceRetry) {
+            return refreshRemoteBoxes(nowMs)
+        }
+        val state = getBoxCacheState()
+        val refresh = _boxRefreshState.value
+        return when (DinoxBoxCachePolicy.decide(state.names, state.lastFetchedAt, nowMs, refresh.lastFailedAt)) {
+            DinoxBoxCachePolicy.CacheAction.USE_CACHE_ONLY -> {
+                _boxRefreshState.value = _boxRefreshState.value.copy(lastError = null)
+                Result.success(state.names)
+            }
+            DinoxBoxCachePolicy.CacheAction.WAIT_FOR_RETRY -> {
+                val message = refresh.lastError ?: "无法获取 Dinox 卡片盒，请点重试"
+                Result.failure(DinoxApiException(message))
+            }
+            DinoxBoxCachePolicy.CacheAction.FETCH_LIGHTWEIGHT,
+            DinoxBoxCachePolicy.CacheAction.SHOW_CACHE_AND_REFRESH -> {
+                refreshRemoteBoxes(nowMs)
+            }
+        }
+    }
+
+    /**
+     * 从 Dinox 通过轻量 `GET /api/openapi/zettelboxes` 拉取最新卡片盒名单并持久化到本地数据库。
      * - 并发调用自动复用同一在途请求，避免冷启动预加载与选择器同时重复请求；
-     * - 失败时绝不清空本地缓存，也不改动上次成功时间，只返回不含敏感信息的短错误。
+     * - 绝不回退为全量 `listNotes(lastSyncIso = null)`；
+     * - 失败时绝不清空本地缓存，也不改动上次成功时间，只记录不含敏感信息的短错误与失败时间戳。
      */
     suspend fun refreshRemoteBoxes(nowMs: Long = System.currentTimeMillis()): Result<List<String>> {
         val existing: CompletableDeferred<Result<List<String>>>?
@@ -179,6 +248,10 @@ class DinoxSyncService(
             } else {
                 val deferred = CompletableDeferred<Result<List<String>>>()
                 inFlightBoxRefresh = deferred
+                _boxRefreshState.value = _boxRefreshState.value.copy(
+                    refreshing = true,
+                    lastError = null,
+                )
                 existing = null
                 created = deferred
             }
@@ -196,6 +269,18 @@ class DinoxSyncService(
             if (inFlightBoxRefresh === deferred) {
                 inFlightBoxRefresh = null
             }
+            _boxRefreshState.value = outcome.fold(
+                onSuccess = {
+                    DinoxBoxRefreshState(refreshing = false, lastError = null, lastFailedAt = 0L)
+                },
+                onFailure = { error ->
+                    DinoxBoxRefreshState(
+                        refreshing = false,
+                        lastError = error.message ?: "无法获取 Dinox 卡片盒",
+                        lastFailedAt = nowMs,
+                    )
+                },
+            )
         }
         deferred.complete(outcome)
         return outcome
@@ -205,25 +290,26 @@ class DinoxSyncService(
         val token = vault.load()
             ?: return@withContext Result.failure(DinoxApiException("尚未保存 Dinox Token，请先测试并保存"))
         val json = try {
-            client.listNotes(token, DinoxModels.listNotesBody(lastSyncIso = null))
+            client.listZettelBoxes(token)
         } catch (error: Throwable) {
             return@withContext Result.failure(DinoxApiException(dinoxShortMessage(error)))
         }
-        val result = try {
-            DinoxModels.parseListNotes(json)
+        val boxes = try {
+            DinoxModels.parseZettelBoxes(json)
         } catch (error: Throwable) {
             return@withContext Result.failure(DinoxApiException(dinoxShortMessage(error)))
         }
-        val names = result.notes
-            .filter { !it.isDel }
-            .flatMap { it.zettelBoxes }
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .distinct()
-            .sorted()
-        boxDao.replaceAll(names.map { DinoxCachedBox(name = it, fetchedAt = nowMs) })
+        boxDao.replaceAll(
+            boxes.map { box ->
+                DinoxCachedBox(
+                    name = box.name,
+                    fetchedAt = nowMs,
+                    remoteId = box.id,
+                )
+            },
+        )
         settingsRepository.update { it.copy(dinoxBoxesFetchedAt = nowMs) }
-        Result.success(names)
+        Result.success(boxes.map { it.name })
     }
 
     /** 导入/同步顺带发现的新卡片盒名补充进本地表（不推进全量刷新时间戳）。 */

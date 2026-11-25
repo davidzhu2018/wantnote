@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Search
@@ -45,7 +46,6 @@ import com.davidzhu.wantnote.data.NoteRepository
 import com.davidzhu.wantnote.data.NoteWithDetails
 import com.davidzhu.wantnote.data.SearchText
 import com.davidzhu.wantnote.data.Tag
-import com.davidzhu.wantnote.sync.dinox.DinoxBoxCachePolicy
 import com.davidzhu.wantnote.ui.LocalAi
 import com.davidzhu.wantnote.ui.LocalDinox
 import com.davidzhu.wantnote.ui.LocalNotes
@@ -427,11 +427,12 @@ private fun FilterDropdown(
 }
 
 /**
- * 0.11.0「发送到Dinox」对话框（N11-N13，覆盖 0.10.0 M16）：
- * - 打开时直接展示本地缓存的 Dinox 卡片盒，不阻塞操作；
- * - 缓存为空且从未成功时才拉取一次并展示短加载态；
- * - 缓存超过两小时则先展示缓存，同时在后台刷新，成功后自动更新列表；
- * - 刷新失败保留上次成功缓存并给出不含敏感信息的短错误。
+ * 0.12.0「发送到Dinox」对话框：
+ * - 有本地缓存时立刻展示卡片盒下拉列表，不阻塞操作；
+ * - 缓存超过两小时则先展示缓存，同时通过轻量 `GET /api/openapi/zettelboxes` 后台刷新；
+ * - 缓存为空且轻量请求进行中仅显示短加载态，完成后立即呈现列表或短错误；
+ * - 失败且缓存为空时立刻展示不含敏感信息的短错误与「重试」，重开弹窗不自动陷入阻塞循环；
+ * - 失败且有缓存时保留上次缓存并展示短错误与可选「重试」。
  */
 @Composable
 private fun SendToDinoxDialog(
@@ -441,58 +442,30 @@ private fun SendToDinoxDialog(
 ) {
     val dinox = LocalDinox.current
     val scope = rememberCoroutineScope()
-    val cachedBoxes by dinox.observeCachedBoxes().collectAsStateWithLifecycle(initialValue = emptyList())
+    val observedBoxes by dinox.observeCachedBoxes().collectAsStateWithLifecycle(initialValue = null)
+    val refreshState by dinox.boxRefreshState.collectAsStateWithLifecycle()
+    var snapshotBoxes by remember { mutableStateOf<List<String>>(emptyList()) }
     var cacheChecked by remember { mutableStateOf(false) }
-    var blockingLoading by remember { mutableStateOf(false) }
-    var backgroundRefreshing by remember { mutableStateOf(false) }
-    var loadError by remember { mutableStateOf<String?>(null) }
     var selected by remember { mutableStateOf<String?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
     var sending by remember { mutableStateOf(false) }
 
-    fun triggerRefresh(forceRetry: Boolean) {
-        if (blockingLoading || backgroundRefreshing) return
+    val displayBoxes = observedBoxes ?: snapshotBoxes
+
+    fun requestBoxes(forceRetry: Boolean) {
         scope.launch {
-            val state = dinox.getBoxCacheState()
-            val action = if (forceRetry) {
-                if (state.names.isEmpty() && state.lastFetchedAt <= 0L) {
-                    DinoxBoxCachePolicy.CacheAction.FETCH_BLOCKING
-                } else {
-                    DinoxBoxCachePolicy.CacheAction.SHOW_CACHE_AND_REFRESH
-                }
-            } else {
-                DinoxBoxCachePolicy.decide(state.names, state.lastFetchedAt, System.currentTimeMillis())
-            }
-            cacheChecked = true
-            when (action) {
-                DinoxBoxCachePolicy.CacheAction.USE_CACHE_ONLY -> {
-                    loadError = null
-                }
-                DinoxBoxCachePolicy.CacheAction.FETCH_BLOCKING -> {
-                    blockingLoading = true
-                    loadError = null
-                    dinox.refreshRemoteBoxes().onFailure { error ->
-                        loadError = error.message ?: "无法获取 Dinox 卡片盒"
-                    }
-                    blockingLoading = false
-                }
-                DinoxBoxCachePolicy.CacheAction.SHOW_CACHE_AND_REFRESH -> {
-                    backgroundRefreshing = true
-                    loadError = null
-                    dinox.refreshRemoteBoxes().onFailure { error ->
-                        loadError = error.message ?: "刷新 Dinox 卡片盒失败"
-                    }
-                    backgroundRefreshing = false
-                }
-            }
+            dinox.ensureBoxesForPicker(forceRetry = forceRetry)
         }
     }
 
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        triggerRefresh(forceRetry = false)
+        val state = dinox.getBoxCacheState()
+        snapshotBoxes = state.names
+        cacheChecked = true
+        dinox.ensureBoxesForPicker(forceRetry = false)
     }
 
-    val pickerReady = cacheChecked && !blockingLoading && (cachedBoxes.isNotEmpty() || loadError == null)
+    val pickerReady = cacheChecked && (displayBoxes.isNotEmpty() || (!refreshState.refreshing && refreshState.lastError == null))
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -505,15 +478,18 @@ private fun SendToDinoxDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 when {
-                    !cacheChecked || blockingLoading -> {
+                    displayBoxes.isEmpty() && (!cacheChecked || refreshState.refreshing) -> {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(modifier = Modifier.padding(end = 10.dp))
-                            Text("正在加载 Dinox 卡片盒…")
+                            CircularProgressIndicator(
+                                modifier = Modifier.padding(end = 10.dp).size(18.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Text("正在获取卡片盒…")
                         }
                     }
-                    cachedBoxes.isEmpty() && loadError != null -> {
-                        Text(loadError.orEmpty(), color = MaterialTheme.colorScheme.error)
-                        OutlinedButton(onClick = { triggerRefresh(forceRetry = true) }) {
+                    displayBoxes.isEmpty() && refreshState.lastError != null -> {
+                        Text(refreshState.lastError.orEmpty(), color = MaterialTheme.colorScheme.error)
+                        OutlinedButton(onClick = { requestBoxes(forceRetry = true) }) {
                             Text("重试")
                         }
                     }
@@ -538,7 +514,7 @@ private fun SendToDinoxDialog(
                                         menuOpen = false
                                     },
                                 )
-                                cachedBoxes.forEach { name ->
+                                displayBoxes.forEach { name ->
                                     DropdownMenuItem(
                                         text = { Text(name) },
                                         onClick = {
@@ -549,35 +525,44 @@ private fun SendToDinoxDialog(
                                 }
                             }
                         }
-                        if (backgroundRefreshing) {
+                        if (refreshState.refreshing) {
                             Text(
                                 "正在后台更新 Dinox 卡片盒列表…",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        if (loadError != null && cachedBoxes.isNotEmpty()) {
+                        if (refreshState.lastError != null && displayBoxes.isNotEmpty()) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
                                 Text(
-                                    "更新失败：${loadError.orEmpty()}（已保留上次缓存）",
+                                    "更新失败：${refreshState.lastError.orEmpty()}（已保留上次缓存）",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.error,
                                     modifier = Modifier.weight(1f),
                                 )
-                                TextButton(onClick = { triggerRefresh(forceRetry = true) }) {
+                                TextButton(onClick = { requestBoxes(forceRetry = true) }) {
                                     Text("重试")
                                 }
                             }
                         }
-                        if (cachedBoxes.isEmpty() && !backgroundRefreshing) {
-                            Text(
-                                "Dinox 里还没有卡片盒；可直接发送（不放入卡片盒）。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                        if (displayBoxes.isEmpty() && !refreshState.refreshing) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    "Dinox 里还没有卡片盒；可直接发送（不放入卡片盒）。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(onClick = { requestBoxes(forceRetry = true) }) {
+                                    Text("刷新")
+                                }
+                            }
                         }
                     }
                 }

@@ -176,6 +176,7 @@ private fun PreviewText(
         modifier = modifier,
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
+        renderInlineImages = false,
     )
 }
 

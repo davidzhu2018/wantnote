@@ -21,7 +21,7 @@ import java.util.UUID
         DinoxCachedBox::class,
         DinoxSyncRule::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class NoteDatabase : RoomDatabase() {
@@ -290,6 +290,17 @@ abstract class NoteDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 0.12.0: additive migration adding optional remote box ID (`remoteId`) to
+         * `dinox_cached_boxes` so boxes returned by `GET /api/openapi/zettelboxes`
+         * persist their ID alongside name. Existing cached rows keep `''`.
+         */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE dinox_cached_boxes ADD COLUMN remoteId TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun create(context: Context): NoteDatabase {
             // 0.6.0：数据库优先放在 Documents/WantNote（卸载后可找回），
             // 未授权时回退到旧私有位置；首次启动由 AppStorage.prepare 迁移旧数据。
@@ -303,7 +314,7 @@ abstract class NoteDatabase : RoomDatabase() {
                 .addMigrations(
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
                     MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
-                    MIGRATION_7_8, MIGRATION_8_9,
+                    MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
                 )
                 .build()
         }

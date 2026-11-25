@@ -222,6 +222,7 @@ object MarkdownVisual {
         highlightColor: Color,
         linkTitles: Map<String, String> = emptyMap(),
         linkColor: Color = Color.Unspecified,
+        renderInlineImages: Boolean = true,
     ): RichRendered {
         if (source.isEmpty()) return RichRendered(AnnotatedString(""), emptyMap())
         val inlineImages = LinkedHashMap<String, String>()
@@ -249,13 +250,15 @@ object MarkdownVisual {
                         }
                     }
                     imageAlt != null -> {
-                        val url = match.groups[3]?.value.orEmpty().trim()
-                        if (url.isNotEmpty()) {
-                            val id = "img${imageIndex++}"
-                            inlineImages[id] = url
-                            appendInlineContent(id, if (imageAlt.isBlank()) "[图片]" else "[图片] $imageAlt")
-                        } else {
-                            append(source.substring(range))
+                        if (renderInlineImages) {
+                            val url = match.groups[3]?.value.orEmpty().trim()
+                            if (url.isNotEmpty()) {
+                                val id = "img${imageIndex++}"
+                                inlineImages[id] = url
+                                appendInlineContent(id, if (imageAlt.isBlank()) "[图片]" else "[图片] $imageAlt")
+                            } else {
+                                append(source.substring(range))
+                            }
                         }
                     }
                     linkLabel != null -> {
@@ -318,12 +321,13 @@ fun MarkdownText(
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = TextOverflow.Ellipsis,
     linkTitles: Map<String, String> = emptyMap(),
+    renderInlineImages: Boolean = true,
 ) {
     val highlight = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
     val linkColor = MaterialTheme.colorScheme.primary
-    // 0.10.0：只读渲染走 renderRich——超链接可点击、行内图片真实显示。
-    val rendered = remember(text, linkTitles, highlight, linkColor) {
-        MarkdownVisual.renderRich(text, highlight, linkTitles, linkColor)
+    // 0.10.0：只读渲染走 renderRich——超链接可点击；0.12.0 支持在主页卡片预览关闭行内图片。
+    val rendered = remember(text, linkTitles, highlight, linkColor, renderInlineImages) {
+        MarkdownVisual.renderRich(text, highlight, linkTitles, linkColor, renderInlineImages = renderInlineImages)
     }
     val inline = remember(rendered.inlineImages) {
         rendered.inlineImages.mapValues { (_, url) ->

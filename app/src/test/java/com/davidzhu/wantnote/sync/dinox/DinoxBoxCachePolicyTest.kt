@@ -6,10 +6,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 0.11.0 N11-N13：Dinox 卡片盒本地缓存两小时新鲜度策略单元测试（纯 JVM，不联网）。
+ * 0.11.0 / 0.12.0：Dinox 卡片盒本地缓存两小时新鲜度与失败冷却策略单元测试（纯 JVM，不联网）。
  */
 class DinoxBoxCachePolicyTest {
     private val twoHoursMs = DinoxBoxCachePolicy.REFRESH_INTERVAL_MS
+    private val cooldownMs = DinoxBoxCachePolicy.FAILURE_COOLDOWN_MS
 
     @Test
     fun refreshIntervalIsTwoHours() {
@@ -17,12 +18,73 @@ class DinoxBoxCachePolicyTest {
     }
 
     @Test
-    fun neverFetchedEmptyCacheTriggersBlockingFetch() {
+    fun neverFetchedEmptyCacheTriggersLightweightFetch() {
         val now = 1_760_000_000_000L
         assertTrue(DinoxBoxCachePolicy.isStale(lastFetchedAtMs = 0L, nowMs = now))
         assertEquals(
-            DinoxBoxCachePolicy.CacheAction.FETCH_BLOCKING,
+            DinoxBoxCachePolicy.CacheAction.FETCH_LIGHTWEIGHT,
             DinoxBoxCachePolicy.decide(cachedNames = emptyList(), lastFetchedAtMs = 0L, nowMs = now),
+        )
+    }
+
+    @Test
+    fun recentFailureWithEmptyCacheWaitsForRetryInsteadOfReenteringLoadingLoop() {
+        val failedAt = 1_760_000_000_000L
+        val reopenedSoon = failedAt + 15_000L
+        assertTrue(DinoxBoxCachePolicy.isInFailureCooldown(failedAt, reopenedSoon))
+        assertEquals(
+            DinoxBoxCachePolicy.CacheAction.WAIT_FOR_RETRY,
+            DinoxBoxCachePolicy.decide(
+                cachedNames = emptyList(),
+                lastFetchedAtMs = 0L,
+                nowMs = reopenedSoon,
+                lastFailedAtMs = failedAt,
+            ),
+        )
+    }
+
+    @Test
+    fun expiredFailureCooldownAllowsLightweightFetchAgain() {
+        val failedAt = 1_760_000_000_000L
+        val afterCooldown = failedAt + cooldownMs
+        assertFalse(DinoxBoxCachePolicy.isInFailureCooldown(failedAt, afterCooldown))
+        assertEquals(
+            DinoxBoxCachePolicy.CacheAction.FETCH_LIGHTWEIGHT,
+            DinoxBoxCachePolicy.decide(
+                cachedNames = emptyList(),
+                lastFetchedAtMs = 0L,
+                nowMs = afterCooldown,
+                lastFailedAtMs = failedAt,
+            ),
+        )
+    }
+
+    @Test
+    fun recentFailureWithStaleCacheWaitsForRetryWhileKeepingCache() {
+        val fetchedAt = 1_760_000_000_000L
+        val failedAt = fetchedAt + twoHoursMs + 60_000L
+        val reopenedSoon = failedAt + 10_000L
+        assertEquals(
+            DinoxBoxCachePolicy.CacheAction.WAIT_FOR_RETRY,
+            DinoxBoxCachePolicy.decide(
+                cachedNames = listOf("读书", "工作"),
+                lastFetchedAtMs = fetchedAt,
+                nowMs = reopenedSoon,
+                lastFailedAtMs = failedAt,
+            ),
+        )
+    }
+
+    @Test
+    fun discoveredCacheWithoutFullFetchShowsCacheAndRefreshesInBackground() {
+        val now = 1_760_000_000_000L
+        assertEquals(
+            DinoxBoxCachePolicy.CacheAction.SHOW_CACHE_AND_REFRESH,
+            DinoxBoxCachePolicy.decide(
+                cachedNames = listOf("已发现盒"),
+                lastFetchedAtMs = 0L,
+                nowMs = now,
+            ),
         )
     }
 
