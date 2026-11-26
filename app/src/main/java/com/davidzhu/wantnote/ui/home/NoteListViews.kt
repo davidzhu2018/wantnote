@@ -24,7 +24,8 @@ import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.material3.MaterialTheme
-import com.davidzhu.wantnote.ui.components.WantSurface
+import com.davidzhu.wantnote.data.LiquidGlassSurfaceRole
+import com.davidzhu.wantnote.ui.components.liquidGlassSurface
 import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -71,18 +72,18 @@ private fun NoteCard(
     elevation: Int = 8,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    WantSurface(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .noteCardShadow(elevation)
+            .liquidGlassSurface(
+                shape = NoteCardShape,
+                role = LiquidGlassSurfaceRole.CARD,
+                baseColor = MaterialTheme.colorScheme.surfaceVariant,
+                elevationOverride = elevation.dp,
+            )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-        shape = NoteCardShape,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        tonalElevation = 2.dp,
-        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)),
-    ) {
-        Column(content = content)
-    }
+        content = content,
+    )
 }
 
 @Composable

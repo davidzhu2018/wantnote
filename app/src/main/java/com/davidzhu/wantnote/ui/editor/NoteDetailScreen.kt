@@ -46,7 +46,9 @@ import com.davidzhu.wantnote.data.SearchText
 import com.davidzhu.wantnote.data.Tag
 import com.davidzhu.wantnote.ui.LocalMedia
 import com.davidzhu.wantnote.ui.LocalNotes
+import com.davidzhu.wantnote.data.LiquidGlassSurfaceRole
 import com.davidzhu.wantnote.ui.components.BoxPickerDialog
+import com.davidzhu.wantnote.ui.components.liquidGlassSurface
 import com.davidzhu.wantnote.ui.components.MarkdownPreview
 import com.davidzhu.wantnote.ui.components.NoteTagRemoveDialog
 import com.davidzhu.wantnote.ui.components.TagAddButton
@@ -218,8 +220,11 @@ fun NoteDetailScreen(
                     // 阅读态改卡片盒入口：点盒名（无盒时为「选择卡片盒」）。
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(MiuixTheme.colorScheme.surfaceContainer)
+                            .liquidGlassSurface(
+                                shape = RoundedCornerShape(50),
+                                role = LiquidGlassSurfaceRole.CHIP,
+                                baseColor = MiuixTheme.colorScheme.surfaceContainer,
+                            )
                             .clickable { boxDialogOpen = true }
                             .padding(horizontal = 10.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,

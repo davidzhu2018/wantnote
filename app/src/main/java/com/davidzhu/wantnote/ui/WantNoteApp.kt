@@ -3,10 +3,15 @@ package com.davidzhu.wantnote.ui
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
+import com.davidzhu.wantnote.data.LiquidGlassSurfaceRole
+import com.davidzhu.wantnote.ui.components.liquidGlassSurface
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CalendarMonth
@@ -222,9 +227,21 @@ private fun WantNoteBottomBar(
     onTab: (String) -> Unit,
     onPlus: () -> Unit,
 ) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
     WantNavigationBar(
-        containerColor = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth(),
+        containerColor = Color.Transparent,
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidGlassSurface(
+                shape = RoundedCornerShape(26.dp),
+                role = LiquidGlassSurfaceRole.BAR,
+                baseColor = MaterialTheme.colorScheme.surface,
+            ),
     ) {
         WantNavigationBarItem(
             selected = currentRoute == MainTab.Home.route,
@@ -267,5 +284,6 @@ private fun WantNoteBottomBar(
             icon = MainTab.Settings.icon,
             label = MainTab.Settings.label,
         )
+    }
     }
 }

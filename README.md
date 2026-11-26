@@ -2,6 +2,10 @@
 
 Android 速记应用。包名：`com.davidzhu.wantnote`
 
+## 0.14.0
+
+在 0.13.0 之上：修复详情页点击卡片盒名称与标签行「+」打开弹窗闪退的问题——根因是 Miuix 0.9.4 的 `WindowDialog` 内部注册 `NavigationBackHandler` 依赖 `NavigationEventDispatcherOwner`，而旧版 `activity-compose:1.9.3` 尚未提供该接口；本包将 `activity-compose` 升至 `1.13.0`（配套升级 `core-ktx:1.19.1`、`lifecycle:2.11.1`、`navigation-compose:2.10.2`），并在 `WantAlertDialog` 增加 `LocalNavigationEventDispatcherOwner` 兜底防护，详情页改盒/加标签及全局弹窗不再闪退。在现有 Miuix 0.9.4 基础上新增液态玻璃立体层次（悬浮胶囊底栏、居中立体加号按钮、主页四视图笔记卡片、设置分组卡片、下拉菜单、分段控件与详情页卡片盒胶囊均配备半透明玻璃底、顶部镜面高光棱边与立体阴影），并按系统版本自动分档：Android 13+（API 33+）启用 AGSL `RuntimeShader` 液态玻璃折射光泽，Android 12（API 31–32）使用磨砂玻璃质感，Android 7–11（API 24–30）自动退路到高对比纯 Compose 立体玻璃层，保持 `minSdk = 24` 且完全兼容用户主题、深色模式与字体缩放。版本 versionName 0.14.0 / versionCode 14。
+
 ## 0.13.0
 
 在 0.12.0 之上：整套界面外观换成 Miuix 0.9.4 稳定版（小米 HyperOS 风：顶栏、底部导航、按钮、输入框、开关、复选、标签页、下拉菜单、列表、进度、对话框、日期选择全部走 Miuix 组件），用户主题的配色 / 日夜 / 字号缩放先解析成同一套 palette 再映射进 Miuix 的 Colors 与 TextStyles，MaterialTheme 只留在内层作为自绘版面（Markdown 预览、图谱、主页卡片、编辑器）的 token，因此换肤、深色模式、字体缩放照旧生效；导航仍是 `androidx.navigation`，不引入 `miuix-nav`，也不引入需要 API 33 的 `miuix-blur`，minSdk 保持 24（compileSdk 提到 37 以满足 Miuix 0.9.4 的 AAR 元数据，targetSdk 36）。阅读态详情页可直接维护归属与标签：点标题下的卡片盒名（没有盒子时显示「选择卡片盒」）打开可搜索的改盒弹窗，关键字没有匹配时提供「新建卡片盒」并把新盒赋给本篇笔记（重名 / 空名弹窗内联报错），该弹窗与编辑态共用同一份实现；标签行右侧**始终**有「+」（即使一个标签都没有），点「+」可搜索或新建标签附加到本篇，点已有标签可从本篇移除一个或多个标签（只调 `removeTagFromNote`，不动标签本身，多选移除有二次确认）。版本 versionName 0.13.0 / versionCode 13。

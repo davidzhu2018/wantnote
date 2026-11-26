@@ -66,6 +66,10 @@ import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import androidx.navigationevent.NavigationEventDispatcher
+import androidx.navigationevent.NavigationEventDispatcherOwner
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
+import com.davidzhu.wantnote.data.LiquidGlassSurfaceRole
 import top.yukonga.miuix.kmp.window.WindowDialog
 import java.util.Calendar
 
@@ -173,6 +177,15 @@ fun WantAlertDialog(
     @Suppress("UNUSED_PARAMETER") tonalElevation: Dp = 0.dp,
     @Suppress("UNUSED_PARAMETER") properties: Any? = null,
 ) {
+    // 0.14.0 双保险：升级 activity-compose 1.13.0 后正常由宿主窗口提供
+    // NavigationEventDispatcherOwner；此处兜底防止个别定制窗口返回 null 导致闪退。
+    val existingOwner = LocalNavigationEventDispatcherOwner.current
+    val fallbackOwner = remember(existingOwner) {
+        existingOwner ?: object : NavigationEventDispatcherOwner {
+            override val navigationEventDispatcher = NavigationEventDispatcher()
+        }
+    }
+    CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides fallbackOwner) {
     WindowDialog(
         show = true,
         modifier = modifier,
@@ -216,6 +229,7 @@ fun WantAlertDialog(
             }
         },
     )
+    }
 }
 
 /** Miuix 主按钮（主题色底）。 */
@@ -439,10 +453,14 @@ fun WantTabRow(
     @Suppress("UNUSED_PARAMETER") divider: Any? = null,
     tabs: @Composable RowScope.() -> Unit,
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(50),
-        color = MiuixTheme.colorScheme.surfaceContainer,
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .liquidGlassSurface(
+                shape = RoundedCornerShape(50),
+                role = LiquidGlassSurfaceRole.CHIP,
+                baseColor = MiuixTheme.colorScheme.surfaceContainer,
+            ),
     ) {
         Row(
             modifier = Modifier
@@ -504,10 +522,15 @@ fun WantDropdownMenu(
         onDismissRequest = onDismissRequest,
         properties = PopupProperties(focusable = true),
     ) {
-        Card(
-            modifier = modifier.widthIn(min = 180.dp, max = 320.dp),
-            cornerRadius = 16.dp,
-            insideMargin = PaddingValues(vertical = 6.dp),
+        Box(
+            modifier = modifier
+                .widthIn(min = 180.dp, max = 320.dp)
+                .liquidGlassSurface(
+                    shape = RoundedCornerShape(18.dp),
+                    role = LiquidGlassSurfaceRole.DIALOG,
+                    baseColor = MiuixTheme.colorScheme.surface,
+                )
+                .padding(vertical = 6.dp),
         ) {
             Column(
                 modifier = Modifier
@@ -681,9 +704,13 @@ fun WantFab(
 ) {
     FloatingActionButton(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.liquidGlassSurface(
+            shape = shape,
+            role = LiquidGlassSurfaceRole.FAB,
+            baseColor = containerColor,
+        ),
         shape = shape,
-        containerColor = containerColor,
+        containerColor = Color.Transparent,
         content = content,
     )
 }
@@ -700,7 +727,14 @@ fun WantCard(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(modifier = modifier, content = content)
+    Column(
+        modifier = modifier.liquidGlassSurface(
+            shape = RoundedCornerShape(18.dp),
+            role = LiquidGlassSurfaceRole.CARD,
+            baseColor = MiuixTheme.colorScheme.surfaceContainer,
+        ),
+        content = content,
+    )
 }
 
 /** Miuix 分割线。 */
