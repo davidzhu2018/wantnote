@@ -27,6 +27,7 @@ data class BackupManifest(
     val tags: Int = 0,
     val noteTags: Int = 0,
     val links: Int = 0,
+    val boxes: Int = 0,
     val attachments: Int = 0,
     val fonts: Int = 0,
 ) {
@@ -40,6 +41,7 @@ data class BackupManifest(
         appendLine("tags=$tags")
         appendLine("noteTags=$noteTags")
         appendLine("links=$links")
+        appendLine("boxes=$boxes")
         appendLine("attachments=$attachments")
         appendLine("fonts=$fonts")
         appendLine("required=${RequiredDataFiles.joinToString(",")}")
@@ -98,6 +100,7 @@ data class BackupManifest(
                 tags = number("tags"),
                 noteTags = number("noteTags"),
                 links = number("links"),
+                boxes = number("boxes"),
                 attachments = number("attachments"),
                 fonts = number("fonts"),
             )

@@ -698,21 +698,29 @@ fun WantFab(
     modifier: Modifier = Modifier,
     shape: Shape = CircleShape,
     containerColor: Color = MiuixTheme.colorScheme.primary,
-    @Suppress("UNUSED_PARAMETER") contentColor: Color = Color.Unspecified,
+    contentColor: Color = Color.Unspecified,
     @Suppress("UNUSED_PARAMETER") elevation: Any? = null,
     content: @Composable () -> Unit,
 ) {
-    FloatingActionButton(
-        onClick = onClick,
-        modifier = modifier.liquidGlassSurface(
-            shape = shape,
-            role = LiquidGlassSurfaceRole.FAB,
-            baseColor = containerColor,
-        ),
-        shape = shape,
-        containerColor = Color.Transparent,
-        content = content,
-    )
+    val resolvedContentColor = if (contentColor != Color.Unspecified) {
+        contentColor
+    } else {
+        MiuixTheme.colorScheme.onPrimary
+    }
+    Box(
+        modifier = modifier
+            .liquidGlassSurface(
+                shape = shape,
+                role = LiquidGlassSurfaceRole.FAB,
+                baseColor = containerColor,
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        CompositionLocalProvider(LocalContentColor provides resolvedContentColor) {
+            content()
+        }
+    }
 }
 
 /** 设置分组标题（Miuix SmallTitle）。 */

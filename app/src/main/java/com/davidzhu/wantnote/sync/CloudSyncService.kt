@@ -4,6 +4,7 @@ import com.davidzhu.wantnote.data.AppSettings
 import com.davidzhu.wantnote.data.MediaStorage
 import com.davidzhu.wantnote.data.Note
 import com.davidzhu.wantnote.data.NoteBlock
+import com.davidzhu.wantnote.data.NoteBox
 import com.davidzhu.wantnote.data.NoteRepository
 import com.davidzhu.wantnote.data.NoteTagCrossRef
 import com.davidzhu.wantnote.data.SettingsRepository
@@ -82,10 +83,40 @@ class CloudSyncService(
             val backend = clientFor(settings)
             val text = backend.getText("wantnote/manifest.json")
             val snapshot = SyncSnapshot.fromJson(text)
+            // 0.14.0：先合并/创建远端卡片盒，再把每篇笔记的 boxId 映射到本机卡片盒 ID。
+            val boxIdMap = mutableMapOf<String, String>()
+            snapshot.boxes.forEach { remoteBox ->
+                val localBox = notes.mergeRemoteBox(remoteBox)
+                boxIdMap[remoteBox.id] = localBox.id
+            }
             var applied = 0
             val blocksByNote = snapshot.blocks.groupBy { it.noteId }
             snapshot.notes.forEach { remote ->
-                val used = notes.mergeRemoteNote(remote, blocksByNote[remote.id].orEmpty())
+                val mappedBoxId = when {
+                    remote.boxId.isBlank() -> {
+                        val name = snapshot.noteBoxNames[remote.id].orEmpty().trim()
+                        if (name.isNotEmpty()) {
+                            notes.mergeRemoteBox(NoteBox(id = "", name = name, createdAt = snapshot.exportedAt)).id
+                        } else {
+                            ""
+                        }
+                    }
+                    boxIdMap.containsKey(remote.boxId) -> boxIdMap.getValue(remote.boxId)
+                    else -> {
+                        val name = snapshot.noteBoxNames[remote.id].orEmpty().trim()
+                        if (name.isNotEmpty()) {
+                            val localBox = notes.mergeRemoteBox(NoteBox(id = remote.boxId, name = name, createdAt = snapshot.exportedAt))
+                            boxIdMap[remote.boxId] = localBox.id
+                            localBox.id
+                        } else {
+                            remote.boxId
+                        }
+                    }
+                }
+                val used = notes.mergeRemoteNote(
+                    remote.copy(boxId = mappedBoxId),
+                    blocksByNote[remote.id].orEmpty(),
+                )
                 if (used) applied += 1
             }
             runCatching { notes.ensureMarkdownFiles() }
@@ -136,6 +167,8 @@ class CloudSyncService(
         val allBlocks = notes.getAllBlocks()
         val allTags = notes.getAllTags()
         val refs = notes.getAllCrossRefs()
+        val allBoxes = notes.getAllBoxes()
+        val boxNameById = allBoxes.associate { it.id to it.name }
         val referenced = allBlocks.map { it.mediaPath }.filter { it.isNotBlank() }.toSet()
         val attachments = referenced.mapNotNull { path ->
             val file = media.fileFor(path)
@@ -153,6 +186,8 @@ class CloudSyncService(
             tags = allTags,
             noteTags = refs,
             attachments = attachments,
+            boxes = allBoxes,
+            noteBoxNames = allNotes.associate { it.id to boxNameById[it.boxId].orEmpty() },
             dinoxTokenSealed = settings.dinoxTokenSealed,
             dinoxSealMethod = settings.dinoxSealMethod,
         )
@@ -254,6 +289,9 @@ internal data class SyncSnapshot(
     val tags: List<Tag>,
     val noteTags: List<NoteTagCrossRef>,
     val attachments: List<SyncAttachment>,
+    /** 0.14.0：随 WebDAV / S3 同步的卡片盒清单与笔记盒名兜底映射。 */
+    val boxes: List<NoteBox> = emptyList(),
+    val noteBoxNames: Map<String, String> = emptyMap(),
     /** 0.9.0：Dinox Token 的可同步密文（凭据派生密钥加密；明文绝不入快照）。 */
     val dinoxTokenSealed: String = "",
     val dinoxSealMethod: String = "",
@@ -267,13 +305,17 @@ internal data class SyncSnapshot(
         root.put(
             "notes",
             JSONArray().also { arr ->
+                val boxNameById = boxes.associate { it.id to it.name }
                 notes.forEach { note ->
+                    val boxName = noteBoxNames[note.id].orEmpty().ifBlank { boxNameById[note.boxId].orEmpty() }
                     arr.put(
                         JSONObject()
                             .put("id", note.id)
                             .put("title", note.title)
                             .put("body", note.body)
                             .put("mdPath", note.mdPath)
+                            .put("boxId", note.boxId)
+                            .put("boxName", boxName)
                             .put("createdAt", note.createdAt)
                             .put("updatedAt", note.updatedAt),
                     )
@@ -322,6 +364,19 @@ internal data class SyncSnapshot(
             },
         )
         root.put(
+            "boxes",
+            JSONArray().also { arr ->
+                boxes.forEach { box ->
+                    arr.put(
+                        JSONObject()
+                            .put("id", box.id)
+                            .put("name", box.name)
+                            .put("createdAt", box.createdAt),
+                    )
+                }
+            },
+        )
+        root.put(
             "attachments",
             JSONArray().also { arr ->
                 attachments.forEach { item ->
@@ -342,14 +397,26 @@ internal data class SyncSnapshot(
 
         fun fromJson(text: String): SyncSnapshot {
             val root = JSONObject(text)
+            val noteBoxNames = LinkedHashMap<String, String>()
             val notes = root.optJSONArray("notes").orEmpty().mapObjects { obj ->
+                val id = obj.getString("id")
+                val boxName = obj.optString("boxName")
+                if (boxName.isNotBlank()) noteBoxNames[id] = boxName
                 Note(
-                    id = obj.getString("id"),
+                    id = id,
                     title = obj.optString("title"),
                     body = obj.optString("body"),
                     createdAt = obj.optLong("createdAt"),
                     updatedAt = obj.optLong("updatedAt"),
                     mdPath = obj.optString("mdPath"),
+                    boxId = obj.optString("boxId"),
+                )
+            }
+            val boxes = root.optJSONArray("boxes").orEmpty().mapObjects { obj ->
+                NoteBox(
+                    id = obj.getString("id"),
+                    name = obj.optString("name"),
+                    createdAt = obj.optLong("createdAt"),
                 )
             }
             val blocks = root.optJSONArray("blocks").orEmpty().mapObjects { obj ->
@@ -390,6 +457,8 @@ internal data class SyncSnapshot(
                 tags = tags,
                 noteTags = refs,
                 attachments = attachments,
+                boxes = boxes,
+                noteBoxNames = noteBoxNames,
                 dinoxTokenSealed = root.optString("dinoxTokenSealed"),
                 dinoxSealMethod = root.optString("dinoxSealMethod"),
             )

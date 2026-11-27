@@ -8,6 +8,7 @@ import com.davidzhu.wantnote.data.BlockType
 import com.davidzhu.wantnote.data.MediaStorage
 import com.davidzhu.wantnote.data.Note
 import com.davidzhu.wantnote.data.NoteBlock
+import com.davidzhu.wantnote.data.NoteBox
 import com.davidzhu.wantnote.data.NoteDatabase
 import com.davidzhu.wantnote.data.NoteLink
 import com.davidzhu.wantnote.data.NoteLinkCodec
@@ -76,6 +77,7 @@ class BackupService(
             val allTags = notes.getAllTags()
             val refs = notes.getAllCrossRefs()
             val allLinks = notes.getAllLinks()
+            val allBoxes = notes.getAllBoxes()
 
             val files = LinkedHashMap<String, File>()
             val included = LinkedHashSet<String>()
@@ -117,6 +119,7 @@ class BackupService(
                 tags = allTags.size,
                 noteTags = refs.size,
                 links = allLinks.size,
+                boxes = allBoxes.size,
                 attachments = included.size,
                 fonts = fontFiles.size,
             )
@@ -129,11 +132,12 @@ class BackupService(
                 }
 
                 putBytes(BackupManifest.MANIFEST_ENTRY, manifest.toText())
-                putBytes("data/notes.json", notesToJson(allNotes))
+                putBytes("data/notes.json", notesToJson(allNotes, allBoxes))
                 putBytes("data/blocks.json", blocksToJson(allBlocks))
                 putBytes("data/tags.json", tagsToJson(allTags))
                 putBytes("data/note_tags.json", refsToJson(refs))
                 putBytes("data/note_links.json", linksToJson(allLinks))
+                putBytes("data/note_boxes.json", boxesToJson(allBoxes))
                 putBytes("data/settings.json", settingsToJson(settings))
                 putBytes("data/ai_providers.json", providersToJson(providers))
 
@@ -200,7 +204,18 @@ class BackupService(
             }
         }
 
-        val noteList = parseNotes(readText(zip, byName.getValue("data/notes.json")))
+        val rawNotes = parseNotes(readText(zip, byName.getValue("data/notes.json")))
+        // note_boxes.json 为可选文件，兼容 0.13.0 及更早未含卡片盒的旧备份。
+        val storedBoxes = byName["data/note_boxes.json"]?.let { entry ->
+            parseBoxes(readText(zip, entry))
+        }.orEmpty()
+        val boxPlan = BackupBoxPlan.prepare(
+            boxes = storedBoxes,
+            notes = rawNotes.map { it.note },
+            noteBoxNames = rawNotes.associate { it.note.id to it.boxName },
+            now = System.currentTimeMillis(),
+        )
+        val noteList = boxPlan.notes
         val blockList = parseBlocks(readText(zip, byName.getValue("data/blocks.json")))
         val tagList = parseTags(readText(zip, byName.getValue("data/tags.json")))
         val refList = parseRefs(readText(zip, byName.getValue("data/note_tags.json")))
@@ -269,9 +284,11 @@ class BackupService(
             db.noteLinkDao().deleteAll()
             db.blockDao().deleteAll()
             db.noteDao().deleteAll()
+            db.noteBoxDao().deleteAll()
             db.tagDao().deleteAll()
             db.aiProviderDao().deleteAll()
 
+            if (boxPlan.boxes.isNotEmpty()) db.noteBoxDao().upsertAll(boxPlan.boxes)
             if (noteList.isNotEmpty()) db.noteDao().upsertAll(noteList)
             if (validBlocks.isNotEmpty()) {
                 db.blockDao().upsertAll(
@@ -321,16 +338,32 @@ class BackupService(
 
     // ---- JSON 序列化 -----------------------------------------------------
 
-    private fun notesToJson(items: List<Note>): String = JSONArray().also { arr ->
-        items.forEach { note ->
+    private fun notesToJson(items: List<Note>, boxes: List<NoteBox>): String {
+        val boxNameById = boxes.associate { it.id to it.name }
+        return JSONArray().also { arr ->
+            items.forEach { note ->
+                arr.put(
+                    JSONObject()
+                        .put("id", note.id)
+                        .put("title", note.title)
+                        .put("body", note.body)
+                        .put("mdPath", note.mdPath)
+                        .put("boxId", note.boxId)
+                        .put("boxName", boxNameById[note.boxId].orEmpty())
+                        .put("createdAt", note.createdAt)
+                        .put("updatedAt", note.updatedAt),
+                )
+            }
+        }.toString()
+    }
+
+    private fun boxesToJson(items: List<NoteBox>): String = JSONArray().also { arr ->
+        items.forEach { box ->
             arr.put(
                 JSONObject()
-                    .put("id", note.id)
-                    .put("title", note.title)
-                    .put("body", note.body)
-                    .put("mdPath", note.mdPath)
-                    .put("createdAt", note.createdAt)
-                    .put("updatedAt", note.updatedAt),
+                    .put("id", box.id)
+                    .put("name", box.name)
+                    .put("createdAt", box.createdAt),
             )
         }
     }.toString()
@@ -438,15 +471,33 @@ class BackupService(
 
     // ---- JSON 反序列化（缺字段用当前默认值，兼容未来/旧版备份） -------------
 
-    private fun parseNotes(text: String): List<Note> =
+    private data class ParsedBackupNote(
+        val note: Note,
+        val boxName: String,
+    )
+
+    private fun parseNotes(text: String): List<ParsedBackupNote> =
         JSONArray(text).objects { obj ->
-            Note(
+            ParsedBackupNote(
+                note = Note(
+                    id = obj.getString("id"),
+                    title = obj.optString("title"),
+                    body = obj.optString("body"),
+                    createdAt = obj.optLong("createdAt"),
+                    updatedAt = obj.optLong("updatedAt"),
+                    mdPath = obj.optString("mdPath"),
+                    boxId = obj.optString("boxId"),
+                ),
+                boxName = obj.optString("boxName"),
+            )
+        }
+
+    private fun parseBoxes(text: String): List<NoteBox> =
+        JSONArray(text).objects { obj ->
+            NoteBox(
                 id = obj.getString("id"),
-                title = obj.optString("title"),
-                body = obj.optString("body"),
+                name = obj.optString("name"),
                 createdAt = obj.optLong("createdAt"),
-                updatedAt = obj.optLong("updatedAt"),
-                mdPath = obj.optString("mdPath"),
             )
         }
 
@@ -568,5 +619,93 @@ class BackupService(
 
     companion object {
         private const val MAX_JSON_BYTES = 64L * 1024 * 1024
+    }
+}
+
+internal data class PreparedBoxRestore(
+    val boxes: List<NoteBox>,
+    val notes: List<Note>,
+)
+
+/**
+ * 0.14.0：备份恢复时的卡片盒规划器（纯 Kotlin，可直接 JVM 单测）。
+ *
+ * - 始终保证默认「暂存箱」（[NoteBox.DEFAULT_ID]）存在；
+ * - 按卡片盒名称去重，避免违反 `note_boxes.name` 唯一索引，并把重名盒子的笔记重映射到存活 ID；
+ * - 若笔记携带了 `boxName` 但 `note_boxes.json` 缺失该盒，则自动补建该卡片盒，确保归属不丢失。
+ */
+internal object BackupBoxPlan {
+    fun prepare(
+        boxes: List<NoteBox>,
+        notes: List<Note>,
+        noteBoxNames: Map<String, String> = emptyMap(),
+        now: Long = 0L,
+    ): PreparedBoxRestore {
+        val byName = LinkedHashMap<String, NoteBox>()
+        val idRemap = HashMap<String, String>()
+
+        // 先纳入所有备份里的卡片盒（规范化名称并按名称去重）。
+        boxes.forEach { raw ->
+            val name = raw.name.trim()
+            if (name.isEmpty()) return@forEach
+            val existing = byName[name]
+            if (existing != null) {
+                idRemap[raw.id] = existing.id
+            } else {
+                val normalized = if (name == NoteBox.DEFAULT_NAME) {
+                    raw.copy(id = NoteBox.DEFAULT_ID, name = NoteBox.DEFAULT_NAME)
+                } else {
+                    raw.copy(name = name)
+                }
+                byName[name] = normalized
+                idRemap[raw.id] = normalized.id
+            }
+        }
+
+        // 确保默认「暂存箱」一定存在。
+        if (!byName.containsKey(NoteBox.DEFAULT_NAME)) {
+            byName[NoteBox.DEFAULT_NAME] = NoteBox(
+                id = NoteBox.DEFAULT_ID,
+                name = NoteBox.DEFAULT_NAME,
+                createdAt = 0L,
+            )
+        }
+        idRemap[NoteBox.DEFAULT_ID] = byName.getValue(NoteBox.DEFAULT_NAME).id
+
+        val validIds = byName.values.mapTo(HashSet()) { it.id }
+
+        // 遍历笔记：映射 boxId；若 note_boxes.json 漏了某个盒子但笔记带了 boxName，则就地补建。
+        val remappedNotes = notes.map { note ->
+            val rawBoxId = note.boxId.trim()
+            val rawBoxName = noteBoxNames[note.id].orEmpty().trim()
+            val targetBoxId = when {
+                rawBoxId.isNotEmpty() && idRemap.containsKey(rawBoxId) -> idRemap.getValue(rawBoxId)
+                rawBoxId.isNotEmpty() && rawBoxId in validIds -> rawBoxId
+                rawBoxName.isNotEmpty() -> {
+                    val existing = byName[rawBoxName]
+                    if (existing != null) {
+                        existing.id
+                    } else {
+                        val createdId = rawBoxId.ifEmpty { "box_restored_${byName.size}" }
+                        val created = NoteBox(
+                            id = createdId,
+                            name = rawBoxName,
+                            createdAt = now,
+                        )
+                        byName[rawBoxName] = created
+                        validIds += created.id
+                        if (rawBoxId.isNotEmpty()) idRemap[rawBoxId] = created.id
+                        created.id
+                    }
+                }
+                else -> ""
+            }
+            if (targetBoxId == note.boxId) note else note.copy(boxId = targetBoxId)
+        }
+
+        return PreparedBoxRestore(
+            boxes = byName.values.toList(),
+            notes = remappedNotes,
+        )
     }
 }

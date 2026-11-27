@@ -268,8 +268,14 @@ private fun WantNoteBottomBar(
                     .offset(y = (-6).dp),
                 shape = CircleShape,
                 containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
             ) {
-                Icon(Icons.Outlined.Add, contentDescription = "新建笔记")
+                Icon(
+                    Icons.Outlined.Add,
+                    contentDescription = "新建笔记",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(28.dp),
+                )
             }
         }
         WantNavigationBarItem(
