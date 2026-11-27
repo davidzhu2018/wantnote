@@ -361,7 +361,7 @@ abstract class NoteDatabase : RoomDatabase() {
         val MIGRATION_17_18 = object : Migration(17, 18) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE notes ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 0")
-                db.execSQL("ALTER TABLE app_settings ADD COLUMN readwiseCategoryTagsJson TEXT NOT NULL DEFAULT '{}'")
+                db.execSQL("ALTER TABLE settings ADD COLUMN readwiseCategoryTagsJson TEXT NOT NULL DEFAULT '{}'")
             }
         }
 
