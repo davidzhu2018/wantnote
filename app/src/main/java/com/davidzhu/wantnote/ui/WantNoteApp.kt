@@ -208,7 +208,15 @@ fun WantNoteApp() {
                 EditorScreen(
                     noteId = noteId,
                     initialMode = initialMode,
-                    onBack = { nav.popBackStack() },
+                    onBack = {
+                        val popped = nav.popBackStack()
+                        if (!popped || nav.currentBackStackEntry == null) {
+                            nav.navigate(MainTab.Home.route) {
+                                popUpTo(nav.graph.findStartDestination().id) { inclusive = false }
+                                launchSingleTop = true
+                            }
+                        }
+                    },
                 )
             }
             composable("search") {

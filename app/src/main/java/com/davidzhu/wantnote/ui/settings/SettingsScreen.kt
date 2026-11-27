@@ -19,7 +19,10 @@ import top.yukonga.miuix.kmp.basic.Text
 import com.davidzhu.wantnote.ui.components.WantTopBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 data class SettingsEntry(
     val title: String,
@@ -57,9 +60,24 @@ fun SettingsScreen(onOpen: (String) -> Unit) {
             contentPadding = PaddingValues(vertical = 8.dp),
         ) {
             items(SettingsEntries) { entry ->
+                val titleStyle = MiuixTheme.textStyles.body1
+                val descSizeSp = (titleStyle.fontSize.value - 2f).coerceAtLeast(11f).sp
                 WantListItem(
-                    headlineContent = { Text(entry.title) },
-                    supportingContent = { Text(entry.subtitle) },
+                    headlineContent = {
+                        Text(
+                            text = entry.title,
+                            style = titleStyle,
+                            fontWeight = FontWeight.Medium,
+                            color = MiuixTheme.colorScheme.onSurface,
+                        )
+                    },
+                    supportingContent = {
+                        Text(
+                            text = entry.subtitle,
+                            style = MiuixTheme.textStyles.footnote1.copy(fontSize = descSizeSp),
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    },
                     trailingContent = {
                         Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null)
                     },

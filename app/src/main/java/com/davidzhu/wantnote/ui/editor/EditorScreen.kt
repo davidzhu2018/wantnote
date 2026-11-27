@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -183,6 +184,7 @@ fun EditorScreen(
     var showOverwriteDialog by remember { mutableStateOf(false) }
     var generating by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
+    var leaving by remember { mutableStateOf(false) }
     val fields = remember { mutableStateMapOf<String, TextFieldValue>() }
     val requesters = remember { mutableMapOf<String, FocusRequester>() }
 
@@ -726,6 +728,8 @@ fun EditorScreen(
      * 保存结束后才调用（保存失败也会退出，不让用户卡在编辑器）。
      */
     fun leave() {
+        if (leaving) return
+        leaving = true
         if (!ready) {
             onBack()
             return
@@ -735,11 +739,13 @@ fun EditorScreen(
         scope.launch {
             try {
                 withContext(NonCancellable + Dispatchers.IO) {
-                    repository.saveMarkdown(noteId, titleNow, contentNow)
-                    repository.deleteIfBlank(noteId)
+                    runCatching { repository.saveMarkdown(noteId, titleNow, contentNow) }
+                    runCatching { repository.deleteIfBlank(noteId) }
                 }
             } finally {
-                onBack()
+                withContext(NonCancellable + Dispatchers.Main.immediate) {
+                    onBack()
+                }
             }
         }
     }
@@ -790,13 +796,13 @@ fun EditorScreen(
      * AI 只能从「已存在的卡片盒」里选（见 [AiService.suggestExistingBox]），
      * 绝不新建。AI 未配置或没有合适盒时静默跳过（不阻塞保存）。
      */
-    suspend fun autoAssignBoxIfNeeded(): String? {
+    suspend fun autoAssignBoxIfNeeded(force: Boolean = false): String? {
         val stored = repository.getById(noteId) ?: return null
-        if (stored.boxId.isNotBlank()) return null
+        if (!force && stored.boxId.isNotBlank()) return null
         return ai.suggestExistingBox(noteId).fold(
             onSuccess = { boxName ->
                 val box = repository.assignNoteToBoxByName(noteId, boxName)
-                if (box != null) "已自动分配到卡片盒「${box.name}」" else null
+                if (box != null) "已分配卡片盒「${box.name}」" else null
             },
             onFailure = { error ->
                 val msg = error.message.orEmpty()
@@ -825,39 +831,51 @@ fun EditorScreen(
         if (generating) return
         generating = true
         scope.launch {
-            repository.saveMarkdown(noteId, titleState.value, currentContentMarkdown())
+            val contentNow = currentContentMarkdown()
+            if (titleState.value.isBlank() && contentNow.isBlank()) {
+                snackbar.showSnackbar("请先输入笔记内容再使用 AI 自动生成")
+                generating = false
+                return@launch
+            }
+            repository.saveMarkdown(noteId, titleState.value, contentNow)
+            val boxMessage = autoAssignBoxIfNeeded(force = overwrite)
             if (overwrite) {
-                // Reached only via the confirmation dialog; replaces the
-                // stored title and tags with the AI result, as the user chose.
+                // 覆盖模式：重新生成标题、标签并重新分配卡片盒。
                 ai.runOverwriteTitleTags(noteId)
                     .onSuccess { suggestion ->
                         if (suggestion.title.isNotBlank()) {
                             title = suggestion.title.take(40)
                         }
                         noteTags = repository.getTagsForNote(noteId)
-                        snackbar.showSnackbar("已覆盖标题和标签")
+                        val suffix = boxMessage?.let { "；$it" } ?: ""
+                        snackbar.showSnackbar("AI 已生成标题与标签$suffix")
                     }
                     .onFailure { error ->
-                        snackbar.showSnackbar(error.message ?: "生成失败，已保留当前内容")
+                        val suffix = boxMessage?.let { "；$it" } ?: ""
+                        snackbar.showSnackbar((error.message ?: "生成失败，已保留当前内容") + suffix)
                     }
             } else {
-                runFillOnlyPass()
+                runFillOnlyPass(extraMessage = boxMessage)
             }
             generating = false
         }
     }
 
     /**
-     * Sparkle button: if the note already has a manual title or tags, ask the
-     * user first — nothing is overwritten without an explicit confirmed
-     * choice. Only a completely blank title/tag note regenerates directly.
+     * 0.16.0 顶栏 AI 命令按钮：一键自动生成标题、分配标签并分配卡片盒。
+     * 若笔记已有标题、标签或卡片盒，弹窗询问「只补充空位」或「覆盖重新生成」。
      */
     fun generateTitleTags() {
         if (generating) return
         scope.launch {
+            val contentNow = currentContentMarkdown()
+            if (titleState.value.isBlank() && contentNow.isBlank()) {
+                snackbar.showSnackbar("请先输入笔记内容再使用 AI 自动生成")
+                return@launch
+            }
             val note = repository.getById(noteId)
             val hasExisting = note != null &&
-                (note.title.isNotBlank() || repository.getTagsForNote(noteId).isNotEmpty())
+                (note.title.isNotBlank() || note.boxId.isNotBlank() || repository.getTagsForNote(noteId).isNotEmpty())
             if (hasExisting) {
                 showOverwriteDialog = true
             } else {
@@ -972,15 +990,39 @@ fun EditorScreen(
                     }
                 },
                 actions = {
-                    WantTextButton(onClick = { saveExplicit() }, enabled = !saving) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                    WantTextButton(
+                        onClick = { saveExplicit() },
+                        enabled = !saving,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
                         Text("保存")
                     }
-                    IconButton(onClick = { generateTitleTags() }, enabled = !generating) {
-                        Icon(Icons.Outlined.AutoAwesome, contentDescription = "重新生成标题和标签")
+                    WantTextButton(
+                        onClick = { generateTitleTags() },
+                        enabled = !generating && !saving,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.AutoAwesome,
+                            contentDescription = "AI 生成标题、标签和卡片盒",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = if (generating) "…" else "AI",
+                            modifier = Modifier.padding(start = 4.dp),
+                        )
                     }
                     // 0.11.0 N16-N17：源码模式收进右上角「高级」按钮，不在主工具栏/顶栏直接露出。
                     Box {
-                        WantTextButton(onClick = { showAdvancedMenu = true }) {
+                        WantTextButton(
+                            onClick = { showAdvancedMenu = true },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        ) {
                             Text("高级")
                         }
                         WantDropdownMenu(
@@ -1001,6 +1043,7 @@ fun EditorScreen(
                                 },
                             )
                         }
+                    }
                     }
                 },
             )
@@ -1219,11 +1262,11 @@ fun EditorScreen(
     if (showOverwriteDialog) {
         WantAlertDialog(
             onDismissRequest = { showOverwriteDialog = false },
-            title = { Text("重新生成标题和标签") },
+            title = { Text("AI 生成标题、标签与卡片盒") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "这篇笔记已有标题或标签。选择应用方式：",
+                        "这篇笔记已有标题、标签或卡片盒。选择应用方式：",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     WantTextButton(onClick = {
@@ -1236,7 +1279,7 @@ fun EditorScreen(
                         showOverwriteDialog = false
                         runAiGeneration(overwrite = true)
                     }, modifier = Modifier.fillMaxWidth()) {
-                        Text("覆盖标题和标签", color = MaterialTheme.colorScheme.error)
+                        Text("重新生成并覆盖标题、标签与卡片盒", color = MaterialTheme.colorScheme.error)
                     }
                     WantTextButton(onClick = { showOverwriteDialog = false }, modifier = Modifier.fillMaxWidth()) {
                         Text("取消")

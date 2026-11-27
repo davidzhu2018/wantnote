@@ -723,10 +723,19 @@ fun WantListItem(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         leadingContent?.invoke()
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
             overlineContent?.invoke()
             headlineContent()
-            supportingContent?.invoke()
+            if (supportingContent != null) {
+                CompositionLocalProvider(
+                    LocalContentColor provides MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                ) {
+                    supportingContent()
+                }
+            }
         }
         trailingContent?.invoke()
     }
