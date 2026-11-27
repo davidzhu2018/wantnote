@@ -272,6 +272,8 @@ private fun CloudSyncTab(snackbar: SnackbarHostState) {
     val settings by settingsRepo.observe().collectAsStateWithLifecycle(initialValue = AppSettings.DEFAULT)
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
+    var syncProgress by remember { mutableStateOf(0f) }
+    var syncStage by remember { mutableStateOf("") }
 
     var method by remember { mutableStateOf(settings.syncMethodOption) }
     var expanded by remember { mutableStateOf(false) }
@@ -311,14 +313,23 @@ private fun CloudSyncTab(snackbar: SnackbarHostState) {
         s3Prefix = s3Prefix.trim(),
     )
 
-    fun runAction(block: suspend () -> Result<String>) {
+    fun runAction(initialStage: String, block: suspend ((Float, String) -> Unit) -> Result<String>) {
         if (busy) return
         busy = true
+        syncProgress = 0.05f
+        syncStage = initialStage
         scope.launch {
-            val result = runCatching { block() }.getOrElse { Result.failure(it) }
+            val result = runCatching {
+                block { frac, msg ->
+                    syncProgress = frac.coerceIn(0f, 1f)
+                    syncStage = msg
+                }
+            }.getOrElse { Result.failure(it) }
             result.onSuccess { snackbar.showSnackbar(it) }
                 .onFailure { snackbar.showSnackbar(it.message ?: "操作失败") }
             busy = false
+            syncProgress = 0f
+            syncStage = ""
         }
     }
 
@@ -405,16 +416,16 @@ private fun CloudSyncTab(snackbar: SnackbarHostState) {
 
         Spacer(modifier = Modifier.height(12.dp))
         WantButton(
-            onClick = { runAction { sync.testAndSave(draft()) } },
+            onClick = { runAction("正在测试连接…") { cb -> sync.testAndSave(draft(), cb) } },
             enabled = !busy,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("测试并保存") }
         Spacer(modifier = Modifier.height(8.dp))
         WantTextButton(
             onClick = {
-                runAction {
+                runAction("正在准备上传…") { cb ->
                     settingsRepo.update { draft() }
-                    sync.upload()
+                    sync.upload(cb)
                 }
             },
             enabled = !busy,
@@ -422,10 +433,23 @@ private fun CloudSyncTab(snackbar: SnackbarHostState) {
         ) { Text("上传") }
         Spacer(modifier = Modifier.height(8.dp))
         WantTextButton(
-            onClick = { runAction { sync.download() } },
+            onClick = { runAction("正在准备下载…") { cb -> sync.download(cb) } },
             enabled = !busy,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("下载") }
+        if (busy) {
+            Spacer(modifier = Modifier.height(14.dp))
+            WantLinearProgressIndicator(
+                progress = { syncProgress },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = "${syncStage.ifBlank { "同步中…" }} (${(syncProgress * 100).toInt()}%)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
         Spacer(modifier = Modifier.height(24.dp))
     }
 }

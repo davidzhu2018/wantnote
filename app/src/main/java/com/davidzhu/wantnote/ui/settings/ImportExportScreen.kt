@@ -203,10 +203,13 @@ internal fun BoxTargetDropdown(
     boxes: List<NoteBox>,
     selectedBoxId: String,
     onSelect: (String) -> Unit,
+    extraOptions: List<Pair<String, String>> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val selectedName = boxes.firstOrNull { it.id == selectedBoxId }?.name ?: "不指定（未分配）"
+    val selectedName = extraOptions.firstOrNull { it.first == selectedBoxId }?.second
+        ?: boxes.firstOrNull { it.id == selectedBoxId }?.name
+        ?: "不指定（未分配）"
     Box(modifier = modifier.fillMaxWidth()) {
         WantTextButton(
             onClick = { expanded = !expanded },
@@ -245,6 +248,15 @@ internal fun BoxTargetDropdown(
                     onSelect("")
                 },
             )
+            extraOptions.forEach { (optId, optLabel) ->
+                WantDropdownMenuItem(
+                    text = { Text(if (selectedBoxId == optId) "✓ $optLabel" else optLabel) },
+                    onClick = {
+                        expanded = false
+                        onSelect(optId)
+                    },
+                )
+            }
             boxes.forEach { box ->
                 WantDropdownMenuItem(
                     text = { Text(if (box.id == selectedBoxId) "✓ ${box.name}" else box.name) },
@@ -404,13 +416,19 @@ private fun ImportModeSubPage(
                     progress = { done.toFloat() / total.toFloat() },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                val pct = (done * 100 / total.coerceAtLeast(1)).coerceIn(0, 100)
                 Text(
-                    "已处理 $done / $total",
+                    "导入进度：$done / $total（$pct%）",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 8.dp),
                 )
             } else {
                 WantLinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text(
+                    "正在解析导入文件…",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             }
             if (currentFile.isNotBlank()) {
                 Text(

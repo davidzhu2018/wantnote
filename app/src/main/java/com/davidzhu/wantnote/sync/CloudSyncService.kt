@@ -41,10 +41,16 @@ class CloudSyncService(
     private val db: NoteDatabase? = null,
     private val context: Context? = null,
 ) {
-    suspend fun testAndSave(draft: AppSettings): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun testAndSave(
+        draft: AppSettings,
+        onProgress: (Float, String) -> Unit = { _, _ -> },
+    ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
+            onProgress(0.2f, "正在校验配置…")
             validate(draft)
+            onProgress(0.55f, "正在测试远程连接…")
             clientFor(draft).test()
+            onProgress(0.9f, "正在保存配置…")
             settingsRepository.update { current ->
                 current.copy(
                     syncMethod = draft.syncMethod,
@@ -65,38 +71,54 @@ class CloudSyncService(
         }
     }
 
-    suspend fun upload(): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun upload(
+        onProgress: (Float, String) -> Unit = { _, _ -> },
+    ): Result<String> = withContext(Dispatchers.IO) {
         val settings = settingsRepository.get()
         runCatching {
+            onProgress(0.05f, "正在连接云端存储…")
             validate(settings)
             val backend = clientFor(settings)
             backend.ensureAppFolder()
+            onProgress(0.15f, "正在整理本地笔记与配置快照…")
             val snapshot = exportSnapshot()
+            val totalFiles = (snapshot.attachments.size + snapshot.fonts.size).coerceAtLeast(1)
+            var doneFiles = 0
             snapshot.attachments.forEach { item ->
                 val file = media.fileFor(item.relativePath)
                 if (file.exists()) {
                     backend.putFile("wantnote/${item.relativePath}", file)
                 }
+                doneFiles += 1
+                onProgress(0.15f + 0.7f * (doneFiles.toFloat() / totalFiles), "正在上传附件 ($doneFiles/$totalFiles)…")
             }
             snapshot.fonts.forEach { item ->
                 val file = media.fileFor(item.relativePath)
                 if (file.exists()) {
                     backend.putFile("wantnote/${item.relativePath}", file)
                 }
+                doneFiles += 1
+                onProgress(0.15f + 0.7f * (doneFiles.toFloat() / totalFiles), "正在上传字体 ($doneFiles/$totalFiles)…")
             }
+            onProgress(0.92f, "正在上传清单 manifest.json…")
             backend.putText("wantnote/manifest.json", snapshot.toJson())
+            onProgress(1f, "上传完成")
             "已上传 ${snapshot.notes.size} 条笔记、${snapshot.boxes.size} 个卡片盒、${snapshot.attachments.size} 个附件与全部用户配置"
         }.recoverCatching { error ->
             throw SyncException(safe(error, settings))
         }
     }
 
-    suspend fun download(): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun download(
+        onProgress: (Float, String) -> Unit = { _, _ -> },
+    ): Result<String> = withContext(Dispatchers.IO) {
         val settings = settingsRepository.get()
         runCatching {
+            onProgress(0.08f, "正在连接云端读取清单…")
             validate(settings)
             val backend = clientFor(settings)
             val text = backend.getText("wantnote/manifest.json")
+            onProgress(0.2f, "正在解析云端快照…")
             val snapshot = SyncSnapshot.fromJson(text)
 
             // 1. 先合并/创建远端卡片盒，建立 remoteBoxId -> localBoxId 映射。
@@ -106,6 +128,7 @@ class CloudSyncService(
                 boxIdMap[remoteBox.id] = localBox.id
             }
 
+            onProgress(0.35f, "正在合并 ${snapshot.notes.size} 条笔记…")
             // 2. 合并笔记与块（携带映射后的卡片盒归属）。
             var applied = 0
             val blocksByNote = snapshot.blocks.groupBy { it.noteId }
@@ -122,6 +145,7 @@ class CloudSyncService(
                 )
                 if (used) applied += 1
             }
+            onProgress(0.65f, "正在同步本地 Markdown 文件与双链…")
             runCatching { notes.ensureMarkdownFiles() }
 
             // 3. 合并双链（note_links）。
@@ -135,6 +159,7 @@ class CloudSyncService(
                 }
             }
 
+            onProgress(0.8f, "正在恢复配置与下载附件…")
             // 4. 恢复全部用户配置（主题、自定义主题、字号、日夜、编辑器、字体、压缩、AI 模型选择、Dinox 密文等），
             //    严格保留本机的 WebDAV / S3 连接地址与凭据不被覆盖。
             val remoteSettings = snapshot.userSettings
@@ -440,6 +465,7 @@ internal data class SyncUserSettings(
     val dedaoLastSyncAt: Long = AppSettings.DEFAULT.dedaoLastSyncAt,
     val readwiseToken: String = AppSettings.DEFAULT.readwiseToken,
     val readwiseCategoryBoxesJson: String = AppSettings.DEFAULT.readwiseCategoryBoxesJson,
+    val readwiseCategoryTagsJson: String = "{}",
     val readwiseAutoSyncMinutes: Int = AppSettings.DEFAULT.readwiseAutoSyncMinutes,
     val readwiseLastSyncAt: Long = AppSettings.DEFAULT.readwiseLastSyncAt,
     val wereadApiKey: String = AppSettings.DEFAULT.wereadApiKey,
@@ -490,6 +516,7 @@ internal data class SyncUserSettings(
         dedaoLastSyncAt = dedaoLastSyncAt,
         readwiseToken = readwiseToken,
         readwiseCategoryBoxesJson = readwiseCategoryBoxesJson,
+        readwiseCategoryTagsJson = readwiseCategoryTagsJson,
         readwiseAutoSyncMinutes = readwiseAutoSyncMinutes,
         readwiseLastSyncAt = readwiseLastSyncAt,
         wereadApiKey = wereadApiKey,
@@ -541,6 +568,7 @@ internal data class SyncUserSettings(
         .put("dedaoLastSyncAt", dedaoLastSyncAt)
         .put("readwiseToken", readwiseToken)
         .put("readwiseCategoryBoxesJson", readwiseCategoryBoxesJson)
+        .put("readwiseCategoryTagsJson", readwiseCategoryTagsJson)
         .put("readwiseAutoSyncMinutes", readwiseAutoSyncMinutes)
         .put("readwiseLastSyncAt", readwiseLastSyncAt)
         .put("wereadApiKey", wereadApiKey)
@@ -592,6 +620,7 @@ internal data class SyncUserSettings(
             dedaoLastSyncAt = settings.dedaoLastSyncAt,
             readwiseToken = settings.readwiseToken,
             readwiseCategoryBoxesJson = settings.readwiseCategoryBoxesJson,
+        readwiseCategoryTagsJson = settings.readwiseCategoryTagsJson,
             readwiseAutoSyncMinutes = settings.readwiseAutoSyncMinutes,
             readwiseLastSyncAt = settings.readwiseLastSyncAt,
             wereadApiKey = settings.wereadApiKey,

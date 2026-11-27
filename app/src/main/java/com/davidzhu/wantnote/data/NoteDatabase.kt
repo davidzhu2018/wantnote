@@ -21,7 +21,7 @@ import java.util.UUID
         DinoxCachedBox::class,
         DinoxSyncRule::class,
     ],
-    version = 17,
+    version = 18,
     exportSchema = false,
 )
 abstract class NoteDatabase : RoomDatabase() {
@@ -358,6 +358,13 @@ abstract class NoteDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE notes ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE app_settings ADD COLUMN readwiseCategoryTagsJson TEXT NOT NULL DEFAULT '{}'")
+            }
+        }
+
         val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
@@ -393,6 +400,7 @@ abstract class NoteDatabase : RoomDatabase() {
                     MIGRATION_14_15,
                     MIGRATION_15_16,
                     MIGRATION_16_17,
+                    MIGRATION_17_18,
                 )
                 .build()
         }

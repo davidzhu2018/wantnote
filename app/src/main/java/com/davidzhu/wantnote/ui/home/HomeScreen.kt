@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Label
@@ -86,6 +87,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /** 主页筛选维度：全部 / 未分配 / 按卡片盒 / 按标签（0.10.0 单选）。 */
 private sealed interface HomeFilter {
     data object All : HomeFilter
+    data object Pinned : HomeFilter
+    data object Starred : HomeFilter
     data object Unassigned : HomeFilter
     data class ByBox(val boxId: String) : HomeFilter
     data class ByTag(val tagId: String) : HomeFilter
@@ -142,6 +145,8 @@ fun HomeScreen(
         val current = filter
         when (current) {
             HomeFilter.All -> items
+            HomeFilter.Pinned -> NoteRepository.filterNotes(items, pinnedOnly = true)
+            HomeFilter.Starred -> NoteRepository.filterNotes(items, starredOnly = true)
             HomeFilter.Unassigned -> NoteRepository.filterNotes(items, boxId = "")
             is HomeFilter.ByBox -> NoteRepository.filterNotes(items, boxId = current.boxId)
             is HomeFilter.ByTag -> NoteRepository.filterNotes(items, tagIds = setOf(current.tagId))
@@ -448,6 +453,7 @@ fun HomeScreen(
                     onSetTags = { showBatchTagDialog = true },
                     onSendFlomo = { runBatchSendFlomo(selectedNotes) },
                     onSendDinox = { showBatchDinoxDialog = true },
+                    onCancel = { exitMultiSelect() },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -813,6 +819,7 @@ private fun MultiSelectBottomCapsule(
     onSetTags: () -> Unit,
     onSendFlomo: () -> Unit,
     onSendDinox: () -> Unit,
+    onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -872,6 +879,12 @@ private fun MultiSelectBottomCapsule(
             enabled = enabled,
             tint = MaterialTheme.colorScheme.error,
             onClick = onDelete,
+        )
+        CapsuleActionItem(
+            icon = Icons.Outlined.Close,
+            label = "取消",
+            enabled = true,
+            onClick = onCancel,
         )
     }
 }
@@ -970,6 +983,8 @@ private fun FilterDropdown(
     var expanded by remember { mutableStateOf(false) }
     val label = when (filter) {
         HomeFilter.All -> "全部笔记"
+        HomeFilter.Pinned -> "置顶"
+        HomeFilter.Starred -> "星标"
         HomeFilter.Unassigned -> "未分配"
         is HomeFilter.ByBox -> "卡片盒：${boxes.firstOrNull { it.id == filter.boxId }?.name ?: "…"}"
         is HomeFilter.ByTag -> "#${tags.firstOrNull { it.id == filter.tagId }?.path ?: "…"}"
@@ -982,6 +997,20 @@ private fun FilterDropdown(
                 onClick = {
                     expanded = false
                     onSelect(HomeFilter.All)
+                },
+            )
+            WantDropdownMenuItem(
+                text = { Text("置顶") },
+                onClick = {
+                    expanded = false
+                    onSelect(HomeFilter.Pinned)
+                },
+            )
+            WantDropdownMenuItem(
+                text = { Text("星标") },
+                onClick = {
+                    expanded = false
+                    onSelect(HomeFilter.Starred)
                 },
             )
             WantDropdownMenuItem(

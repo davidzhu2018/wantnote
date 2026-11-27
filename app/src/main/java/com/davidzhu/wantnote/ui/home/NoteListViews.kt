@@ -43,6 +43,16 @@ import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Icon
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -221,13 +231,28 @@ fun NoteCollection(
     val ordered = remember(items) {
         items.sortedWith(compareByDescending<NoteWithDetails> { it.note.pinned }.thenByDescending { it.note.updatedAt })
     }
+    // 0.20.0：主页卡片懒加载分页，默认先加载 50 条，向上滑动时边滑边加载后续批次。
+    val pageSize = 50
+    var loadedCount by remember(viewMode) { mutableIntStateOf(pageSize) }
+    val visibleItems = remember(ordered, loadedCount) {
+        ordered.take(loadedCount.coerceAtMost(ordered.size))
+    }
+    val hasMore = visibleItems.size < ordered.size
+    val loadMore: () -> Unit = {
+        if (loadedCount < ordered.size) {
+            loadedCount = (loadedCount + pageSize).coerceAtMost(ordered.size)
+        }
+    }
     when (viewMode) {
-        HomeViewMode.CARD -> CardView(ordered, onOpenNote, onLongPressNote, links, multiSelectMode, selectedIds, onToggleSelect, modifier)
-        HomeViewMode.WATERFALL -> WaterfallView(ordered, onOpenNote, onLongPressNote, links, multiSelectMode, selectedIds, onToggleSelect, modifier)
-        HomeViewMode.MINIMAL -> MinimalView(ordered, onOpenNote, onLongPressNote, links, multiSelectMode, selectedIds, onToggleSelect, modifier)
-        HomeViewMode.TIMESTAMP -> TimestampView(ordered, onOpenNote, onLongPressNote, links, multiSelectMode, selectedIds, onToggleSelect, modifier)
+        HomeViewMode.CARD -> CardView(visibleItems, ordered.size, hasMore, loadMore, onOpenNote, onLongPressNote, links, multiSelectMode, selectedIds, onToggleSelect, modifier)
+        HomeViewMode.WATERFALL -> WaterfallView(visibleItems, ordered.size, hasMore, loadMore, onOpenNote, onLongPressNote, links, multiSelectMode, selectedIds, onToggleSelect, modifier)
+        HomeViewMode.MINIMAL -> MinimalView(visibleItems, ordered.size, hasMore, loadMore, onOpenNote, onLongPressNote, links, multiSelectMode, selectedIds, onToggleSelect, modifier)
+        HomeViewMode.TIMESTAMP -> TimestampView(visibleItems, ordered.size, hasMore, loadMore, onOpenNote, onLongPressNote, links, multiSelectMode, selectedIds, onToggleSelect, modifier)
         HomeViewMode.MOMENTS -> MomentsView(
-            items = ordered,
+            items = visibleItems,
+            totalCount = ordered.size,
+            hasMore = hasMore,
+            onLoadMore = loadMore,
             onOpenNote = onOpenNote,
             onLongPressNote = onLongPressNote,
             links = links,
@@ -309,9 +334,16 @@ private fun PreviewText(
 }
 
 @Composable
-private fun CardView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, multiSelectMode: Boolean = false, selectedIds: Set<String> = emptySet(), onToggleSelect: (String) -> Unit = {}, modifier: Modifier = Modifier) {
+private fun CardView(items: List<NoteWithDetails>, totalCount: Int, hasMore: Boolean, onLoadMore: () -> Unit, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, multiSelectMode: Boolean = false, selectedIds: Set<String> = emptySet(), onToggleSelect: (String) -> Unit = {}, modifier: Modifier = Modifier) {
+    val gridState = rememberLazyGridState()
+    LaunchedEffect(gridState, items.size, hasMore) {
+        snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .distinctUntilChanged()
+            .collect { last -> if (hasMore && last >= items.size - 8) onLoadMore() }
+    }
     val linkTitles = items.associate { it.note.id to SearchText.displayTitle(it.note) }
     LazyVerticalGrid(
+        state = gridState,
         columns = GridCells.Fixed(2),
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 14.dp, top = 10.dp, end = 14.dp, bottom = if (multiSelectMode) 104.dp else 28.dp),
@@ -368,13 +400,42 @@ private fun CardView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit,
                 }
             }
         }
+        if (hasMore) {
+            item(key = "load-more-card", span = { GridItemSpan(maxLineSpan) }) {
+                LazyLoadFooter(loaded = items.size, total = totalCount, onClick = onLoadMore)
+            }
+        }
     }
 }
 
 @Composable
-private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, multiSelectMode: Boolean = false, selectedIds: Set<String> = emptySet(), onToggleSelect: (String) -> Unit = {}, modifier: Modifier = Modifier) {
+private fun LazyLoadFooter(loaded: Int, total: Int, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "已加载 $loaded / $total 篇，继续上滑加载更多…",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun WaterfallView(items: List<NoteWithDetails>, totalCount: Int, hasMore: Boolean, onLoadMore: () -> Unit, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, multiSelectMode: Boolean = false, selectedIds: Set<String> = emptySet(), onToggleSelect: (String) -> Unit = {}, modifier: Modifier = Modifier) {
+    val staggeredState = rememberLazyStaggeredGridState()
+    LaunchedEffect(staggeredState, items.size, hasMore) {
+        snapshotFlow { staggeredState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .distinctUntilChanged()
+            .collect { last -> if (hasMore && last >= items.size - 8) onLoadMore() }
+    }
     val linkTitles = items.associate { it.note.id to SearchText.displayTitle(it.note) }
     LazyVerticalStaggeredGrid(
+        state = staggeredState,
         columns = StaggeredGridCells.Fixed(2),
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 14.dp, top = 10.dp, end = 14.dp, bottom = if (multiSelectMode) 104.dp else 28.dp),
@@ -439,13 +500,25 @@ private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
                 }
             }
         }
+        if (hasMore) {
+            item(key = "load-more-waterfall", span = StaggeredGridItemSpan.FullLine) {
+                LazyLoadFooter(loaded = items.size, total = totalCount, onClick = onLoadMore)
+            }
+        }
     }
 }
 
 @Composable
-private fun MinimalView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, multiSelectMode: Boolean = false, selectedIds: Set<String> = emptySet(), onToggleSelect: (String) -> Unit = {}, modifier: Modifier = Modifier) {
+private fun MinimalView(items: List<NoteWithDetails>, totalCount: Int, hasMore: Boolean, onLoadMore: () -> Unit, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, multiSelectMode: Boolean = false, selectedIds: Set<String> = emptySet(), onToggleSelect: (String) -> Unit = {}, modifier: Modifier = Modifier) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(listState, items.size, hasMore) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .distinctUntilChanged()
+            .collect { last -> if (hasMore && last >= items.size - 8) onLoadMore() }
+    }
     val linkTitles = items.associate { it.note.id to SearchText.displayTitle(it.note) }
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = if (multiSelectMode) 104.dp else 28.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -499,12 +572,20 @@ private fun MinimalView(items: List<NoteWithDetails>, onOpenNote: (String) -> Un
                 }
             }
         }
+        if (hasMore) {
+            item(key = "load-more-minimal") {
+                LazyLoadFooter(loaded = items.size, total = totalCount, onClick = onLoadMore)
+            }
+        }
     }
 }
 
 @Composable
 private fun TimestampView(
     items: List<NoteWithDetails>,
+    totalCount: Int,
+    hasMore: Boolean,
+    onLoadMore: () -> Unit,
     onOpenNote: (String) -> Unit,
     onLongPressNote: (String) -> Unit,
     links: List<NoteLink>,
@@ -518,7 +599,18 @@ private fun TimestampView(
     val normalNotes = items.filter { !it.note.pinned }
     val grouped = normalNotes.groupBy { Dates.dayKey(it.note.updatedAt) }
     val keys = grouped.keys.toList()
+    val listState = rememberLazyListState()
+    LaunchedEffect(listState, items.size, hasMore) {
+        snapshotFlow {
+            val totalRendered = listState.layoutInfo.totalItemsCount
+            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            last to totalRendered
+        }.distinctUntilChanged().collect { (last, totalRendered) ->
+            if (hasMore && totalRendered > 0 && last >= totalRendered - 8) onLoadMore()
+        }
+    }
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = if (multiSelectMode) 104.dp else 28.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -549,6 +641,11 @@ private fun TimestampView(
             }
             items(dayNotes, key = { it.note.id }) { item ->
                 TimestampNoteRow(item, linkTitles, links, onOpenNote, onLongPressNote, multiSelectMode, item.note.id in selectedIds) { onToggleSelect(item.note.id) }
+            }
+        }
+        if (hasMore) {
+            item(key = "load-more-ts") {
+                LazyLoadFooter(loaded = items.size, total = totalCount, onClick = onLoadMore)
             }
         }
     }
@@ -635,6 +732,9 @@ private fun TimestampNoteRow(
 @Composable
 private fun MomentsView(
     items: List<NoteWithDetails>,
+    totalCount: Int,
+    hasMore: Boolean,
+    onLoadMore: () -> Unit,
     onOpenNote: (String) -> Unit,
     onLongPressNote: (String) -> Unit,
     links: List<NoteLink>,
@@ -658,7 +758,14 @@ private fun MomentsView(
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val nicknameColor = if (isDark) Color(0xFF7DA7D9) else Color(0xFF576B95)
 
+    val listState = rememberLazyListState()
+    LaunchedEffect(listState, items.size, hasMore) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .distinctUntilChanged()
+            .collect { last -> if (hasMore && last >= items.size - 8) onLoadMore() }
+    }
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 14.dp, top = 8.dp, end = 14.dp, bottom = if (multiSelectMode) 104.dp else 28.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -789,6 +896,11 @@ private fun MomentsView(
                         )
                     }
                 }
+            }
+        }
+        if (hasMore) {
+            item(key = "load-more-moments") {
+                LazyLoadFooter(loaded = items.size, total = totalCount, onClick = onLoadMore)
             }
         }
     }

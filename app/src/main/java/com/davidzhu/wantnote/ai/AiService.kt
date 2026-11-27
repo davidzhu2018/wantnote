@@ -147,6 +147,32 @@ class AiService(
         return complete(providerId, modelId, system, user)
     }
 
+    suspend fun generateDailyReport(corpus: String, dateLabel: String): Result<String> {
+        val settings = settingsRepository.get()
+        if (settings.aiSummaryProviderId.isBlank() || settings.aiSummaryModelId.isBlank()) {
+            return Result.failure(IllegalStateException("请先在「设置 → AI」里配置总结模型"))
+        }
+        return complete(
+            providerId = settings.aiSummaryProviderId,
+            modelId = settings.aiSummaryModelId,
+            system = "你是一位擅长复盘的中文个人知识助理。请基于用户今天（$dateLabel）记录的全部笔记生成一份结构清晰的「AI 日报」，包含：1) 今日核心主题；2) 关键进展与收获；3) 重要想法/摘录；4) 明日待办或行动建议。只使用笔记里的真实内容，不要编造。",
+            user = corpus.take(12_000),
+        )
+    }
+
+    suspend fun generateWeeklyReport(corpus: String, weekLabel: String): Result<String> {
+        val settings = settingsRepository.get()
+        if (settings.aiSummaryProviderId.isBlank() || settings.aiSummaryModelId.isBlank()) {
+            return Result.failure(IllegalStateException("请先在「设置 → AI」里配置总结模型"))
+        }
+        return complete(
+            providerId = settings.aiSummaryProviderId,
+            modelId = settings.aiSummaryModelId,
+            system = "你是一位擅长周度复盘的中文个人知识助理。请基于用户本自然周（$weekLabel）记录的全部笔记生成一份结构清晰的「AI 周报」，包含：1) 本周概览与主线；2) 重点成果与知识沉淀；3) 跨笔记的共性洞察与模式；4) 下周聚焦建议。只使用笔记里的真实内容，不要编造。",
+            user = corpus.take(14_000),
+        )
+    }
+
     suspend fun generateInsight(corpus: String): Result<String> {
         val settings = settingsRepository.get()
         if (!settings.aiEnableInsight) {

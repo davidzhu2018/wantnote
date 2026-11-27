@@ -39,14 +39,27 @@ data class ReadingSyncResult(
 )
 
 /**
- * 0.19.0：生态互联外部同步服务：
+ * 0.19.0 / 0.20.0：生态互联外部同步服务：
  * 1. Flomo 官方 Webhook 单向发送（供主页卡片长按与多选队列发送使用）；
- * 2. Readwise 单向同步（API v2 Export，支持按类别映射到不同卡片盒、全量/增量、手动/WorkManager 自动同步）；
- * 3. 微信读书单向同步（API Key，支持划线与高亮同步到指定卡片盒、全量/增量、手动/WorkManager 自动同步）。
+ * 2. Readwise 单向同步（API v2 Export，支持按类别映射到不同卡片盒或沿用 Readwise 分类名、
+ *    按类别自动打标签默认 Readwise、全量/增量、手动/WorkManager 自动同步、实时进度回调）；
+ * 3. 微信读书单向同步（官方微信读书 Skill Agent API Gateway: POST https://i.weread.qq.com/api/agent/gateway，
+ *    携带 Authorization: Bearer <API_KEY> 与 skill_version=1.0.6，拉取 /user/notebooks、
+ *    /book/bookmarklist 与 /review/list/mine，支持全量/增量、自动同步与实时进度回调）。
  */
 object ExternalReadingSyncService {
 
-    /** Readwise 标准类别（支持按类别映射到想记不同卡片盒）。 */
+    /** 特殊占位值：表示沿用 Readwise 分类名称作为本地卡片盒名称（不存在时自动创建）。 */
+    const val USE_CATEGORY_BOX = "__USE_CATEGORY__"
+
+    /** Readwise 同步笔记的默认标签。 */
+    const val DEFAULT_READWISE_TAG = "Readwise"
+
+    /** 微信读书官方 Skill Agent Gateway 地址与协议版本（参考 Tencent/WeChatReading）。 */
+    internal const val WEREAD_GATEWAY_URL = "https://i.weread.qq.com/api/agent/gateway"
+    internal const val WEREAD_SKILL_VERSION = "1.0.6"
+
+    /** Readwise 标准类别（支持按类别映射到想记不同卡片盒或沿用分类名）。 */
     val READWISE_CATEGORIES = listOf(
         "books" to "书籍 (books)",
         "articles" to "文章 (articles)",
@@ -77,7 +90,7 @@ object ExternalReadingSyncService {
                 connectTimeout = 10_000
                 readTimeout = 15_000
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                setRequestProperty("User-Agent", "WantNote-Android/0.19.0")
+                setRequestProperty("User-Agent", "WantNote-Android/0.20.0")
             }
             try {
                 OutputStreamWriter(conn.outputStream, StandardCharsets.UTF_8).use {
@@ -130,6 +143,15 @@ object ExternalReadingSyncService {
         return obj.toString()
     }
 
+    fun parseCategoryTagMap(json: String): Map<String, String> = parseCategoryBoxMap(json)
+
+    fun serializeCategoryTagMap(map: Map<String, String>): String = serializeCategoryBoxMap(map)
+
+    fun resolveReadwiseTagForCategory(tagMap: Map<String, String>, category: String): String {
+        val key = category.trim().lowercase()
+        return tagMap[key]?.trim()?.ifBlank { null } ?: DEFAULT_READWISE_TAG
+    }
+
     suspend fun testReadwiseToken(token: String): Result<String> = withContext(Dispatchers.IO) {
         val clean = token.trim()
         if (clean.isEmpty()) return@withContext Result.failure(IllegalStateException("请先填写 Readwise Access Token"))
@@ -139,7 +161,7 @@ object ExternalReadingSyncService {
                 connectTimeout = 10_000
                 readTimeout = 15_000
                 setRequestProperty("Authorization", "Token $clean")
-                setRequestProperty("User-Agent", "WantNote-Android/0.19.0")
+                setRequestProperty("User-Agent", "WantNote-Android/0.20.0")
             }
             try {
                 if (conn.responseCode == 204 || conn.responseCode in 200..299) {
@@ -156,23 +178,26 @@ object ExternalReadingSyncService {
     suspend fun syncReadwise(
         token: String,
         categoryBoxesJson: String,
+        categoryTagsJson: String = "",
         lastSyncAt: Long,
         fullSync: Boolean,
         repository: NoteRepository,
+        onProgress: (current: Int, total: Int, message: String) -> Unit = { _, _, _ -> },
     ): Result<ReadingSyncResult> = withContext(Dispatchers.IO) {
         val clean = token.trim()
         if (clean.isEmpty()) return@withContext Result.failure(IllegalStateException("请先填写 Readwise Access Token"))
         runCatching {
             val boxMap = parseCategoryBoxMap(categoryBoxesJson)
+            val tagMap = parseCategoryTagMap(categoryTagsJson)
             val updatedAfter = if (!fullSync && lastSyncAt > 0L) isoUtc(lastSyncAt) else null
             val existingFingerprints = repository.observeAll().first()
                 .map { fingerprint(it.title, it.body) }
                 .toMutableSet()
 
+            onProgress(0, 0, "正在连接 Readwise 拉取摘录列表…")
+            val allDocs = ArrayList<ReadwiseDoc>()
             var cursor: String? = null
             var pages = 0
-            var imported = 0
-            var skipped = 0
 
             do {
                 val urlStr = buildString {
@@ -189,29 +214,52 @@ object ExternalReadingSyncService {
                 val raw = httpGet(urlStr, mapOf("Authorization" to "Token $clean"))
                     ?: throw IllegalStateException("Readwise 接口请求失败，请检查网络或 Token")
                 val parsed = parseReadwiseExportPage(raw)
-                val now = System.currentTimeMillis()
-                for (doc in parsed.docs) {
-                    val fp = fingerprint(doc.title, doc.markdown)
-                    if (fp in existingFingerprints) {
-                        skipped += 1
-                        continue
-                    }
-                    val targetBox = boxMap[doc.category.lowercase()].orEmpty()
-                    val note = Note(
-                        id = UUID.randomUUID().toString(),
-                        title = doc.title.take(120),
-                        body = doc.markdown,
-                        createdAt = now,
-                        updatedAt = now,
-                        boxId = targetBox,
-                    )
-                    repository.insertImportedMarkdown(note, doc.markdown)
-                    existingFingerprints += fp
-                    imported += 1
-                }
+                allDocs.addAll(parsed.docs)
                 cursor = parsed.nextCursor
                 pages += 1
-            } while (!cursor.isNullOrBlank() && pages < 10)
+                onProgress(0, allDocs.size, "已拉取第 $pages 页，共 ${allDocs.size} 篇摘录…")
+            } while (!cursor.isNullOrBlank() && pages < 12)
+
+            var imported = 0
+            var skipped = 0
+            val now = System.currentTimeMillis()
+            val total = allDocs.size
+            val resolvedCategoryBoxCache = HashMap<String, String>()
+
+            allDocs.forEachIndexed { index, doc ->
+                onProgress(index + 1, total, "正在写入 (${index + 1}/$total)：${doc.title}")
+                val fp = fingerprint(doc.title, doc.markdown)
+                if (fp in existingFingerprints) {
+                    skipped += 1
+                    return@forEachIndexed
+                }
+                val catKey = doc.category.lowercase()
+                val mappedSetting = boxMap[catKey].orEmpty()
+                val targetBox = when {
+                    mappedSetting == USE_CATEGORY_BOX -> {
+                        resolvedCategoryBoxCache.getOrPut(catKey) {
+                            val boxName = doc.category.trim().ifBlank { "Readwise" }
+                            (repository.getBoxByName(boxName) ?: repository.createBox(boxName))?.id.orEmpty()
+                        }
+                    }
+                    else -> mappedSetting
+                }
+                val note = Note(
+                    id = UUID.randomUUID().toString(),
+                    title = doc.title.take(120),
+                    body = doc.markdown,
+                    createdAt = now,
+                    updatedAt = now,
+                    boxId = targetBox,
+                )
+                repository.insertImportedMarkdown(note, doc.markdown)
+                val tagPath = resolveReadwiseTagForCategory(tagMap, doc.category)
+                if (tagPath.isNotBlank()) {
+                    repository.addTagToNote(note.id, tagPath)
+                }
+                existingFingerprints += fp
+                imported += 1
+            }
 
             val modeLabel = if (fullSync) "全量" else "增量"
             ReadingSyncResult(
@@ -270,7 +318,36 @@ object ExternalReadingSyncService {
         return ReadwisePage(docs, nextCursor)
     }
 
-    // ==================== 3. 微信读书单向同步 ====================
+    // ==================== 3. 微信读书单向同步（官方 Agent Gateway） ====================
+
+    internal fun buildWeReadGatewayPayload(apiName: String, params: Map<String, Any> = emptyMap()): JSONObject {
+        val body = JSONObject()
+        body.put("api_name", apiName)
+        body.put("skill_version", WEREAD_SKILL_VERSION)
+        params.forEach { (k, v) -> body.put(k, v) }
+        return body
+    }
+
+    suspend fun testWeReadApiKey(apiKey: String): Result<String> = withContext(Dispatchers.IO) {
+        val key = apiKey.trim()
+        if (key.isEmpty()) return@withContext Result.failure(IllegalStateException("请先填写微信读书 API Key"))
+        runCatching {
+            val payload = buildWeReadGatewayPayload("/user/notebooks", mapOf("count" to 1))
+            val raw = postWeReadGateway(key, payload)
+            val root = JSONObject(raw)
+            val errcode = root.optInt("errcode", 0)
+            if (errcode != 0) {
+                val errmsg = root.optString("errmsg").ifBlank { "错误码 $errcode" }
+                throw IllegalStateException("微信读书 API Key 验证失败：$errmsg")
+            }
+            val totalBooks = root.optInt("totalBookCount", -1)
+            if (totalBooks >= 0) {
+                "微信读书连接成功（检测到 $totalBooks 本有笔记的书籍）"
+            } else {
+                "微信读书 API Key 验证通过"
+            }
+        }
+    }
 
     suspend fun syncWeRead(
         apiKey: String,
@@ -278,66 +355,78 @@ object ExternalReadingSyncService {
         lastSyncAt: Long,
         fullSync: Boolean,
         repository: NoteRepository,
+        onProgress: (current: Int, total: Int, message: String) -> Unit = { _, _, _ -> },
     ): Result<ReadingSyncResult> = withContext(Dispatchers.IO) {
         val key = apiKey.trim()
         if (key.isEmpty()) return@withContext Result.failure(IllegalStateException("请先填写微信读书 API Key"))
         runCatching {
-            val headers = mapOf(
-                "Authorization" to "Bearer $key",
-                "x-api-key" to key,
-            )
-            // 微信读书官方 Skill / 开放接口拉取划线与笔记本列表
-            val endpoints = listOf(
-                "https://weread.qq.com/api/user/notebook",
-                "https://i.weread.qq.com/user/notebooks",
-            )
-            var rawNotebooks: String? = null
-            for (ep in endpoints) {
-                rawNotebooks = httpGet(ep, headers)
-                if (!rawNotebooks.isNullOrBlank()) break
-            }
-            if (rawNotebooks.isNullOrBlank()) {
-                throw IllegalStateException("微信读书接口暂不可达或 API Key 无效，请在微信读书「设置 → 微信读书Skill」核对 API Key")
-            }
+            onProgress(0, 0, "正在连接微信读书拉取书架笔记列表…")
+            val allBooks = ArrayList<WeReadBook>()
+            var lastSort: Long? = null
+            var pages = 0
+            do {
+                val params = LinkedHashMap<String, Any>()
+                params["count"] = 50
+                if (lastSort != null) params["lastSort"] = lastSort
+                val raw = postWeReadGateway(key, buildWeReadGatewayPayload("/user/notebooks", params))
+                val root = JSONObject(raw)
+                val errcode = root.optInt("errcode", 0)
+                if (errcode != 0) {
+                    val errmsg = root.optString("errmsg").ifBlank { "错误码 $errcode" }
+                    throw IllegalStateException("微信读书拉取笔记本失败：$errmsg")
+                }
+                val pageBooks = parseWeReadNotebooks(raw)
+                allBooks.addAll(pageBooks)
+                val hasMore = root.optInt("hasMore", 0) == 1
+                val nextSort = pageBooks.lastOrNull()?.sortTime?.takeIf { it > 0L }
+                if (!hasMore || nextSort == null || nextSort == lastSort) break
+                lastSort = nextSort
+                pages += 1
+                onProgress(0, allBooks.size, "已获取 ${allBooks.size} 本书籍…")
+            } while (pages < 20)
 
-            val books = parseWeReadNotebooks(rawNotebooks)
+            val sinceSec = if (!fullSync && lastSyncAt > 0L) lastSyncAt / 1000L else 0L
+            val targetBooks = allBooks.filter { book ->
+                sinceSec <= 0L || book.sortTime <= 0L || book.sortTime >= sinceSec
+            }
+            val skippedByIncremental = allBooks.size - targetBooks.size
+
             val existingFingerprints = repository.observeAll().first()
                 .map { fingerprint(it.title, it.body) }
                 .toMutableSet()
 
             var imported = 0
-            var skipped = 0
+            var skipped = skippedByIncremental
             val now = System.currentTimeMillis()
-            val sinceSec = if (!fullSync && lastSyncAt > 0L) lastSyncAt / 1000L else 0L
+            val total = targetBooks.size
 
-            for (book in books) {
-                if (sinceSec > 0L && book.sortTime > 0L && book.sortTime < sinceSec) {
-                    skipped += 1
-                    continue
-                }
-                val bmRaw = httpGet(
-                    "https://weread.qq.com/web/book/bookmarklist?bookId=${URLEncoder.encode(book.bookId, "UTF-8")}",
-                    headers,
-                )
+            targetBooks.forEachIndexed { index, book ->
+                onProgress(index + 1, total, "正在同步 (${index + 1}/$total)：《${book.title}》")
+                val bmRaw = runCatching {
+                    postWeReadGateway(
+                        key,
+                        buildWeReadGatewayPayload("/book/bookmarklist", mapOf("bookId" to book.bookId)),
+                    )
+                }.getOrNull()
+                val reviewRaw = runCatching {
+                    postWeReadGateway(
+                        key,
+                        buildWeReadGatewayPayload(
+                            "/review/list/mine",
+                            mapOf("bookid" to book.bookId, "count" to 50, "synckey" to 0),
+                        ),
+                    )
+                }.getOrNull()
+
                 val highlights = if (!bmRaw.isNullOrBlank()) parseWeReadBookmarks(bmRaw) else emptyList()
-                val body = buildString {
-                    if (book.author.isNotBlank()) append("作者：${book.author}\n\n")
-                    if (highlights.isEmpty()) {
-                        append("（来自微信读书，共 ${book.noteCount} 条划线/想法）")
-                    } else {
-                        highlights.forEach { h ->
-                            append("> ").append(h.markText.replace("\n", "\n> ")).append("\n\n")
-                            if (h.thought.isNotBlank()) {
-                                append("想法：").append(h.thought).append("\n\n")
-                            }
-                        }
-                    }
-                }.trim()
+                val reviews = if (!reviewRaw.isNullOrBlank()) parseWeReadReviews(reviewRaw) else emptyList()
+
+                val body = formatWeReadBookMarkdown(book, highlights, reviews)
                 val title = "《${book.title}》微信读书划线"
                 val fp = fingerprint(title, body)
                 if (fp in existingFingerprints) {
                     skipped += 1
-                    continue
+                    return@forEachIndexed
                 }
                 val note = Note(
                     id = UUID.randomUUID().toString(),
@@ -361,6 +450,39 @@ object ExternalReadingSyncService {
         }
     }
 
+    private fun postWeReadGateway(apiKey: String, payload: JSONObject): String {
+        val conn = (URL(WEREAD_GATEWAY_URL).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = 12_000
+            readTimeout = 20_000
+            setRequestProperty("Authorization", "Bearer $apiKey")
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "WantNote-Android/0.20.0")
+        }
+        return try {
+            OutputStreamWriter(conn.outputStream, StandardCharsets.UTF_8).use {
+                it.write(payload.toString())
+            }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val text = stream?.let { s ->
+                BufferedReader(InputStreamReader(s, StandardCharsets.UTF_8)).use { it.readText() }
+            }.orEmpty()
+            if (code !in 200..299) {
+                val hint = runCatching { JSONObject(text).optString("errmsg") }.getOrNull().orEmpty()
+                throw IllegalStateException(
+                    if (hint.isNotBlank()) "微信读书网关错误（HTTP $code）：$hint"
+                    else "微信读书接口返回 HTTP $code，请核对 API Key（wrk- 开头）是否有效",
+                )
+            }
+            text
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     internal data class WeReadBook(
         val bookId: String,
         val title: String,
@@ -371,12 +493,19 @@ object ExternalReadingSyncService {
 
     internal data class WeReadHighlight(
         val markText: String,
+        val chapterTitle: String = "",
         val thought: String = "",
     )
 
+    internal data class WeReadReview(
+        val content: String,
+        val abstractText: String = "",
+        val chapterName: String = "",
+    )
+
     internal fun parseWeReadNotebooks(json: String): List<WeReadBook> {
-        val root = runCatching { JSONObject(json) }.getOrNull() ?: return emptyList()
-        val arr = root.optJSONArray("books") ?: root.optJSONArray("data") ?: return emptyList()
+        val root = JSONObject(json)
+        val arr = root.optJSONArray("books") ?: root.optJSONArray("data") ?: JSONArray()
         val out = ArrayList<WeReadBook>(arr.length())
         for (i in 0 until arr.length()) {
             val item = arr.optJSONObject(i) ?: continue
@@ -384,44 +513,102 @@ object ExternalReadingSyncService {
             val bookId = item.optString("bookId").ifBlank { bookObj.optString("bookId") }.trim()
             val title = bookObj.optString("title").trim()
             if (bookId.isEmpty() || title.isEmpty()) continue
-            out += WeReadBook(
-                bookId = bookId,
-                title = title,
-                author = bookObj.optString("author").trim(),
-                noteCount = item.optInt("noteCount", item.optInt("reviewCount", 0)),
-                sortTime = item.optLong("sort", 0L),
-            )
+            val author = bookObj.optString("author").trim()
+            val noteCount = item.optInt("noteCount", 0) + item.optInt("reviewCount", 0)
+            val sortTime = item.optLong("sort", 0L)
+            out += WeReadBook(bookId, title, author, noteCount, sortTime)
         }
         return out
     }
 
     internal fun parseWeReadBookmarks(json: String): List<WeReadHighlight> {
-        val root = runCatching { JSONObject(json) }.getOrNull() ?: return emptyList()
-        val arr = root.optJSONArray("updated") ?: root.optJSONArray("bookmarks") ?: return emptyList()
+        val root = JSONObject(json)
+        val chapterMap = HashMap<Int, String>()
+        val chapters = root.optJSONArray("chapters") ?: JSONArray()
+        for (i in 0 until chapters.length()) {
+            val ch = chapters.optJSONObject(i) ?: continue
+            val uid = ch.optInt("chapterUid", -1)
+            val title = ch.optString("title").trim()
+            if (uid >= 0 && title.isNotEmpty()) chapterMap[uid] = title
+        }
+        val arr = root.optJSONArray("updated") ?: root.optJSONArray("bookmarks") ?: JSONArray()
         val out = ArrayList<WeReadHighlight>(arr.length())
         for (i in 0 until arr.length()) {
             val item = arr.optJSONObject(i) ?: continue
-            val mark = item.optString("markText").ifBlank { item.optString("abstract") }.trim()
-            val thought = item.optString("content").trim()
-            if (mark.isNotEmpty() || thought.isNotEmpty()) {
-                out += WeReadHighlight(markText = mark.ifEmpty { thought }, thought = if (mark.isNotEmpty()) thought else "")
+            val text = item.optString("markText").trim()
+            val chTitle = chapterMap[item.optInt("chapterUid", -1)].orEmpty()
+            val thought = item.optString("abstract").trim()
+            if (text.isNotEmpty()) out += WeReadHighlight(text, chTitle, thought)
+        }
+        return out
+    }
+
+    internal fun parseWeReadReviews(json: String): List<WeReadReview> {
+        val root = JSONObject(json)
+        val arr = root.optJSONArray("reviews") ?: JSONArray()
+        val out = ArrayList<WeReadReview>(arr.length())
+        for (i in 0 until arr.length()) {
+            val item = arr.optJSONObject(i) ?: continue
+            val rev = item.optJSONObject("review") ?: item
+            val content = rev.optString("content").trim()
+            val abs = rev.optString("abstract").trim()
+            val chName = rev.optString("chapterName").trim()
+            if (content.isNotEmpty() || abs.isNotEmpty()) {
+                out += WeReadReview(content = content, abstractText = abs, chapterName = chName)
             }
         }
         return out
     }
 
-    private fun httpGet(url: String, headers: Map<String, String>): String? {
+    internal fun formatWeReadBookMarkdown(
+        book: WeReadBook,
+        highlights: List<WeReadHighlight>,
+        reviews: List<WeReadReview>,
+    ): String = buildString {
+        if (book.author.isNotBlank()) append("作者：${book.author}\n\n")
+        if (highlights.isEmpty() && reviews.isEmpty()) {
+            append("（来自微信读书，共 ${book.noteCount} 条划线/想法）")
+        } else {
+            if (highlights.isNotEmpty()) {
+                val grouped = highlights.groupBy { it.chapterTitle }
+                grouped.forEach { (chapter, list) ->
+                    if (chapter.isNotBlank()) append("### $chapter\n\n")
+                    list.forEach { h ->
+                        append("> ").append(h.markText.replace("\n", "\n> ")).append("\n\n")
+                        if (h.thought.isNotBlank()) {
+                            append("想法：").append(h.thought).append("\n\n")
+                        }
+                    }
+                }
+            }
+            if (reviews.isNotEmpty()) {
+                append("### 个人想法与书评\n\n")
+                reviews.forEach { r ->
+                    if (r.abstractText.isNotBlank()) {
+                        append("> ").append(r.abstractText.replace("\n", "\n> ")).append("\n\n")
+                    }
+                    if (r.content.isNotBlank()) {
+                        append(r.content).append("\n\n")
+                    }
+                }
+            }
+        }
+    }.trim()
+
+    // ==================== Helpers ====================
+
+    private fun httpGet(urlStr: String, headers: Map<String, String>): String? {
         return runCatching {
-            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = 10_000
                 readTimeout = 20_000
                 setRequestProperty("Accept", "application/json")
-                setRequestProperty("User-Agent", "WantNote-Android/0.19.0")
+                setRequestProperty("User-Agent", "WantNote-Android/0.20.0")
                 headers.forEach { (k, v) -> setRequestProperty(k, v) }
             }
             try {
-                if (conn.responseCode !in 200..299) return@runCatching null
+                if (conn.responseCode !in 200..299) return null
                 BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8)).use { it.readText() }
             } finally {
                 conn.disconnect()
@@ -429,19 +616,21 @@ object ExternalReadingSyncService {
         }.getOrNull()
     }
 
-    private fun isoUtc(millis: Long): String {
-        val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-        fmt.timeZone = TimeZone.getTimeZone("UTC")
-        return fmt.format(Date(millis))
+    private fun isoUtc(ms: Long): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+        sdf.timeZone = TimeZone.getTimeZone("UTC")
+        return sdf.format(Date(ms))
     }
 
     private fun fingerprint(title: String, body: String): String {
-        return "${title.trim().lowercase()}||${body.trim().take(120).lowercase()}"
+        val t = title.trim().lowercase()
+        val b = body.trim().take(240).lowercase()
+        return "$t||$b"
     }
 }
 
 /**
- * 0.19.0：Readwise / 微信读书 WorkManager 定时自动增量同步（模仿 DinoxBoxSyncWorker 架构）。
+ * 0.19.0 / 0.20.0：Readwise 与微信读书后台定时自动同步 Worker（WorkManager）。
  */
 class ExternalReadingAutoSyncWorker(
     appContext: Context,
@@ -458,6 +647,7 @@ class ExternalReadingAutoSyncWorker(
                     val res = ExternalReadingSyncService.syncReadwise(
                         token = settings.readwiseToken,
                         categoryBoxesJson = settings.readwiseCategoryBoxesJson,
+                        categoryTagsJson = settings.readwiseCategoryTagsJson,
                         lastSyncAt = settings.readwiseLastSyncAt,
                         fullSync = false,
                         repository = app.repository,

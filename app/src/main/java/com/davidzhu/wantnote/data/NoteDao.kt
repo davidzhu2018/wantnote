@@ -152,6 +152,12 @@ interface NoteDao {
     @Query("UPDATE notes SET starred = :starred WHERE id = :noteId")
     suspend fun setStarred(noteId: String, starred: Boolean)
 
+    @Query("UPDATE notes SET reviewed = :reviewed WHERE id = :noteId")
+    suspend fun setReviewed(noteId: String, reviewed: Boolean)
+
+    @Query("UPDATE notes SET reviewed = 1 WHERE id IN (:noteIds)")
+    suspend fun markReviewedBatch(noteIds: List<String>)
+
     /** 0.10.0：把一篇笔记分配到卡片盒（boxId 传空串 = 取消分配）。 */
     @Query("UPDATE notes SET boxId = :boxId WHERE id = :noteId")
     suspend fun assignBox(noteId: String, boxId: String)

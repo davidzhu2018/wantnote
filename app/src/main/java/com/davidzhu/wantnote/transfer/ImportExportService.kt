@@ -153,6 +153,9 @@ class ImportExportService(
                         listOf(text to isHtml)
                     }
                     docsToImport.forEachIndexed { idx, (docText, docIsHtml) ->
+                        if (docsToImport.size > 1) {
+                            onProgress(idx + 1, docsToImport.size, "${task.displayName} (${idx + 1}/${docsToImport.size})")
+                        }
                         val fallback = if (docsToImport.size > 1) {
                             "${fileTitle(task.displayName)} #${idx + 1}"
                         } else {

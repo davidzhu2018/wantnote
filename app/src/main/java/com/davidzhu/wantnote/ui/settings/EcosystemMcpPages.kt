@@ -47,7 +47,11 @@ import com.davidzhu.wantnote.sync.ExternalReadingAutoSyncWorker
 import com.davidzhu.wantnote.sync.ExternalReadingSyncService
 import com.davidzhu.wantnote.ui.LocalNotes
 import com.davidzhu.wantnote.ui.LocalSettings
+import com.davidzhu.wantnote.data.Tag
+import com.davidzhu.wantnote.ui.components.WantAlertDialog
 import com.davidzhu.wantnote.ui.components.WantButton
+import com.davidzhu.wantnote.ui.components.WantLinearProgressIndicator
+import androidx.compose.runtime.mutableIntStateOf
 import com.davidzhu.wantnote.ui.components.WantFilterChip
 import com.davidzhu.wantnote.ui.components.WantListItem
 import com.davidzhu.wantnote.ui.components.WantTextButton
@@ -323,13 +327,18 @@ private fun ReadwiseSyncSubPage(snackbar: SnackbarHostState) {
     val notesRepo = LocalNotes.current
     val settings by settingsRepo.observe().collectAsStateWithLifecycle(initialValue = AppSettings.DEFAULT)
     val boxes by notesRepo.observeBoxes().collectAsStateWithLifecycle(initialValue = emptyList())
+    val allTags by notesRepo.observeAllTags().collectAsStateWithLifecycle(initialValue = emptyList())
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
     var token by remember { mutableStateOf("") }
     var dirty by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var syncCurrent by remember { mutableIntStateOf(0) }
+    var syncTotal by remember { mutableIntStateOf(0) }
+    var syncMessage by remember { mutableStateOf("") }
     var statusText by remember { mutableStateOf("") }
+    var editingTagCategory by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     LaunchedEffect(Unit) {
         val stored = runCatching { settingsRepo.get().readwiseToken }.getOrNull().orEmpty()
@@ -339,20 +348,36 @@ private fun ReadwiseSyncSubPage(snackbar: SnackbarHostState) {
     val categoryBoxMap = remember(settings.readwiseCategoryBoxesJson) {
         ExternalReadingSyncService.parseCategoryBoxMap(settings.readwiseCategoryBoxesJson)
     }
+    val categoryTagMap = remember(settings.readwiseCategoryTagsJson) {
+        ExternalReadingSyncService.parseCategoryTagMap(settings.readwiseCategoryTagsJson)
+    }
+    val useCategoryExtra = remember {
+        listOf(ExternalReadingSyncService.USE_CATEGORY_BOX to "沿用 Readwise 分类名（自动创建/匹配）")
+    }
 
     fun runReadwiseSync(fullSync: Boolean) {
         if (busy) return
         busy = true
+        syncCurrent = 0
+        syncTotal = 0
+        syncMessage = if (fullSync) "正在启动 Readwise 全量同步…" else "正在启动 Readwise 增量同步…"
         scope.launch {
             val cleanToken = token.trim()
             settingsRepo.update { it.copy(readwiseToken = cleanToken) }
             dirty = false
+            val cur = settingsRepo.get()
             val res = ExternalReadingSyncService.syncReadwise(
                 token = cleanToken,
-                categoryBoxesJson = settingsRepo.get().readwiseCategoryBoxesJson,
-                lastSyncAt = settingsRepo.get().readwiseLastSyncAt,
+                categoryBoxesJson = cur.readwiseCategoryBoxesJson,
+                categoryTagsJson = cur.readwiseCategoryTagsJson,
+                lastSyncAt = cur.readwiseLastSyncAt,
                 fullSync = fullSync,
                 repository = notesRepo,
+                onProgress = { c, t, msg ->
+                    syncCurrent = c
+                    syncTotal = t
+                    syncMessage = msg
+                },
             )
             res.onSuccess { summary ->
                 settingsRepo.update { it.copy(readwiseLastSyncAt = System.currentTimeMillis()) }
@@ -363,6 +388,7 @@ private fun ReadwiseSyncSubPage(snackbar: SnackbarHostState) {
                 snackbar.showSnackbar(statusText)
             }
             busy = false
+            syncMessage = ""
         }
     }
 
@@ -374,7 +400,7 @@ private fun ReadwiseSyncSubPage(snackbar: SnackbarHostState) {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            text = "单向同步 Readwise 高亮与笔记到想记，可按 Readwise 类别（书籍/文章/推文/播客/补充）分别归入不同卡片盒。",
+            text = "单向同步 Readwise 高亮与笔记到想记，可按类别归入指定卡片盒或沿用 Readwise 分类名，并为每个分类设置标签（默认 #Readwise）。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -410,12 +436,14 @@ private fun ReadwiseSyncSubPage(snackbar: SnackbarHostState) {
                 onClick = {
                     if (busy) return@WantTextButton
                     busy = true
+                    syncMessage = "正在验证 Readwise Token…"
                     scope.launch {
                         val res = ExternalReadingSyncService.testReadwiseToken(token)
                         val msg = res.getOrElse { it.message ?: "验证失败" }
                         statusText = msg
                         snackbar.showSnackbar(msg)
                         busy = false
+                        syncMessage = ""
                     }
                 },
                 enabled = !busy,
@@ -423,19 +451,47 @@ private fun ReadwiseSyncSubPage(snackbar: SnackbarHostState) {
             ) { Text("验证连接") }
         }
 
-        SectionTitle("按 Readwise 类别分配卡片盒")
+        SectionTitle("按 Readwise 类别分配卡片盒与标签")
         ExternalReadingSyncService.READWISE_CATEGORIES.forEach { (catKey, catLabel) ->
-            BoxTargetDropdown(
-                label = catLabel,
-                boxes = boxes,
-                selectedBoxId = categoryBoxMap[catKey].orEmpty(),
-                onSelect = { boxId ->
-                    val next = categoryBoxMap.toMutableMap()
-                    if (boxId.isBlank()) next.remove(catKey) else next[catKey] = boxId
-                    val serialized = ExternalReadingSyncService.serializeCategoryBoxMap(next)
-                    scope.launch { settingsRepo.update { it.copy(readwiseCategoryBoxesJson = serialized) } }
-                },
-            )
+            val currentTag = ExternalReadingSyncService.resolveReadwiseTagForCategory(categoryTagMap, catKey)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MiuixTheme.colorScheme.surfaceContainer.copy(alpha = 0.55f))
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                BoxTargetDropdown(
+                    label = "$catLabel · 卡片盒",
+                    boxes = boxes,
+                    selectedBoxId = categoryBoxMap[catKey].orEmpty(),
+                    extraOptions = useCategoryExtra,
+                    onSelect = { boxId ->
+                        val next = categoryBoxMap.toMutableMap()
+                        if (boxId.isBlank()) next.remove(catKey) else next[catKey] = boxId
+                        val serialized = ExternalReadingSyncService.serializeCategoryBoxMap(next)
+                        scope.launch { settingsRepo.update { it.copy(readwiseCategoryBoxesJson = serialized) } }
+                    },
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = "同步标签：#$currentTag",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    WantTextButton(
+                        onClick = { editingTagCategory = catKey to catLabel },
+                        enabled = !busy,
+                    ) { Text("设置标签") }
+                }
+            }
         }
 
         SectionTitle("自动同步频率")
@@ -481,6 +537,27 @@ private fun ReadwiseSyncSubPage(snackbar: SnackbarHostState) {
             ) { Text(if (busy) "同步中…" else "全量同步") }
         }
 
+        if (busy) {
+            if (syncTotal > 0 && syncCurrent > 0) {
+                val frac = (syncCurrent.toFloat() / syncTotal.toFloat()).coerceIn(0f, 1f)
+                WantLinearProgressIndicator(progress = { frac }, modifier = Modifier.fillMaxWidth())
+                Text(
+                    text = "${syncMessage.ifBlank { "同步中…" }}（${(frac * 100).toInt()}%）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                WantLinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                if (syncMessage.isNotBlank()) {
+                    Text(
+                        text = syncMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
         if (settings.readwiseLastSyncAt > 0L) {
             Text(
                 text = "上次同步：${Dates.formatTimestamp(settings.readwiseLastSyncAt)}",
@@ -499,9 +576,84 @@ private fun ReadwiseSyncSubPage(snackbar: SnackbarHostState) {
         ) { Text("获取 Readwise Access Token") }
         Spacer(modifier = Modifier.height(24.dp))
     }
+
+    editingTagCategory?.let { (catKey, catLabel) ->
+        ReadwiseCategoryTagDialog(
+            categoryLabel = catLabel,
+            currentTagPath = ExternalReadingSyncService.resolveReadwiseTagForCategory(categoryTagMap, catKey),
+            allTags = allTags,
+            onConfirm = { newPath ->
+                val normalized = Tag.normalizePath(newPath).ifBlank { ExternalReadingSyncService.DEFAULT_READWISE_TAG }
+                editingTagCategory = null
+                scope.launch {
+                    notesRepo.upsertTag(normalized)
+                    val next = categoryTagMap.toMutableMap()
+                    next[catKey] = normalized
+                    val serialized = ExternalReadingSyncService.serializeCategoryTagMap(next)
+                    settingsRepo.update { it.copy(readwiseCategoryTagsJson = serialized) }
+                    snackbar.showSnackbar("$catLabel 同步标签已设为 #$normalized")
+                }
+            },
+            onDismiss = { editingTagCategory = null },
+        )
+    }
 }
 
-/** 微信读书单向同步子菜单（API Key + 目标卡片盒 + 全量/增量 + 自动/手动同步）。 */
+@Composable
+private fun ReadwiseCategoryTagDialog(
+    categoryLabel: String,
+    currentTagPath: String,
+    allTags: List<Tag>,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var input by remember { mutableStateOf(currentTagPath) }
+    WantAlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("设置 $categoryLabel 标签") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                WantTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    label = "输入或新建标签（默认 Readwise）",
+                    placeholder = "例如 Readwise 或 阅读/书籍",
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (allTags.isNotEmpty()) {
+                    Text(
+                        text = "或点击已有标签：",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        allTags.forEach { tag ->
+                            WantFilterChip(
+                                selected = input.trim().equals(tag.path, ignoreCase = true),
+                                onClick = { input = tag.path },
+                                label = { Text("#${tag.path}") },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            WantTextButton(onClick = { onConfirm(input) }) { Text("确定") }
+        },
+        dismissButton = {
+            WantTextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
+}
+
+/** 微信读书单向同步子菜单（官方 Agent Gateway + API Key 验证 + 目标卡片盒 + 进度条）。 */
 @Composable
 private fun WeReadSyncSubPage(snackbar: SnackbarHostState) {
     val settingsRepo = LocalSettings.current
@@ -514,6 +666,9 @@ private fun WeReadSyncSubPage(snackbar: SnackbarHostState) {
     var apiKey by remember { mutableStateOf("") }
     var dirty by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var syncCurrent by remember { mutableIntStateOf(0) }
+    var syncTotal by remember { mutableIntStateOf(0) }
+    var syncMessage by remember { mutableStateOf("") }
     var statusText by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
@@ -524,16 +679,25 @@ private fun WeReadSyncSubPage(snackbar: SnackbarHostState) {
     fun runWeReadSync(fullSync: Boolean) {
         if (busy) return
         busy = true
+        syncCurrent = 0
+        syncTotal = 0
+        syncMessage = if (fullSync) "正在启动微信读书全量同步…" else "正在启动微信读书增量同步…"
         scope.launch {
             val cleanKey = apiKey.trim()
             settingsRepo.update { it.copy(wereadApiKey = cleanKey) }
             dirty = false
+            val cur = settingsRepo.get()
             val res = ExternalReadingSyncService.syncWeRead(
                 apiKey = cleanKey,
-                targetBoxId = settingsRepo.get().wereadBoxId,
-                lastSyncAt = settingsRepo.get().wereadLastSyncAt,
+                targetBoxId = cur.wereadBoxId,
+                lastSyncAt = cur.wereadLastSyncAt,
                 fullSync = fullSync,
                 repository = notesRepo,
+                onProgress = { c, t, msg ->
+                    syncCurrent = c
+                    syncTotal = t
+                    syncMessage = msg
+                },
             )
             res.onSuccess { summary ->
                 settingsRepo.update { it.copy(wereadLastSyncAt = System.currentTimeMillis()) }
@@ -544,6 +708,7 @@ private fun WeReadSyncSubPage(snackbar: SnackbarHostState) {
                 snackbar.showSnackbar(statusText)
             }
             busy = false
+            syncMessage = ""
         }
     }
 
@@ -555,7 +720,7 @@ private fun WeReadSyncSubPage(snackbar: SnackbarHostState) {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            text = "输入微信读书 API Key，单向同步微信读书里的划线与高亮到指定卡片盒（支持自动定时同步与手动全量/增量同步）。",
+            text = "输入微信读书 Skill API Key（wrk- 开头），通过微信读书官方网关单向同步划线、高亮与个人想法到指定卡片盒。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -565,24 +730,46 @@ private fun WeReadSyncSubPage(snackbar: SnackbarHostState) {
                 apiKey = it
                 dirty = true
             },
-            label = "微信读书 API Key",
+            label = "微信读书 API Key（wrk-...）",
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth(),
         )
-        WantButton(
-            onClick = {
-                val clean = apiKey.trim()
-                scope.launch {
-                    settingsRepo.update { it.copy(wereadApiKey = clean) }
-                    dirty = false
-                    snackbar.showSnackbar("微信读书 API Key 已保存")
-                }
-            },
-            enabled = !busy,
+        Row(
             modifier = Modifier.fillMaxWidth(),
-        ) { Text("保存 API Key") }
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            WantButton(
+                onClick = {
+                    val clean = apiKey.trim()
+                    scope.launch {
+                        settingsRepo.update { it.copy(wereadApiKey = clean) }
+                        dirty = false
+                        snackbar.showSnackbar("微信读书 API Key 已保存")
+                    }
+                },
+                enabled = !busy,
+                modifier = Modifier.weight(1f),
+            ) { Text("保存 API Key") }
+            WantTextButton(
+                onClick = {
+                    if (busy) return@WantTextButton
+                    busy = true
+                    syncMessage = "正在验证微信读书 API Key…"
+                    scope.launch {
+                        val res = ExternalReadingSyncService.testWeReadApiKey(apiKey)
+                        val msg = res.getOrElse { it.message ?: "验证失败" }
+                        statusText = msg
+                        snackbar.showSnackbar(msg)
+                        busy = false
+                        syncMessage = ""
+                    }
+                },
+                enabled = !busy,
+                modifier = Modifier.weight(1f),
+            ) { Text("验证连接") }
+        }
 
         BoxTargetDropdown(
             label = "同步目标卡片盒",
@@ -634,6 +821,27 @@ private fun WeReadSyncSubPage(snackbar: SnackbarHostState) {
                 enabled = !busy,
                 modifier = Modifier.weight(1f),
             ) { Text(if (busy) "同步中…" else "全量同步") }
+        }
+
+        if (busy) {
+            if (syncTotal > 0 && syncCurrent > 0) {
+                val frac = (syncCurrent.toFloat() / syncTotal.toFloat()).coerceIn(0f, 1f)
+                WantLinearProgressIndicator(progress = { frac }, modifier = Modifier.fillMaxWidth())
+                Text(
+                    text = "${syncMessage.ifBlank { "同步中…" }}（${(frac * 100).toInt()}%）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                WantLinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                if (syncMessage.isNotBlank()) {
+                    Text(
+                        text = syncMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
 
         if (settings.wereadLastSyncAt > 0L) {

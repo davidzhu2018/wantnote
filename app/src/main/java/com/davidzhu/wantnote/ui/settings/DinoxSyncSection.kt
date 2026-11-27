@@ -24,6 +24,7 @@ import com.davidzhu.wantnote.ui.components.WantAlertDialog
 import com.davidzhu.wantnote.ui.components.WantButton
 import com.davidzhu.wantnote.ui.components.WantCheckbox
 import com.davidzhu.wantnote.ui.components.WantCircularProgressIndicator
+import com.davidzhu.wantnote.ui.components.WantLinearProgressIndicator
 import com.davidzhu.wantnote.ui.components.WantDropdownMenu
 import com.davidzhu.wantnote.ui.components.WantDropdownMenuItem
 import com.davidzhu.wantnote.ui.components.WantFilterChip

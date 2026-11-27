@@ -541,6 +541,14 @@ class NoteRepository(
         notes.setStarred(noteId, starred)
     }
 
+    suspend fun setReviewed(noteId: String, reviewed: Boolean) {
+        notes.setReviewed(noteId, reviewed)
+    }
+
+    suspend fun markReviewedBatch(noteIds: List<String>) {
+        if (noteIds.isNotEmpty()) notes.markReviewedBatch(noteIds)
+    }
+
     suspend fun updateLocation(
         noteId: String,
         locationName: String,
@@ -754,10 +762,12 @@ class NoteRepository(
             endMs: Long? = null,
             boxId: String? = null,
             starredOnly: Boolean = false,
+            pinnedOnly: Boolean = false,
         ): List<NoteWithDetails> {
             val q = keyword.trim()
             return items.filter { item ->
                 if (starredOnly && !item.note.starred) return@filter false
+            if (pinnedOnly && !item.note.pinned) return@filter false
                 val keywordOk = q.isEmpty() ||
                     item.note.title.contains(q, ignoreCase = true) ||
                     item.note.body.contains(q, ignoreCase = true) ||

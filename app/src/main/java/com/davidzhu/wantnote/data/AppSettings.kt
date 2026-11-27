@@ -175,6 +175,7 @@ data class AppSettings(
     /** 0.19.0：Readwise 单向同步配置（Token、类别→卡片盒映射 JSON、自动同步分钟数、上次同步时间）。 */
     val readwiseToken: String = "",
     val readwiseCategoryBoxesJson: String = "{}",
+    val readwiseCategoryTagsJson: String = "{}",
     val readwiseAutoSyncMinutes: Int = 0,
     val readwiseLastSyncAt: Long = 0L,
     /** 0.19.0：微信读书单向同步配置（API Key、目标卡片盒、自动同步分钟数、上次同步时间）。 */
