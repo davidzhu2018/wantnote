@@ -66,6 +66,7 @@ fun MarkdownPreview(
     modifier: Modifier = Modifier,
     linkTitles: Map<String, String> = emptyMap(),
     onOpenAttachment: (String) -> Unit = {},
+    onOpenNote: ((String) -> Unit)? = null,
     scrollable: Boolean = true,
 ) {
     val blocks = remember(content) {
@@ -106,18 +107,21 @@ fun MarkdownPreview(
                     block,
                     linkTitles = linkTitles,
                     highlight = highlight,
+                    onOpenNote = onOpenNote,
                 )
                 BlockType.CODE -> PreviewCode(block)
-                BlockType.TASK -> PreviewTask(block, linkTitles = linkTitles)
+                BlockType.TASK -> PreviewTask(block, linkTitles = linkTitles, onOpenNote = onOpenNote)
                 BlockType.ORDERED -> PreviewListItem(
                     block,
                     marker = "${orderedNumber(blocks, index)}.",
                     linkTitles = linkTitles,
+                    onOpenNote = onOpenNote,
                 )
                 BlockType.UNORDERED -> PreviewListItem(
                     block,
                     marker = "•",
                     linkTitles = linkTitles,
+                    onOpenNote = onOpenNote,
                 )
                 BlockType.DIVIDER -> HorizontalDivider(color = MaterialTheme.colorScheme.outline)
                 BlockType.IMAGE -> PreviewImage(path = block.mediaPath)
@@ -130,12 +134,13 @@ fun MarkdownPreview(
                     label = block.text,
                     onOpen = { onOpenAttachment(block.mediaPath) },
                 )
-                BlockType.TABLE -> PreviewTable(block, linkTitles = linkTitles)
+                BlockType.TABLE -> PreviewTable(block, linkTitles = linkTitles, onOpenNote = onOpenNote)
                 BlockType.PARAGRAPH -> MarkdownText(
                     text = block.text,
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onBackground,
                     linkTitles = linkTitles,
+                    onOpenNote = onOpenNote,
                 )
             }
         }
@@ -187,6 +192,7 @@ private fun PreviewQuote(
     block: MarkdownBlock,
     linkTitles: Map<String, String>,
     highlight: Color,
+    onOpenNote: ((String) -> Unit)? = null,
 ) {
     Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
         Box(
@@ -200,6 +206,7 @@ private fun PreviewQuote(
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             linkTitles = linkTitles,
+            onOpenNote = onOpenNote,
             modifier = Modifier.padding(start = 10.dp).weight(1f),
         )
     }
@@ -229,6 +236,7 @@ private fun PreviewCode(block: MarkdownBlock) {
 private fun PreviewTask(
     block: MarkdownBlock,
     linkTitles: Map<String, String>,
+    onOpenNote: ((String) -> Unit)? = null,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -245,6 +253,7 @@ private fun PreviewTask(
                 MaterialTheme.colorScheme.onBackground
             },
             linkTitles = linkTitles,
+            onOpenNote = onOpenNote,
         )
     }
 }
@@ -254,6 +263,7 @@ private fun PreviewListItem(
     block: MarkdownBlock,
     marker: String,
     linkTitles: Map<String, String>,
+    onOpenNote: ((String) -> Unit)? = null,
 ) {
     Row(
         verticalAlignment = Alignment.Top,
@@ -271,6 +281,7 @@ private fun PreviewListItem(
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onBackground,
             linkTitles = linkTitles,
+            onOpenNote = onOpenNote,
             modifier = Modifier.weight(1f),
         )
     }
@@ -338,6 +349,7 @@ private fun PreviewFile(path: String, label: String, onOpen: () -> Unit) {
 private fun PreviewTable(
     block: MarkdownBlock,
     linkTitles: Map<String, String>,
+    onOpenNote: ((String) -> Unit)? = null,
 ) {
     val grid = remember(block.text) { MarkdownCodec.parseTable(block.text) }
     if (grid == null) {
@@ -346,6 +358,7 @@ private fun PreviewTable(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onBackground,
             linkTitles = linkTitles,
+            onOpenNote = onOpenNote,
         )
         return
     }

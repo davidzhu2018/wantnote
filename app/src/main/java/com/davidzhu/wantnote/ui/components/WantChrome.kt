@@ -1,6 +1,7 @@
 package com.davidzhu.wantnote.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,7 +12,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -246,7 +250,7 @@ fun WantButton(
     content: @Composable RowScope.() -> Unit,
 ) {
     val fill = LocalFillDialogButtons.current
-    val btnShape = shape ?: RoundedCornerShape(14.dp)
+    val btnShape = shape ?: RoundedCornerShape(13.dp)
     val baseColor = if (enabled) {
         MiuixTheme.colorScheme.primary
     } else {
@@ -259,15 +263,16 @@ fun WantButton(
     }
     Row(
         modifier = (if (fill) modifier.fillMaxWidth() else modifier)
+            .defaultMinSize(minHeight = 42.dp)
             .liquidGlassSurface(
                 shape = btnShape,
                 role = LiquidGlassSurfaceRole.BUTTON,
                 baseColor = baseColor,
-                elevationOverride = if (enabled) 8.dp else 1.dp,
-                borderWidth = 1.2.dp,
+                elevationOverride = if (enabled) 10.dp else 1.dp,
+                borderWidth = 1.3.dp,
             )
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(contentPadding ?: PaddingValues(horizontal = 18.dp, vertical = 11.dp)),
+            .padding(contentPadding ?: PaddingValues(horizontal = 16.dp, vertical = 10.dp)),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -291,12 +296,14 @@ fun WantTextButton(
     content: @Composable RowScope.() -> Unit,
 ) {
     val fill = LocalFillDialogButtons.current
-    val btnShape = shape ?: RoundedCornerShape(12.dp)
-    val baseColor = if (enabled) {
-        MiuixTheme.colorScheme.surface
+    val btnShape = shape ?: RoundedCornerShape(13.dp)
+    val isDark = MiuixTheme.colorScheme.background.luminance() < 0.5f
+    val liftedSurface = if (isDark) {
+        lerp(MiuixTheme.colorScheme.surface, Color.White, 0.14f)
     } else {
-        MiuixTheme.colorScheme.surfaceContainer
+        lerp(MiuixTheme.colorScheme.surface, Color.White, 0.78f)
     }
+    val baseColor = if (enabled) liftedSurface else MiuixTheme.colorScheme.surfaceContainer
     val textColor = if (enabled) {
         MiuixTheme.colorScheme.onSurface
     } else {
@@ -304,15 +311,16 @@ fun WantTextButton(
     }
     Row(
         modifier = (if (fill) modifier.fillMaxWidth() else modifier)
+            .defaultMinSize(minHeight = 42.dp)
             .liquidGlassSurface(
                 shape = btnShape,
-                role = LiquidGlassSurfaceRole.CHIP,
+                role = LiquidGlassSurfaceRole.BUTTON,
                 baseColor = baseColor,
-                elevationOverride = if (enabled) 5.dp else 1.dp,
-                borderWidth = 1.dp,
+                elevationOverride = if (enabled) 8.dp else 1.dp,
+                borderWidth = 1.2.dp,
             )
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(contentPadding ?: PaddingValues(horizontal = 14.dp, vertical = 8.dp)),
+            .padding(contentPadding ?: PaddingValues(horizontal = 16.dp, vertical = 10.dp)),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -496,26 +504,34 @@ fun WantTabRow(
     @Suppress("UNUSED_PARAMETER") divider: Any? = null,
     tabs: @Composable RowScope.() -> Unit,
 ) {
+    val isDark = MiuixTheme.colorScheme.background.luminance() < 0.5f
+    val trackColor = if (isDark) {
+        lerp(MiuixTheme.colorScheme.background, Color.Black, 0.25f)
+    } else {
+        lerp(MiuixTheme.colorScheme.surfaceContainer, Color.Black, 0.08f)
+    }
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .liquidGlassSurface(
+            .clip(RoundedCornerShape(50))
+            .background(trackColor)
+            .border(
+                width = 1.dp,
+                color = MiuixTheme.colorScheme.outline.copy(alpha = 0.45f),
                 shape = RoundedCornerShape(50),
-                role = LiquidGlassSurfaceRole.CHIP,
-                baseColor = MiuixTheme.colorScheme.surfaceContainer,
-            ),
+            )
+            .padding(4.dp),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(3.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
             content = tabs,
         )
     }
 }
 
-/** Miuix 分段控件的一个页签。 */
+/** Miuix 分段控件的一个页签（选中态为主题色立体胶囊，非选中态扁平弱化，对比清晰）。 */
 @Composable
 fun RowScope.WantTab(
     selected: Boolean,
@@ -528,19 +544,32 @@ fun RowScope.WantTab(
     @Suppress("UNUSED_PARAMETER") unselectedContentColor: Color = Color.Unspecified,
     @Suppress("UNUSED_PARAMETER") interactionSource: Any? = null,
 ) {
-    val background = if (selected) MiuixTheme.colorScheme.surface else Color.Transparent
     val contentColor = if (selected) {
-        MiuixTheme.colorScheme.primary
+        MiuixTheme.colorScheme.onPrimary
     } else {
         MiuixTheme.colorScheme.onSurfaceSecondary
     }
-    Box(
-        modifier = modifier
+    val tabModifier = if (selected) {
+        modifier
+            .weight(1f)
+            .liquidGlassSurface(
+                shape = RoundedCornerShape(50),
+                role = LiquidGlassSurfaceRole.BUTTON,
+                baseColor = MiuixTheme.colorScheme.primary,
+                elevationOverride = 6.dp,
+                borderWidth = 1.dp,
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 8.dp)
+    } else {
+        modifier
             .weight(1f)
             .clip(RoundedCornerShape(50))
-            .background(background)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(vertical = 7.dp),
+            .padding(vertical = 8.dp)
+    }
+    Box(
+        modifier = tabModifier,
         contentAlignment = Alignment.Center,
     ) {
         CompositionLocalProvider(LocalContentColor provides contentColor) {

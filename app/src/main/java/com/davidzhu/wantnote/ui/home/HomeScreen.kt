@@ -3,7 +3,12 @@ package com.davidzhu.wantnote.ui.home
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -231,7 +236,19 @@ fun HomeScreen(
             onDismissRequest = { if (!busy) menuNote = null },
             title = { Text(SearchText.displayTitle(target.note), maxLines = 2) },
             text = {
-                Column {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(MiuixTheme.colorScheme.surfaceContainer.copy(alpha = 0.72f))
+                        .border(
+                            width = 1.dp,
+                            color = MiuixTheme.colorScheme.outline.copy(alpha = 0.45f),
+                            shape = RoundedCornerShape(18.dp),
+                        )
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                     HomeMenuAction("编辑笔记") {
                         menuNote = null
                         onEditNote(target.note.id)

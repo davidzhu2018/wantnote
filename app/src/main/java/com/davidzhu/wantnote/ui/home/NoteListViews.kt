@@ -77,11 +77,11 @@ private fun NoteCard(
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     // 让卡片背景比页面底色更明亮/通透，配合 20dp 大圆角与立体阴影明显浮起。
     val liftedSurface = if (isDark) {
-        lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.08f)
+        lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.14f)
     } else {
-        lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.58f)
+        lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.80f)
     }
-    val cardElevation = maxOf(elevation, 10)
+    val cardElevation = maxOf(elevation, 13)
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -90,7 +90,7 @@ private fun NoteCard(
                 role = LiquidGlassSurfaceRole.CARD,
                 baseColor = liftedSurface,
                 elevationOverride = cardElevation.dp,
-                borderWidth = 1.2.dp,
+                borderWidth = 1.3.dp,
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         content = content,

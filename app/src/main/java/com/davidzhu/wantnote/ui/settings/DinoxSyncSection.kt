@@ -183,7 +183,11 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth(),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             WantButton(
                 onClick = {
                     runOperation {
@@ -196,11 +200,16 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                         }
                     }
                 },
+                modifier = Modifier.weight(1f).height(42.dp),
                 enabled = !busy && tokenInput.isNotBlank(),
-            ) { Text("测试并保存") }
+            ) { Text("测试并保存", maxLines = 1) }
             if (hasToken) {
-                WantTextButton(onClick = { runOperation { dinox.testSavedToken() } }, enabled = !busy) {
-                    Text("重新测试")
+                WantTextButton(
+                    onClick = { runOperation { dinox.testSavedToken() } },
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    enabled = !busy,
+                ) {
+                    Text("重新测试", maxLines = 1)
                 }
                 WantTextButton(
                     onClick = {
@@ -210,8 +219,9 @@ fun EcosystemTab(snackbar: SnackbarHostState) {
                             Result.success("已清除本机 Token")
                         }
                     },
+                    modifier = Modifier.weight(1f).height(42.dp),
                     enabled = !busy,
-                ) { Text("清除") }
+                ) { Text("清除", maxLines = 1) }
             }
         }
         lastError?.let { message ->
@@ -618,20 +628,40 @@ private fun SyncRuleCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 if (rule.modeOption == DinoxRuleSyncMode.MANUAL) {
-                    WantButton(onClick = onRunFull, enabled = !busy) {
-                        Text(if (isRunningThis) "同步中…" else "全量同步")
+                    WantButton(
+                        onClick = onRunFull,
+                        modifier = Modifier.weight(1f).height(42.dp),
+                        enabled = !busy,
+                    ) {
+                        Text(if (isRunningThis) "同步中…" else "全量同步", maxLines = 1)
                     }
-                    WantTextButton(onClick = onRunIncremental, enabled = !busy) {
-                        Text("增量同步")
+                    WantTextButton(
+                        onClick = onRunIncremental,
+                        modifier = Modifier.weight(1f).height(42.dp),
+                        enabled = !busy,
+                    ) {
+                        Text("增量同步", maxLines = 1)
                     }
                 } else {
-                    WantTextButton(onClick = onRunIncremental, enabled = !busy) {
-                        Text(if (isRunningThis) "同步中…" else "立即增量")
+                    WantButton(
+                        onClick = onRunIncremental,
+                        modifier = Modifier.weight(1f).height(42.dp),
+                        enabled = !busy,
+                    ) {
+                        Text(if (isRunningThis) "同步中…" else "立即增量", maxLines = 1)
                     }
-                    WantTextButton(onClick = onRunFull, enabled = !busy) {
-                        Text("立即全量")
+                    WantTextButton(
+                        onClick = onRunFull,
+                        modifier = Modifier.weight(1f).height(42.dp),
+                        enabled = !busy,
+                    ) {
+                        Text("立即全量", maxLines = 1)
                     }
                 }
             }

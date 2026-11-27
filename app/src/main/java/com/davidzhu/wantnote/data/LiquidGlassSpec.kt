@@ -135,19 +135,19 @@ object LiquidGlassSpec {
             LiquidGlassSurfaceRole.CHIP -> if (isDark) 0.32f else 0.82f
         }
 
-        val rimBottomAlpha = if (isDark) 0.16f else 0.28f
+        val rimBottomAlpha = if (isDark) 0.28f else 0.42f
 
         val shadowElevationDp = when (role) {
             LiquidGlassSurfaceRole.BAR -> 16f
             LiquidGlassSurfaceRole.DIALOG -> 20f
-            LiquidGlassSurfaceRole.FAB -> 14f
-            LiquidGlassSurfaceRole.CARD -> 12f
-            LiquidGlassSurfaceRole.BUTTON -> 8f
-            LiquidGlassSurfaceRole.CHIP -> 6f
+            LiquidGlassSurfaceRole.FAB -> 15f
+            LiquidGlassSurfaceRole.CARD -> 14f
+            LiquidGlassSurfaceRole.BUTTON -> 10f
+            LiquidGlassSurfaceRole.CHIP -> 7f
         }
 
-        val ambientShadowAlpha = if (isDark) 0.56f else 0.30f
-        val spotShadowAlpha = if (isDark) 0.78f else 0.52f
+        val ambientShadowAlpha = if (isDark) 0.68f else 0.42f
+        val spotShadowAlpha = if (isDark) 0.88f else 0.72f
 
         val blurRadiusDp = when (tier) {
             LiquidGlassTier.LIQUID_GLASS_SHADER -> when (role) {

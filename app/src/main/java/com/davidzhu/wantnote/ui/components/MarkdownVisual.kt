@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
@@ -106,8 +107,12 @@ object MarkdownVisual {
                 noteId != null -> {
                     val title = linkTitles[noteId]?.takeIf { it.isNotBlank() } ?: "已删除的笔记"
                     segments += Segment(
-                        range.first, range.last + 1, "→ $title",
-                        SpanStyle(color = linkColor, fontWeight = FontWeight.Medium),
+                        range.first, range.last + 1, "[[$title]]",
+                        SpanStyle(
+                            color = linkColor,
+                            fontWeight = FontWeight.Medium,
+                            textDecoration = TextDecoration.Underline,
+                        ),
                     )
                 }
                 imageAlt != null -> segments += Segment(
@@ -222,7 +227,9 @@ object MarkdownVisual {
         highlightColor: Color,
         linkTitles: Map<String, String> = emptyMap(),
         linkColor: Color = Color.Unspecified,
+        noteLinkColor: Color = Color(0xFF1A73E8),
         renderInlineImages: Boolean = true,
+        onOpenNote: ((String) -> Unit)? = null,
     ): RichRendered {
         if (source.isEmpty()) return RichRendered(AnnotatedString(""), emptyMap())
         val inlineImages = LinkedHashMap<String, String>()
@@ -245,8 +252,25 @@ object MarkdownVisual {
                 when {
                     noteId != null -> {
                         val title = linkTitles[noteId]?.takeIf { it.isNotBlank() } ?: "已删除的笔记"
-                        withStyle(SpanStyle(color = linkColor, fontWeight = FontWeight.Medium)) {
-                            append("→ $title")
+                        val linkStyle = SpanStyle(
+                            color = noteLinkColor,
+                            fontWeight = FontWeight.Medium,
+                            textDecoration = TextDecoration.Underline,
+                        )
+                        if (onOpenNote != null && linkTitles.containsKey(noteId)) {
+                            withLink(
+                                LinkAnnotation.Clickable(
+                                    tag = "note:$noteId",
+                                    styles = TextLinkStyles(style = linkStyle),
+                                    linkInteractionListener = { onOpenNote(noteId) },
+                                ),
+                            ) {
+                                append("[[$title]]")
+                            }
+                        } else {
+                            withStyle(linkStyle) {
+                                append("[[$title]]")
+                            }
                         }
                     }
                     imageAlt != null -> {
@@ -322,12 +346,23 @@ fun MarkdownText(
     overflow: TextOverflow = TextOverflow.Ellipsis,
     linkTitles: Map<String, String> = emptyMap(),
     renderInlineImages: Boolean = true,
+    onOpenNote: ((String) -> Unit)? = null,
 ) {
     val highlight = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
     val linkColor = MaterialTheme.colorScheme.primary
-    // 0.10.0：只读渲染走 renderRich——超链接可点击；0.12.0 支持在主页卡片预览关闭行内图片。
-    val rendered = remember(text, linkTitles, highlight, linkColor, renderInlineImages) {
-        MarkdownVisual.renderRich(text, highlight, linkTitles, linkColor, renderInlineImages = renderInlineImages)
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val noteLinkColor = if (isDark) Color(0xFF6EA8FE) else Color(0xFF1A73E8)
+    // 0.10.0：只读渲染走 renderRich——超链接可点击；0.14.0：双链渲染为蓝色带下划线 [[标题]] 并支持点击跳转。
+    val rendered = remember(text, linkTitles, highlight, linkColor, noteLinkColor, renderInlineImages, onOpenNote) {
+        MarkdownVisual.renderRich(
+            source = text,
+            highlightColor = highlight,
+            linkTitles = linkTitles,
+            linkColor = linkColor,
+            noteLinkColor = noteLinkColor,
+            renderInlineImages = renderInlineImages,
+            onOpenNote = onOpenNote,
+        )
     }
     val inline = remember(rendered.inlineImages) {
         rendered.inlineImages.mapValues { (_, url) ->
