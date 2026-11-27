@@ -540,6 +540,13 @@ class BackupService(
         .put("uiStyle", settings.uiStyle)
         .put("mapProvider", settings.mapProvider)
         .put("mapApiKey", settings.mapApiKey)
+        .put("flomoMcpUrl", settings.flomoMcpUrl)
+        .put("flomoMcpToken", settings.flomoMcpToken)
+        .put("flomoWebhookUrl", settings.flomoWebhookUrl)
+        .put("flomoLastSyncAt", settings.flomoLastSyncAt)
+        .put("dedaoMcpUrl", settings.dedaoMcpUrl)
+        .put("dedaoMcpToken", settings.dedaoMcpToken)
+        .put("dedaoLastSyncAt", settings.dedaoLastSyncAt)
         .toString()
 
     // ---- JSON 反序列化（缺字段用当前默认值，兼容未来/旧版备份） -------------
@@ -721,6 +728,13 @@ class BackupService(
             uiStyle = obj.optString("uiStyle", default.uiStyle),
             mapProvider = obj.optString("mapProvider", default.mapProvider),
             mapApiKey = obj.optString("mapApiKey", default.mapApiKey),
+            flomoMcpUrl = obj.optString("flomoMcpUrl", default.flomoMcpUrl),
+            flomoMcpToken = obj.optString("flomoMcpToken", default.flomoMcpToken),
+            flomoWebhookUrl = obj.optString("flomoWebhookUrl", default.flomoWebhookUrl),
+            flomoLastSyncAt = obj.optLong("flomoLastSyncAt", default.flomoLastSyncAt),
+            dedaoMcpUrl = obj.optString("dedaoMcpUrl", default.dedaoMcpUrl),
+            dedaoMcpToken = obj.optString("dedaoMcpToken", default.dedaoMcpToken),
+            dedaoLastSyncAt = obj.optLong("dedaoLastSyncAt", default.dedaoLastSyncAt),
         )
     }
 

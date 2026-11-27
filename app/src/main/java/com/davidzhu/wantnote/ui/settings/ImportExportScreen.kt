@@ -62,7 +62,7 @@ fun ImportExportScreen(onBack: () -> Unit) {
             when (dataTabState) {
                 0 -> ImportTab(snackbar = snackbar)
                 1 -> ExportTab(snackbar = snackbar)
-                else -> EcosystemTab(snackbar = snackbar)
+                else -> EcosystemHubTab(snackbar = snackbar)
             }
         }
     }

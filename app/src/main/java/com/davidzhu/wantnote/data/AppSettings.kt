@@ -164,6 +164,14 @@ data class AppSettings(
     /** 0.18.0：编辑器位置 POI 地图服务商（AMAP 高德 / TENCENT 腾讯）与本机 Key。 */
     val mapProvider: String = "AMAP",
     val mapApiKey: String = "",
+    /** 0.18.2：生态互联 Flomo & 得到大脑 MCP 双向同步配置（仅存本机，随备份/云同步保存）。 */
+    val flomoMcpUrl: String = "",
+    val flomoMcpToken: String = "",
+    val flomoWebhookUrl: String = "",
+    val flomoLastSyncAt: Long = 0L,
+    val dedaoMcpUrl: String = "",
+    val dedaoMcpToken: String = "",
+    val dedaoLastSyncAt: Long = 0L,
 ) {
     val palette: ThemePalette get() = ThemePalette.fromStorage(themeName)
     val fontScaleOption: FontScaleOption get() = FontScaleOption.fromStorage(fontScale)

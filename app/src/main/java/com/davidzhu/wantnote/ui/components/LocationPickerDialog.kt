@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -254,28 +255,50 @@ fun LocationPickerDialog(
                     }
                 }
 
-                // 搜索框 + 定位刷新（支持键盘搜索键）
+                // 0.18.2：当前定位卡片——直接定位到当前位置，点击即可选用或在下方面板微调周边 POI
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                        .clickable(enabled = currentAddress.isNotBlank()) {
+                            onPick(
+                                PoiItem(
+                                    id = "current-loc",
+                                    name = currentAddress,
+                                    address = currentAddress,
+                                    lat = coords?.first ?: 0.0,
+                                    lng = coords?.second ?: 0.0,
+                                    distanceMeters = 0,
+                                ),
+                            )
+                        }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    WantTextField(
-                        value = keyword,
-                        onValueChange = { keyword = it },
-                        placeholder = "搜索附近地点或输入位置名",
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(
-                            onSearch = { loadPois(query = keyword, refreshCoords = false) },
-                        ),
-                        modifier = Modifier.weight(1f),
+                    Icon(
+                        imageVector = Icons.Outlined.MyLocation,
+                        contentDescription = "当前位置",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp),
                     )
-                    WantButton(
-                        onClick = { loadPois(query = keyword, refreshCoords = false) },
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
-                    ) {
-                        Icon(Icons.Outlined.Search, contentDescription = "搜索", modifier = Modifier.size(18.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (loading && currentAddress.isBlank()) "正在自动定位当前位置…" else "当前位置（点击直接选用）",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        if (currentAddress.isNotBlank()) {
+                            Text(
+                                text = currentAddress,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                     WantTextButton(
                         onClick = {
@@ -291,20 +314,37 @@ fun LocationPickerDialog(
                                 )
                             }
                         },
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                     ) {
-                        Icon(Icons.Outlined.MyLocation, contentDescription = "重新定位", modifier = Modifier.size(18.dp))
+                        Text("重定位", style = MaterialTheme.typography.labelSmall)
                     }
                 }
 
-                if (currentAddress.isNotBlank()) {
-                    Text(
-                        text = "当前定位：$currentAddress",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                // 微调搜索栏：用 Box(weight(1f)) 包裹 WantTextField，防止其内部 fillMaxWidth 挤出搜索按钮。
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        WantTextField(
+                            value = keyword,
+                            onValueChange = { keyword = it },
+                            placeholder = "微调位置：搜索地点或地标",
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(
+                                onSearch = { loadPois(query = keyword, refreshCoords = false) },
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    WantButton(
+                        onClick = { loadPois(query = keyword, refreshCoords = false) },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                    ) {
+                        Icon(Icons.Outlined.Search, contentDescription = "搜索", modifier = Modifier.size(18.dp))
+                    }
                 }
 
                 if (!hint.isNullOrBlank()) {

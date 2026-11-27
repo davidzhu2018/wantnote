@@ -431,6 +431,13 @@ internal data class SyncUserSettings(
     val uiStyle: String = AppSettings.DEFAULT.uiStyle,
     val mapProvider: String = AppSettings.DEFAULT.mapProvider,
     val mapApiKey: String = AppSettings.DEFAULT.mapApiKey,
+    val flomoMcpUrl: String = AppSettings.DEFAULT.flomoMcpUrl,
+    val flomoMcpToken: String = AppSettings.DEFAULT.flomoMcpToken,
+    val flomoWebhookUrl: String = AppSettings.DEFAULT.flomoWebhookUrl,
+    val flomoLastSyncAt: Long = AppSettings.DEFAULT.flomoLastSyncAt,
+    val dedaoMcpUrl: String = AppSettings.DEFAULT.dedaoMcpUrl,
+    val dedaoMcpToken: String = AppSettings.DEFAULT.dedaoMcpToken,
+    val dedaoLastSyncAt: Long = AppSettings.DEFAULT.dedaoLastSyncAt,
 ) {
     fun applyOnto(local: AppSettings): AppSettings = local.copy(
         themeName = themeName,
@@ -466,6 +473,13 @@ internal data class SyncUserSettings(
         uiStyle = uiStyle,
         mapProvider = mapProvider,
         mapApiKey = mapApiKey,
+        flomoMcpUrl = flomoMcpUrl,
+        flomoMcpToken = flomoMcpToken,
+        flomoWebhookUrl = flomoWebhookUrl,
+        flomoLastSyncAt = flomoLastSyncAt,
+        dedaoMcpUrl = dedaoMcpUrl,
+        dedaoMcpToken = dedaoMcpToken,
+        dedaoLastSyncAt = dedaoLastSyncAt,
     )
 
     fun toJsonObject(): JSONObject = JSONObject()
@@ -502,6 +516,13 @@ internal data class SyncUserSettings(
         .put("uiStyle", uiStyle)
         .put("mapProvider", mapProvider)
         .put("mapApiKey", mapApiKey)
+        .put("flomoMcpUrl", flomoMcpUrl)
+        .put("flomoMcpToken", flomoMcpToken)
+        .put("flomoWebhookUrl", flomoWebhookUrl)
+        .put("flomoLastSyncAt", flomoLastSyncAt)
+        .put("dedaoMcpUrl", dedaoMcpUrl)
+        .put("dedaoMcpToken", dedaoMcpToken)
+        .put("dedaoLastSyncAt", dedaoLastSyncAt)
 
     companion object {
         fun from(settings: AppSettings): SyncUserSettings = SyncUserSettings(
@@ -538,6 +559,13 @@ internal data class SyncUserSettings(
             uiStyle = settings.uiStyle,
             mapProvider = settings.mapProvider,
             mapApiKey = settings.mapApiKey,
+            flomoMcpUrl = settings.flomoMcpUrl,
+            flomoMcpToken = settings.flomoMcpToken,
+            flomoWebhookUrl = settings.flomoWebhookUrl,
+            flomoLastSyncAt = settings.flomoLastSyncAt,
+            dedaoMcpUrl = settings.dedaoMcpUrl,
+            dedaoMcpToken = settings.dedaoMcpToken,
+            dedaoLastSyncAt = settings.dedaoLastSyncAt,
         )
 
         fun fromJsonObject(obj: JSONObject): SyncUserSettings {
@@ -576,6 +604,13 @@ internal data class SyncUserSettings(
                 uiStyle = obj.optString("uiStyle", d.uiStyle),
                 mapProvider = obj.optString("mapProvider", d.mapProvider),
                 mapApiKey = obj.optString("mapApiKey", d.mapApiKey),
+                flomoMcpUrl = obj.optString("flomoMcpUrl", d.flomoMcpUrl),
+                flomoMcpToken = obj.optString("flomoMcpToken", d.flomoMcpToken),
+                flomoWebhookUrl = obj.optString("flomoWebhookUrl", d.flomoWebhookUrl),
+                flomoLastSyncAt = obj.optLong("flomoLastSyncAt", d.flomoLastSyncAt),
+                dedaoMcpUrl = obj.optString("dedaoMcpUrl", d.dedaoMcpUrl),
+                dedaoMcpToken = obj.optString("dedaoMcpToken", d.dedaoMcpToken),
+                dedaoLastSyncAt = obj.optLong("dedaoLastSyncAt", d.dedaoLastSyncAt),
             )
         }
     }

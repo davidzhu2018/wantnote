@@ -198,20 +198,33 @@ object LocationPoiService {
         var cityName = ""
         var currentAddr = ""
 
-        // 1. 若手机未获取到 GPS/网络坐标，用高德 IP 定位自动获取当前城市与中心坐标
+        // 1. 若手机未获取到 GPS/网络坐标，用高德 IP 定位自动获取当前城市与中心坐标；
+        // 国内 4G/5G 常默认走 IPv6 导致高德 /v3/ip 返回空 rectangle，自动补充公网 IPv4 再查一次。
         if (activeCoords == null) {
-            val ipBody = httpGet("https://restapi.amap.com/v3/ip?key=$encKey")
-            if (ipBody != null) {
-                val ipRoot = runCatching { JSONObject(ipBody) }.getOrNull()
-                if (ipRoot?.optString("status") == "1") {
-                    cityName = ipRoot.optString("city").takeIf { it.isNotBlank() && it != "[]" }
-                        ?: ipRoot.optString("province").takeIf { it.isNotBlank() && it != "[]" }.orEmpty()
+            fun queryAmapIp(ipv4: String?): JSONObject? {
+                val ipParam = if (!ipv4.isNullOrBlank()) "&ip=${URLEncoder.encode(ipv4.trim(), "UTF-8")}" else ""
+                val body = httpGet("https://restapi.amap.com/v3/ip?key=$encKey$ipParam") ?: return null
+                return runCatching { JSONObject(body) }.getOrNull()
+            }
+            var ipRoot = queryAmapIp(null)
+            if (ipRoot?.optString("status") == "1") {
+                val rect0 = ipRoot.optString("rectangle")
+                if (parseAmapRectangleCenter(rect0) == null) {
+                    val ipv4 = httpGet("https://api4.ipify.org?format=text")?.trim()
+                    if (!ipv4.isNullOrBlank() && ipv4.contains('.')) {
+                        queryAmapIp(ipv4)?.let { ipRoot = it }
+                    }
+                }
+            }
+            if (ipRoot != null) {
+                if (ipRoot!!.optString("status") == "1") {
+                    cityName = ipRoot!!.optString("city").takeIf { it.isNotBlank() && it != "[]" }
+                        ?: ipRoot!!.optString("province").takeIf { it.isNotBlank() && it != "[]" }.orEmpty()
                     currentAddr = cityName
-                    val rect = ipRoot.optString("rectangle")
-                    activeCoords = parseAmapRectangleCenter(rect)
+                    activeCoords = parseAmapRectangleCenter(ipRoot!!.optString("rectangle"))
                 } else {
-                    val info = ipRoot?.optString("info").orEmpty()
-                    val code = ipRoot?.optString("infocode").orEmpty()
+                    val info = ipRoot!!.optString("info").orEmpty()
+                    val code = ipRoot!!.optString("infocode").orEmpty()
                     if (info.isNotBlank()) {
                         return ProviderQueryOutcome(emptyList(), errorHint = formatAmapError(info, code))
                     }
