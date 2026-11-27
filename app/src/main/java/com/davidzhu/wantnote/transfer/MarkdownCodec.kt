@@ -50,6 +50,24 @@ object MarkdownCodec {
     private val orderedRegex = Regex("""^([ \t]*)\d+[.)][ \t]+(.*)$""")
     private val unorderedRegex = Regex("""^([ \t]*)[-*+][ \t]+(.*)$""")
     private val imageRegex = Regex("""^([ \t]*)!\[([^\]]*)\]\(([^)\s]+)(?:[ \t]+"[^"]*")?\)[ \t]*$""")
+    private val htmlImgLineRegex = Regex("""^([ \t]*)<img\b([^>]*)>[ \t]*$""", RegexOption.IGNORE_CASE)
+    private val htmlAttrDoubleRegex = Regex("""([a-zA-Z0-9_-]+)\s*=\s*"([^"]*)"""")
+    private val htmlAttrSingleRegex = Regex("""([a-zA-Z0-9_-]+)\s*=\s*'([^']*)'""")
+    private val htmlAttrBareRegex = Regex("""([a-zA-Z0-9_-]+)\s*=\s*([^\s"'=<>`]+)""")
+
+    /** 从 HTML 标签属性串里提取指定属性（兼容双引号、单引号与无引号写法）。 */
+    fun extractHtmlAttr(attrs: String, name: String): String? {
+        for (m in htmlAttrDoubleRegex.findAll(attrs)) {
+            if (m.groupValues[1].equals(name, ignoreCase = true)) return m.groupValues[2].trim()
+        }
+        for (m in htmlAttrSingleRegex.findAll(attrs)) {
+            if (m.groupValues[1].equals(name, ignoreCase = true)) return m.groupValues[2].trim()
+        }
+        for (m in htmlAttrBareRegex.findAll(attrs)) {
+            if (m.groupValues[1].equals(name, ignoreCase = true)) return m.groupValues[2].trim()
+        }
+        return null
+    }
     private val videoRegex = Regex("""^([ \t]*)\[视频\]\(([^)\s]+)(?:[ \t]+"[^"]*")?\)[ \t]*$""")
     private val fileRegex = Regex("""^([ \t]*)\[文件[:：]?[ \t]*([^\]]*)\]\(([^)\s]+)(?:[ \t]+"[^"]*")?\)[ \t]*$""")
     private val linkRegex = Regex("""^([ \t]*)\[([^\]]*)\]\(([^)\s]+)(?:[ \t]+"[^"]*")?\)[ \t]*$""")
@@ -171,6 +189,8 @@ object MarkdownCodec {
         var title: String? = null
         var inFence = false
         var fenceIndent = 0
+        var fenceLang = ""
+        val mermaidBuffer = ArrayList<String>()
 
         val lines = normalized.split('\n')
         var index = 0
@@ -181,21 +201,76 @@ object MarkdownCodec {
             if (fence != null) {
                 if (!inFence) {
                     inFence = true
-                    fenceIndent = indentOf(fence.groupValues[1].takeWhile { it.isWhitespace() })
+                    fenceIndent = indentOf(rawLine.takeWhile { it.isWhitespace() })
+                    fenceLang = fence.groupValues[2].trim().lowercase()
+                    mermaidBuffer.clear()
                 } else {
+                    if (fenceLang == "mermaid" || fenceLang.startsWith("mermaid ")) {
+                        val body = mermaidBuffer.joinToString("\n").trim()
+                        if (body.isNotEmpty()) {
+                            blocks += MarkdownBlock(
+                                type = BlockType.CODE,
+                                text = "mermaid\n$body",
+                                indent = fenceIndent,
+                            )
+                        }
+                        mermaidBuffer.clear()
+                    }
                     inFence = false
+                    fenceLang = ""
                 }
                 index += 1
                 continue
             }
             if (inFence) {
-                blocks += MarkdownBlock(
-                    type = BlockType.CODE,
-                    text = rawLine,
-                    indent = fenceIndent,
-                )
+                if (fenceLang == "mermaid" || fenceLang.startsWith("mermaid ")) {
+                    mermaidBuffer += rawLine
+                } else {
+                    blocks += MarkdownBlock(
+                        type = BlockType.CODE,
+                        text = rawLine,
+                        indent = fenceIndent,
+                    )
+                }
                 index += 1
                 continue
+            }
+            // LaTeX 块级公式：单行 `$$...$$` 或多行 `$$\n...\n$$` 合并为单个公式段落块。
+            val trimmedForMath = line.trim()
+            if (trimmedForMath.startsWith("$$")) {
+                val mathIndent = indentOf(rawLine.takeWhile { it.isWhitespace() })
+                if (trimmedForMath.length > 4 && trimmedForMath.endsWith("$$")) {
+                    blocks += MarkdownBlock(
+                        type = BlockType.PARAGRAPH,
+                        text = trimmedForMath,
+                        indent = mathIndent,
+                    )
+                    index += 1
+                    continue
+                } else if (trimmedForMath == "$$") {
+                    val mathLines = ArrayList<String>()
+                    var cursor = index + 1
+                    var closed = false
+                    while (cursor < lines.size) {
+                        val cand = lines[cursor].trimEnd()
+                        if (cand.trim() == "$$") {
+                            closed = true
+                            cursor += 1
+                            break
+                        }
+                        mathLines += cand
+                        cursor += 1
+                    }
+                    if (closed && mathLines.isNotEmpty()) {
+                        blocks += MarkdownBlock(
+                            type = BlockType.PARAGRAPH,
+                            text = "$$\n" + mathLines.joinToString("\n").trim() + "\n$$",
+                            indent = mathIndent,
+                        )
+                        index = cursor
+                        continue
+                    }
+                }
             }
             if (line.isBlank()) {
                 index += 1
@@ -275,6 +350,37 @@ object MarkdownCodec {
                 )
                 index += 1
                 continue
+            }
+            val htmlImg = htmlImgLineRegex.matchEntire(line)
+            if (htmlImg != null) {
+                val attrs = htmlImg.groupValues[2]
+                val ref = extractHtmlAttr(attrs, "src").orEmpty()
+                val alt = extractHtmlAttr(attrs, "alt").orEmpty().ifBlank { "图片" }
+                if (ref.isNotEmpty()) {
+                    if (isRemoteLink(ref)) {
+                        blocks += MarkdownBlock(
+                            type = BlockType.IMAGE,
+                            text = alt,
+                            indent = indentOf(htmlImg.groupValues[1]),
+                            mediaPath = ref,
+                        )
+                        index += 1
+                        continue
+                    }
+                    val resolved = resolveMedia(ref)
+                    if (resolved == null) {
+                        missing += ref
+                    } else {
+                        blocks += MarkdownBlock(
+                            type = BlockType.IMAGE,
+                            text = alt,
+                            indent = indentOf(htmlImg.groupValues[1]),
+                            mediaPath = resolved,
+                        )
+                    }
+                    index += 1
+                    continue
+                }
             }
             val image = imageRegex.matchEntire(line)
             if (image != null) {
@@ -433,16 +539,24 @@ object MarkdownCodec {
             val text = block.text.replace('\n', ' ').trim()
             when (block.type) {
                 BlockType.CODE -> {
-                    val previousCode = index > 0 && blocks[index - 1].type == BlockType.CODE
-                    val nextCode = index + 1 < blocks.size && blocks[index + 1].type == BlockType.CODE
-                    if (!previousCode) {
+                    if (MermaidParser.isMermaidCodeBlock(block.text) && block.text.contains('\n')) {
                         if (index > 0) out.append('\n')
-                        out.append("```\n")
+                        val body = MermaidParser.stripLanguageHeader(block.text)
+                        out.append("```mermaid\n").append(body).append("\n```")
                     } else {
-                        out.append('\n')
+                        val previousCode = index > 0 && blocks[index - 1].type == BlockType.CODE &&
+                            !(MermaidParser.isMermaidCodeBlock(blocks[index - 1].text) && blocks[index - 1].text.contains('\n'))
+                        val nextCode = index + 1 < blocks.size && blocks[index + 1].type == BlockType.CODE &&
+                            !(MermaidParser.isMermaidCodeBlock(blocks[index + 1].text) && blocks[index + 1].text.contains('\n'))
+                        if (!previousCode) {
+                            if (index > 0) out.append('\n')
+                            out.append("```\n")
+                        } else {
+                            out.append('\n')
+                        }
+                        out.append(block.text.trimEnd('\n'))
+                        if (!nextCode) out.append("\n```")
                     }
-                    out.append(block.text.trimEnd('\n'))
-                    if (!nextCode) out.append("\n```")
                 }
                 BlockType.HEADING -> {
                     if (index > 0) out.append('\n')

@@ -533,6 +533,38 @@ class NoteRepository(
     }
 
     /** 把笔记分配到卡片盒；boxId 必须已存在（空串 = 取消分配）。 */
+    suspend fun setPinned(noteId: String, pinned: Boolean) {
+        notes.setPinned(noteId, pinned)
+    }
+
+    suspend fun setStarred(noteId: String, starred: Boolean) {
+        notes.setStarred(noteId, starred)
+    }
+
+    suspend fun setReviewed(noteId: String, reviewed: Boolean) {
+        notes.setReviewed(noteId, reviewed)
+    }
+
+    suspend fun markReviewedBatch(noteIds: List<String>) {
+        if (noteIds.isNotEmpty()) notes.markReviewedBatch(noteIds)
+    }
+
+    suspend fun updateLocation(
+        noteId: String,
+        locationName: String,
+        locationAddress: String,
+        locationLat: Double,
+        locationLng: Double,
+    ) {
+        notes.updateLocation(
+            noteId = noteId,
+            locationName = locationName.trim(),
+            locationAddress = locationAddress.trim(),
+            locationLat = locationLat,
+            locationLng = locationLng,
+        )
+    }
+
     suspend fun assignNoteToBox(noteId: String, boxId: String) {
         if (boxId.isNotEmpty() && boxes.getById(boxId) == null) return
         notes.assignBox(noteId, boxId)
@@ -624,9 +656,18 @@ class NoteRepository(
                 else -> remote.body.replace("\r\n", "\n").trimEnd('\n')
             }
             val mdPath = remote.mdPath.ifBlank { markdownStore.relativePathFor(remote.id) }
-            // 卡片盒是本地组织概念：远端覆盖时保留本地原归属（远端没有该概念）。
-            val remoteMarkdown = remote.copy(body = content, mdPath = mdPath, boxId = local?.boxId ?: remote.boxId)
+            // 0.14.0：WebDAV / S3 同步携带每篇笔记的卡片盒归属。
+            // 远端更新或本地未归盒时采纳远端 boxId；否则保留本地已有归属。
             val isNewer = local == null || remote.updatedAt > local.updatedAt
+            val resolvedBoxId = when {
+                remote.boxId.isNotBlank() && (isNewer || local?.boxId.isNullOrBlank()) -> remote.boxId
+                local != null && local.boxId.isNotBlank() -> local.boxId
+                else -> remote.boxId
+            }
+            val remoteMarkdown = remote.copy(body = content, mdPath = mdPath, boxId = resolvedBoxId)
+            if (!isNewer && local != null && local.boxId.isBlank() && remote.boxId.isNotBlank()) {
+                notes.assignBox(local.id, remote.boxId)
+            }
             if (isNewer) {
                 markdownStore.writeDocument(mdPath, documentOf(remoteMarkdown, content))
                 val previous = local?.let { blocks.getByNoteId(remote.id) }.orEmpty()
@@ -651,6 +692,36 @@ class NoteRepository(
             return true
         }
         return false
+    }
+
+    /**
+     * 0.14.0：云同步（WebDAV / S3）合并远端卡片盒；按名称/ID 幂等去重，缺失则创建。
+     * 返回本机实际落库的 [NoteBox]，供调用方映射远端笔记的 `boxId`。
+     */
+    suspend fun mergeRemoteBox(remote: NoteBox): NoteBox {
+        val normalized = remote.name.trim()
+        if (normalized.isEmpty() || remote.id == NoteBox.DEFAULT_ID || normalized == NoteBox.DEFAULT_NAME) {
+            return ensureDefaultBox()
+        }
+        val byId = boxes.getById(remote.id)
+        val byName = boxes.getByName(normalized)
+        return when {
+            byId != null && byId.name == normalized -> byId
+            byName != null -> byName
+            byId != null -> {
+                boxes.update(byId.copy(name = normalized))
+                boxes.getById(byId.id) ?: byId.copy(name = normalized)
+            }
+            else -> {
+                val created = NoteBox(
+                    id = remote.id.ifBlank { UUID.randomUUID().toString() },
+                    name = normalized,
+                    createdAt = if (remote.createdAt > 0L) remote.createdAt else System.currentTimeMillis(),
+                )
+                boxes.insertIfAbsent(created)
+                boxes.getById(created.id) ?: boxes.getByName(normalized) ?: created
+            }
+        }
     }
 
     suspend fun mergeRemoteTag(remote: Tag): Tag {
@@ -690,9 +761,13 @@ class NoteRepository(
             startMs: Long? = null,
             endMs: Long? = null,
             boxId: String? = null,
+            starredOnly: Boolean = false,
+            pinnedOnly: Boolean = false,
         ): List<NoteWithDetails> {
             val q = keyword.trim()
             return items.filter { item ->
+                if (starredOnly && !item.note.starred) return@filter false
+            if (pinnedOnly && !item.note.pinned) return@filter false
                 val keywordOk = q.isEmpty() ||
                     item.note.title.contains(q, ignoreCase = true) ||
                     item.note.body.contains(q, ignoreCase = true) ||

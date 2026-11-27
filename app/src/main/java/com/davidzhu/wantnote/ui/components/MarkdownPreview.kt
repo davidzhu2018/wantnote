@@ -45,7 +45,14 @@ import androidx.compose.ui.unit.sp
 import com.davidzhu.wantnote.data.BlockType
 import com.davidzhu.wantnote.transfer.MarkdownBlock
 import com.davidzhu.wantnote.data.Markup
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextAlign
+import com.davidzhu.wantnote.transfer.LatexMath
 import com.davidzhu.wantnote.transfer.MarkdownCodec
+import com.davidzhu.wantnote.transfer.MermaidDiagram
+import com.davidzhu.wantnote.transfer.MermaidNode
+import com.davidzhu.wantnote.transfer.MermaidParser
 import com.davidzhu.wantnote.ui.LocalMedia
 import com.davidzhu.wantnote.ui.theme.LocalFontScale
 import kotlinx.coroutines.Dispatchers
@@ -66,6 +73,7 @@ fun MarkdownPreview(
     modifier: Modifier = Modifier,
     linkTitles: Map<String, String> = emptyMap(),
     onOpenAttachment: (String) -> Unit = {},
+    onOpenNote: ((String) -> Unit)? = null,
     scrollable: Boolean = true,
 ) {
     val blocks = remember(content) {
@@ -106,18 +114,27 @@ fun MarkdownPreview(
                     block,
                     linkTitles = linkTitles,
                     highlight = highlight,
+                    onOpenNote = onOpenNote,
                 )
-                BlockType.CODE -> PreviewCode(block)
-                BlockType.TASK -> PreviewTask(block, linkTitles = linkTitles)
+                BlockType.CODE -> {
+                    if (MermaidParser.isMermaidCodeBlock(block.text)) {
+                        PreviewMermaid(block)
+                    } else {
+                        PreviewCode(block)
+                    }
+                }
+                BlockType.TASK -> PreviewTask(block, linkTitles = linkTitles, onOpenNote = onOpenNote)
                 BlockType.ORDERED -> PreviewListItem(
                     block,
                     marker = "${orderedNumber(blocks, index)}.",
                     linkTitles = linkTitles,
+                    onOpenNote = onOpenNote,
                 )
                 BlockType.UNORDERED -> PreviewListItem(
                     block,
                     marker = "•",
                     linkTitles = linkTitles,
+                    onOpenNote = onOpenNote,
                 )
                 BlockType.DIVIDER -> HorizontalDivider(color = MaterialTheme.colorScheme.outline)
                 BlockType.IMAGE -> PreviewImage(path = block.mediaPath)
@@ -130,13 +147,21 @@ fun MarkdownPreview(
                     label = block.text,
                     onOpen = { onOpenAttachment(block.mediaPath) },
                 )
-                BlockType.TABLE -> PreviewTable(block, linkTitles = linkTitles)
-                BlockType.PARAGRAPH -> MarkdownText(
-                    text = block.text,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    linkTitles = linkTitles,
-                )
+                BlockType.TABLE -> PreviewTable(block, linkTitles = linkTitles, onOpenNote = onOpenNote)
+                BlockType.PARAGRAPH -> {
+                    val latexFormula = LatexMath.extractBlockFormula(block.text)
+                    if (latexFormula != null) {
+                        PreviewLatexBlock(formula = latexFormula)
+                    } else {
+                        MarkdownText(
+                            text = block.text,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            linkTitles = linkTitles,
+                            onOpenNote = onOpenNote,
+                        )
+                    }
+                }
             }
         }
         Spacer(modifier = Modifier.height(24.dp))
@@ -187,6 +212,7 @@ private fun PreviewQuote(
     block: MarkdownBlock,
     linkTitles: Map<String, String>,
     highlight: Color,
+    onOpenNote: ((String) -> Unit)? = null,
 ) {
     Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
         Box(
@@ -200,6 +226,7 @@ private fun PreviewQuote(
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             linkTitles = linkTitles,
+            onOpenNote = onOpenNote,
             modifier = Modifier.padding(start = 10.dp).weight(1f),
         )
     }
@@ -229,6 +256,7 @@ private fun PreviewCode(block: MarkdownBlock) {
 private fun PreviewTask(
     block: MarkdownBlock,
     linkTitles: Map<String, String>,
+    onOpenNote: ((String) -> Unit)? = null,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -245,6 +273,7 @@ private fun PreviewTask(
                 MaterialTheme.colorScheme.onBackground
             },
             linkTitles = linkTitles,
+            onOpenNote = onOpenNote,
         )
     }
 }
@@ -254,6 +283,7 @@ private fun PreviewListItem(
     block: MarkdownBlock,
     marker: String,
     linkTitles: Map<String, String>,
+    onOpenNote: ((String) -> Unit)? = null,
 ) {
     Row(
         verticalAlignment = Alignment.Top,
@@ -271,6 +301,7 @@ private fun PreviewListItem(
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onBackground,
             linkTitles = linkTitles,
+            onOpenNote = onOpenNote,
             modifier = Modifier.weight(1f),
         )
     }
@@ -338,6 +369,7 @@ private fun PreviewFile(path: String, label: String, onOpen: () -> Unit) {
 private fun PreviewTable(
     block: MarkdownBlock,
     linkTitles: Map<String, String>,
+    onOpenNote: ((String) -> Unit)? = null,
 ) {
     val grid = remember(block.text) { MarkdownCodec.parseTable(block.text) }
     if (grid == null) {
@@ -346,6 +378,7 @@ private fun PreviewTable(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onBackground,
             linkTitles = linkTitles,
+            onOpenNote = onOpenNote,
         )
         return
     }
@@ -416,5 +449,205 @@ private fun TableCell(
             linkTitles = linkTitles,
             maxLines = 6,
         )
+    }
+}
+
+
+/**
+ * 0.16.5：离线原生 Mermaid 流程图渲染卡片（支持 TD/LR 拓扑分层、节点形状与连线标签）。
+ */
+@Composable
+private fun PreviewMermaid(block: MarkdownBlock) {
+    val diagram = remember(block.text) { MermaidParser.parse(block.text) }
+    if (diagram == null) {
+        PreviewCode(block)
+        return
+    }
+    val borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+    val nodeBg = MaterialTheme.colorScheme.surface
+    val accent = MaterialTheme.colorScheme.primary
+    val dirLabel = if (diagram.direction == MermaidDiagram.Direction.LEFT_RIGHT) "从左到右" else "自上而下"
+
+    WantSurface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Mermaid 流程图 · $dirLabel",
+                style = MaterialTheme.typography.labelSmall,
+                color = accent,
+                fontWeight = FontWeight.Medium,
+            )
+            if (diagram.direction == MermaidDiagram.Direction.LEFT_RIGHT) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    diagram.layers.forEachIndexed { layerIdx, layer ->
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            layer.forEach { node ->
+                                MermaidNodeChip(node = node, borderColor = borderColor, backgroundColor = nodeBg)
+                            }
+                        }
+                        if (layerIdx < diagram.layers.lastIndex) {
+                            val nextIds = diagram.layers[layerIdx + 1].map { it.id }.toSet()
+                            val curIds = layer.map { it.id }.toSet()
+                            val edgeLabels = diagram.edges
+                                .filter { it.from in curIds && it.to in nextIds && it.label.isNotBlank() }
+                                .map { it.label }
+                                .distinct()
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                if (edgeLabels.isNotEmpty()) {
+                                    Text(
+                                        text = edgeLabels.joinToString("/"),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Text("→", color = accent, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    diagram.layers.forEachIndexed { layerIdx, layer ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            layer.forEach { node ->
+                                MermaidNodeChip(node = node, borderColor = borderColor, backgroundColor = nodeBg)
+                            }
+                        }
+                        if (layerIdx < diagram.layers.lastIndex) {
+                            val nextIds = diagram.layers[layerIdx + 1].map { it.id }.toSet()
+                            val curIds = layer.map { it.id }.toSet()
+                            val edgeLabels = diagram.edges
+                                .filter { it.from in curIds && it.to in nextIds && it.label.isNotBlank() }
+                                .map { it.label }
+                                .distinct()
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("↓", color = accent, fontWeight = FontWeight.Bold)
+                                if (edgeLabels.isNotEmpty()) {
+                                    Text(
+                                        text = edgeLabels.joinToString(" / "),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (diagram.edges.isNotEmpty()) {
+                val nodeById = remember(diagram) { diagram.nodes.associateBy { it.id } }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    diagram.edges.forEach { edge ->
+                        val fromLabel = nodeById[edge.from]?.label ?: edge.from
+                        val toLabel = nodeById[edge.to]?.label ?: edge.to
+                        val arrow = if (edge.label.isBlank()) "→" else "—[${edge.label}]→"
+                        Text(
+                            text = "$fromLabel $arrow $toLabel",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MermaidNodeChip(
+    node: MermaidNode,
+    borderColor: Color,
+    backgroundColor: Color,
+) {
+    val shape = when (node.shape) {
+        MermaidNode.Shape.CIRCLE -> CircleShape
+        MermaidNode.Shape.ROUND -> RoundedCornerShape(18.dp)
+        MermaidNode.Shape.DIAMOND -> RoundedCornerShape(4.dp)
+        MermaidNode.Shape.RECT -> RoundedCornerShape(8.dp)
+    }
+    val prefix = if (node.shape == MermaidNode.Shape.DIAMOND) "◇ " else ""
+    Box(
+        modifier = Modifier
+            .clip(shape)
+            .background(backgroundColor)
+            .border(
+                width = if (node.shape == MermaidNode.Shape.DIAMOND) 1.5.dp else 1.dp,
+                color = borderColor,
+                shape = shape,
+            )
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = prefix + node.label,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+/**
+ * 0.16.5：离线原生 LaTeX 块级公式渲染卡片（`$$ ... $$`）。
+ */
+@Composable
+private fun PreviewLatexBlock(formula: String) {
+    val scale = LocalFontScale.current
+    val formatted = remember(formula) { LatexMath.format(formula) }
+    WantSurface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(0.8.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = formatted,
+                fontFamily = FontFamily.Serif,
+                fontStyle = FontStyle.Italic,
+                fontSize = (18 * scale).sp,
+                lineHeight = (26 * scale).sp,
+                color = MaterialTheme.colorScheme.onBackground,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }

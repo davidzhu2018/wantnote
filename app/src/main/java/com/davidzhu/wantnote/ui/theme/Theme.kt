@@ -18,6 +18,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
@@ -30,6 +31,7 @@ import com.davidzhu.wantnote.data.DayNightMode
 import com.davidzhu.wantnote.data.ThemeColorSet
 import com.davidzhu.wantnote.data.ThemeCustoms
 import com.davidzhu.wantnote.data.ThemePalette
+import com.davidzhu.wantnote.data.UiStyle
 
 val Paper = Color(0xFFF7F2EA)
 val Ink = Color(0xFF3F2A1A)
@@ -47,6 +49,8 @@ val LocalWantNoteColors = staticCompositionLocalOf {
 
 val LocalFontScale = staticCompositionLocalOf { 1.0f }
 
+val LocalUiStyle = staticCompositionLocalOf { UiStyle.MIUIX }
+
 private data class Palette(
     val lightBg: Color,
     val lightInk: Color,
@@ -59,6 +63,8 @@ private data class Palette(
     val darkVariant: Color,
     val darkOutline: Color,
     val highlight: Color,
+    val accentLight: Color? = null,
+    val accentDark: Color? = null,
 )
 
 private val Palettes = mapOf(
@@ -113,6 +119,22 @@ private val Palettes = mapOf(
         darkVariant = Color(0xFF2A1C1F),
         darkOutline = Color(0xFF4A3338),
         highlight = Color(0xFFF0B4C0),
+    ),
+    // 0.18.1：「蔚蓝」默认主题——存放 COUI（ColorOS 17）经典凝光蓝配色方案。
+    ThemePalette.AZURE to Palette(
+        lightBg = Color(0xFFF5F6F8),
+        lightInk = Color(0xFF1A1C1E),
+        lightMuted = Color(0xFF6B7280),
+        lightVariant = Color(0xFFFFFFFF),
+        lightOutline = Color(0xFFD9E1EC),
+        darkBg = Color(0xFF0E1014),
+        darkInk = Color(0xFFF2F4F8),
+        darkMuted = Color(0xFF98A2B3),
+        darkVariant = Color(0xFF1B1E26),
+        darkOutline = Color(0xFF2D3442),
+        highlight = Color(0xFF90C8FF),
+        accentLight = Color(0xFF1677FF),
+        accentDark = Color(0xFF4B8BFF),
     ),
 )
 
@@ -171,6 +193,8 @@ private fun resolvePalette(
         darkVariant = pick(resolved.darkVariant, paper.darkVariant),
         darkOutline = pick(resolved.darkOutline, paper.darkOutline),
         highlight = pick(resolved.highlight, paper.highlight),
+        accentLight = Palettes[ThemePalette.fromStorage(themeName)]?.accentLight,
+        accentDark = Palettes[ThemePalette.fromStorage(themeName)]?.accentDark,
     )
 }
 
@@ -180,21 +204,53 @@ fun WantNoteTheme(
     fontFamily: FontFamily = FontFamily.Default,
     content: @Composable () -> Unit,
 ) {
+    val uiStyle = settings.uiStyleOption
     val customs = remember(settings.themeCustomJson) { ThemeCustoms.parse(settings.themeCustomJson) }
-    val palette = resolvePalette(settings.themeName, customs)
+    val rawPalette = resolvePalette(settings.themeName, customs)
+    // 0.18.0：COUI 风格基于用户所选主题（纸色/墨色/青松/暮粉/自建主题）派生凝光通透表面，
+    // 切换主题时背景、卡片、强调色与描边全部实时联动，不再锁死单一色板。
+    val palette = if (uiStyle == UiStyle.COUI) {
+        Palette(
+            lightBg = lerp(rawPalette.lightBg, Color(0xFFF6F7F9), 0.22f),
+            lightInk = rawPalette.lightInk,
+            lightMuted = rawPalette.lightMuted,
+            lightVariant = lerp(rawPalette.lightVariant, Color.White, 0.72f),
+            lightOutline = lerp(rawPalette.lightOutline, Color.White, 0.20f),
+            darkBg = rawPalette.darkBg,
+            darkInk = rawPalette.darkInk,
+            darkMuted = rawPalette.darkMuted,
+            darkVariant = lerp(rawPalette.darkVariant, Color.White, 0.06f),
+            darkOutline = rawPalette.darkOutline,
+            highlight = rawPalette.highlight,
+            accentLight = rawPalette.accentLight,
+            accentDark = rawPalette.accentDark,
+        )
+    } else {
+        rawPalette
+    }
     val dark = when (settings.dayNightMode) {
         DayNightMode.LIGHT -> false
         DayNightMode.DARK -> true
         DayNightMode.SYSTEM -> isSystemInDarkTheme()
     }
     val scale = settings.fontScaleOption.scale
+    val primaryColor = if (dark) {
+        palette.accentDark ?: palette.darkInk
+    } else {
+        palette.accentLight ?: palette.lightInk
+    }
+    val onPrimaryColor = if (dark) {
+        if (palette.accentDark != null) Color.White else palette.darkBg
+    } else {
+        if (palette.accentLight != null) Color.White else palette.lightBg
+    }
     val scheme = if (dark) {
         darkColorScheme(
-            primary = palette.darkInk,
-            onPrimary = palette.darkBg,
+            primary = primaryColor,
+            onPrimary = onPrimaryColor,
             background = palette.darkBg,
             onBackground = palette.darkInk,
-            surface = palette.darkBg,
+            surface = if (uiStyle == UiStyle.COUI) palette.darkVariant else palette.darkBg,
             onSurface = palette.darkInk,
             surfaceVariant = palette.darkVariant,
             onSurfaceVariant = palette.darkMuted,
@@ -205,11 +261,11 @@ fun WantNoteTheme(
         )
     } else {
         lightColorScheme(
-            primary = palette.lightInk,
-            onPrimary = palette.lightBg,
+            primary = primaryColor,
+            onPrimary = onPrimaryColor,
             background = palette.lightBg,
             onBackground = palette.lightInk,
-            surface = palette.lightBg,
+            surface = if (uiStyle == UiStyle.COUI) palette.lightVariant else palette.lightBg,
             onSurface = palette.lightInk,
             surfaceVariant = palette.lightVariant,
             onSurfaceVariant = palette.lightMuted,
@@ -236,12 +292,34 @@ fun WantNoteTheme(
     // 用户主题（配色 / 日夜 / 字体缩放）先解析成同一套 palette，再映射进 Miuix 的
     // Colors；MaterialTheme 留在内层只作为自定义版面（Markdown / 图谱 / 卡片）
     // 的 typography 与色值 token，保证两者永远一致，不会出现两套视觉语言。
-    val miuixColors = remember(palette, dark) { miuixColorsFor(palette, dark) }
+    val miuixColors = remember(palette, dark, uiStyle, primaryColor, onPrimaryColor) {
+        val base = miuixColorsFor(palette, dark)
+        val withAccent = if (palette.accentLight != null || palette.accentDark != null) {
+            base.copy(primary = primaryColor, onPrimary = onPrimaryColor, primaryVariant = primaryColor)
+        } else {
+            base
+        }
+        if (uiStyle == UiStyle.COUI) {
+            val cardBg = if (dark) palette.darkVariant else palette.lightVariant
+            withAccent.copy(
+                primary = primaryColor,
+                onPrimary = onPrimaryColor,
+                primaryVariant = primaryColor,
+                surface = cardBg,
+                surfaceContainer = cardBg,
+                surfaceContainerHigh = if (dark) lerp(cardBg, Color.White, 0.05f) else lerp(cardBg, palette.lightBg, 0.35f),
+                surfaceContainerHighest = if (dark) lerp(cardBg, Color.White, 0.10f) else lerp(cardBg, palette.lightBg, 0.60f),
+            )
+        } else {
+            withAccent
+        }
+    }
     val miuixTextStyles = remember(scale, fontFamily) { scaledTextStyles(scale, fontFamily) }
     CompositionLocalProvider(
         LocalWantNoteColors provides WantNoteColors(highlight = palette.highlight),
         LocalFontScale provides scale,
         LocalEditorFontFamily provides fontFamily,
+        LocalUiStyle provides uiStyle,
     ) {
         MiuixTheme(colors = miuixColors, textStyles = miuixTextStyles) {
             MaterialTheme(

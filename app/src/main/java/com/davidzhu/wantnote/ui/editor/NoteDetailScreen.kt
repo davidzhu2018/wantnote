@@ -32,6 +32,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -46,7 +50,9 @@ import com.davidzhu.wantnote.data.SearchText
 import com.davidzhu.wantnote.data.Tag
 import com.davidzhu.wantnote.ui.LocalMedia
 import com.davidzhu.wantnote.ui.LocalNotes
+import com.davidzhu.wantnote.data.LiquidGlassSurfaceRole
 import com.davidzhu.wantnote.ui.components.BoxPickerDialog
+import com.davidzhu.wantnote.ui.components.liquidGlassSurface
 import com.davidzhu.wantnote.ui.components.MarkdownPreview
 import com.davidzhu.wantnote.ui.components.NoteTagRemoveDialog
 import com.davidzhu.wantnote.ui.components.TagAddButton
@@ -107,6 +113,7 @@ fun NoteDetailScreen(
     var tagAddOpen by remember(noteId) { mutableStateOf(false) }
     var tagRemoveOpen by remember(noteId) { mutableStateOf(false) }
 
+    val notesById = remember(allNotes) { allNotes.associateBy { it.id } }
     val linkTitles = remember(allNotes) { allNotes.associate { it.id to SearchText.displayTitle(it) } }
     val outgoing = remember(allLinks, noteId) { allLinks.filter { it.sourceNoteId == noteId } }
     val incoming = remember(allLinks, noteId) { allLinks.filter { it.targetNoteId == noteId } }
@@ -218,8 +225,11 @@ fun NoteDetailScreen(
                     // 阅读态改卡片盒入口：点盒名（无盒时为「选择卡片盒」）。
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(MiuixTheme.colorScheme.surfaceContainer)
+                            .liquidGlassSurface(
+                                shape = RoundedCornerShape(50),
+                                role = LiquidGlassSurfaceRole.CHIP,
+                                baseColor = MiuixTheme.colorScheme.surfaceContainer,
+                            )
                             .clickable { boxDialogOpen = true }
                             .padding(horizontal = 10.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -260,46 +270,40 @@ fun NoteDetailScreen(
                     content = content,
                     linkTitles = linkTitles,
                     onOpenAttachment = { openAttachment(it) },
+                    onOpenNote = onOpenNote,
                     scrollable = false,
                 )
                 if (outgoing.isNotEmpty() || incoming.isNotEmpty()) {
                     HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 12.dp),
+                        modifier = Modifier.padding(vertical = 14.dp),
                         color = MaterialTheme.colorScheme.outline,
                     )
                     Text(
                         "相关链接",
                         style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 6.dp),
+                        modifier = Modifier.padding(bottom = 10.dp),
                     )
-                    outgoing.forEach { link ->
-                        val title = linkTitles[link.targetNoteId] ?: return@forEach
-                        Text(
-                            text = "→ $title",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onOpenNote(link.targetNoteId) }
-                                .padding(vertical = 4.dp),
-                        )
-                    }
-                    incoming.forEach { link ->
-                        val title = linkTitles[link.sourceNoteId] ?: return@forEach
-                        Text(
-                            text = "← $title",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onOpenNote(link.sourceNoteId) }
-                                .padding(vertical = 4.dp),
-                        )
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        outgoing.forEach { link ->
+                            val target = notesById[link.targetNoteId] ?: return@forEach
+                            RelatedNoteCard(
+                                directionLabel = "→ 引用",
+                                title = SearchText.displayTitle(target),
+                                snippet = relatedNoteSnippet(target),
+                                onClick = { onOpenNote(target.id) },
+                            )
+                        }
+                        incoming.forEach { link ->
+                            val source = notesById[link.sourceNoteId] ?: return@forEach
+                            RelatedNoteCard(
+                                directionLabel = "← 被引用",
+                                title = SearchText.displayTitle(source),
+                                snippet = relatedNoteSnippet(source),
+                                onClick = { onOpenNote(source.id) },
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(24.dp))
@@ -379,6 +383,73 @@ fun NoteDetailScreen(
                 }
             },
             onDismiss = { tagRemoveOpen = false },
+        )
+    }
+}
+
+private fun relatedNoteSnippet(note: com.davidzhu.wantnote.data.Note): String {
+    val clean = SearchText.previewMarkdown(note)
+        .replace(Regex("""\s+"""), " ")
+        .trim()
+    if (clean.isEmpty()) return "（暂无正文）"
+    return if (clean.length > 100) clean.take(100) + "…" else clean
+}
+
+@Composable
+private fun RelatedNoteCard(
+    directionLabel: String,
+    title: String,
+    snippet: String,
+    onClick: () -> Unit,
+) {
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val linkBlue = if (isDark) Color(0xFF6EA8FE) else Color(0xFF1A73E8)
+    val cardBg = if (isDark) {
+        lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.14f)
+    } else {
+        lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.80f)
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidGlassSurface(
+                shape = RoundedCornerShape(16.dp),
+                role = LiquidGlassSurfaceRole.CARD,
+                baseColor = cardBg,
+                elevationOverride = 10.dp,
+                borderWidth = 1.2.dp,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = directionLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = linkBlue,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = linkBlue,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Text(
+            text = snippet,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 4,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

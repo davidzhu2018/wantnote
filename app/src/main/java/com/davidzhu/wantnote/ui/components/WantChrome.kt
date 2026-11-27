@@ -1,6 +1,7 @@
 package com.davidzhu.wantnote.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,7 +12,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -39,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
@@ -66,6 +71,12 @@ import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import androidx.navigationevent.NavigationEventDispatcher
+import androidx.navigationevent.NavigationEventDispatcherOwner
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
+import com.davidzhu.wantnote.data.LiquidGlassSurfaceRole
+import com.davidzhu.wantnote.data.UiStyle
+import com.davidzhu.wantnote.ui.theme.LocalUiStyle
 import top.yukonga.miuix.kmp.window.WindowDialog
 import java.util.Calendar
 
@@ -173,6 +184,15 @@ fun WantAlertDialog(
     @Suppress("UNUSED_PARAMETER") tonalElevation: Dp = 0.dp,
     @Suppress("UNUSED_PARAMETER") properties: Any? = null,
 ) {
+    // 0.14.0 双保险：升级 activity-compose 1.13.0 后正常由宿主窗口提供
+    // NavigationEventDispatcherOwner；此处兜底防止个别定制窗口返回 null 导致闪退。
+    val existingOwner = LocalNavigationEventDispatcherOwner.current
+    val fallbackOwner = remember(existingOwner) {
+        existingOwner ?: object : NavigationEventDispatcherOwner {
+            override val navigationEventDispatcher = NavigationEventDispatcher()
+        }
+    }
+    CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides fallbackOwner) {
     WindowDialog(
         show = true,
         modifier = modifier,
@@ -216,55 +236,105 @@ fun WantAlertDialog(
             }
         },
     )
+    }
 }
 
-/** Miuix 主按钮（主题色底）。 */
+/** Miuix 立体液态玻璃主按钮（主题色底 + 顶部光泽 + 立体投影）。 */
 @Composable
 fun WantButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     @Suppress("UNUSED_PARAMETER") colors: Any? = null,
-    @Suppress("UNUSED_PARAMETER") shape: Shape? = null,
-    @Suppress("UNUSED_PARAMETER") contentPadding: PaddingValues? = null,
+    shape: Shape? = null,
+    contentPadding: PaddingValues? = null,
     @Suppress("UNUSED_PARAMETER") elevation: Any? = null,
     @Suppress("UNUSED_PARAMETER") border: Any? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     val fill = LocalFillDialogButtons.current
-    Button(
-        onClick = onClick,
-        modifier = if (fill) modifier.fillMaxWidth() else modifier,
-        enabled = enabled,
-        colors = ButtonDefaults.buttonColorsPrimary(),
-        content = content,
-    )
+    val isCoui = LocalUiStyle.current == UiStyle.COUI
+    val btnShape = shape ?: if (isCoui) RoundedCornerShape(999.dp) else RoundedCornerShape(13.dp)
+    val baseColor = if (enabled) {
+        MiuixTheme.colorScheme.primary
+    } else {
+        MiuixTheme.colorScheme.disabledPrimaryButton
+    }
+    val textColor = if (enabled) {
+        MiuixTheme.colorScheme.onPrimary
+    } else {
+        MiuixTheme.colorScheme.disabledOnPrimaryButton
+    }
+    Row(
+        modifier = (if (fill) modifier.fillMaxWidth() else modifier)
+            .defaultMinSize(minHeight = 42.dp)
+            .liquidGlassSurface(
+                shape = btnShape,
+                role = LiquidGlassSurfaceRole.BUTTON,
+                baseColor = baseColor,
+                elevationOverride = if (enabled) 10.dp else 1.dp,
+                borderWidth = 1.3.dp,
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(contentPadding ?: PaddingValues(horizontal = 16.dp, vertical = 10.dp)),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CompositionLocalProvider(LocalContentColor provides textColor) {
+            content()
+        }
+    }
 }
 
-/** Miuix 次按钮（浅色底，用于「取消 / 完成 / 工具栏」）。 */
+/** Miuix 立体液态玻璃次按钮（用于「取消 / 完成 / 工具栏」）。 */
 @Composable
 fun WantTextButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     @Suppress("UNUSED_PARAMETER") colors: Any? = null,
-    @Suppress("UNUSED_PARAMETER") shape: Shape? = null,
-    @Suppress("UNUSED_PARAMETER") contentPadding: PaddingValues? = null,
+    shape: Shape? = null,
+    contentPadding: PaddingValues? = null,
     @Suppress("UNUSED_PARAMETER") elevation: Any? = null,
     @Suppress("UNUSED_PARAMETER") border: Any? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     val fill = LocalFillDialogButtons.current
-    Button(
-        onClick = onClick,
-        modifier = if (fill) modifier.fillMaxWidth() else modifier,
-        enabled = enabled,
-        minWidth = 0.dp,
-        minHeight = 34.dp,
-        insideMargin = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-        colors = ButtonDefaults.buttonColors(),
-        content = content,
-    )
+    val isCoui = LocalUiStyle.current == UiStyle.COUI
+    val btnShape = shape ?: if (isCoui) RoundedCornerShape(999.dp) else RoundedCornerShape(13.dp)
+    val isDark = MiuixTheme.colorScheme.background.luminance() < 0.5f
+    val liftedSurface = if (isCoui) {
+        if (isDark) MiuixTheme.colorScheme.primary.copy(alpha = 0.18f) else MiuixTheme.colorScheme.primary.copy(alpha = 0.10f)
+    } else if (isDark) {
+        lerp(MiuixTheme.colorScheme.surface, Color.White, 0.14f)
+    } else {
+        lerp(MiuixTheme.colorScheme.surface, Color.White, 0.78f)
+    }
+    val baseColor = if (enabled) liftedSurface else MiuixTheme.colorScheme.surfaceContainer
+    val textColor = if (enabled) {
+        if (isCoui) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface
+    } else {
+        MiuixTheme.colorScheme.onSurfaceSecondary
+    }
+    Row(
+        modifier = (if (fill) modifier.fillMaxWidth() else modifier)
+            .defaultMinSize(minHeight = 42.dp)
+            .liquidGlassSurface(
+                shape = btnShape,
+                role = LiquidGlassSurfaceRole.BUTTON,
+                baseColor = baseColor,
+                elevationOverride = if (enabled) 8.dp else 1.dp,
+                borderWidth = 1.2.dp,
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(contentPadding ?: PaddingValues(horizontal = 16.dp, vertical = 10.dp)),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CompositionLocalProvider(LocalContentColor provides textColor) {
+            content()
+        }
+    }
 }
 
 /** Miuix 输入框（浮动标签 / 聚焦描边 / 圆角底色）。 */
@@ -398,19 +468,21 @@ fun WantFilterChip(
     } else {
         MiuixTheme.colorScheme.onSurfaceContainer
     }
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(50),
-        color = container,
-        contentColor = content,
+    Row(
+        modifier = modifier
+            .liquidGlassSurface(
+                shape = RoundedCornerShape(50),
+                role = LiquidGlassSurfaceRole.CHIP,
+                baseColor = container,
+                elevationOverride = if (selected) 7.dp else 4.dp,
+                borderWidth = 1.dp,
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .clickable(enabled = enabled, onClick = onClick)
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
+        CompositionLocalProvider(LocalContentColor provides content) {
             leadingIcon?.invoke()
             label()
         }
@@ -439,22 +511,34 @@ fun WantTabRow(
     @Suppress("UNUSED_PARAMETER") divider: Any? = null,
     tabs: @Composable RowScope.() -> Unit,
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(50),
-        color = MiuixTheme.colorScheme.surfaceContainer,
+    val isDark = MiuixTheme.colorScheme.background.luminance() < 0.5f
+    val trackColor = if (isDark) {
+        lerp(MiuixTheme.colorScheme.background, Color.Black, 0.25f)
+    } else {
+        lerp(MiuixTheme.colorScheme.surfaceContainer, Color.Black, 0.08f)
+    }
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(50))
+            .background(trackColor)
+            .border(
+                width = 1.dp,
+                color = MiuixTheme.colorScheme.outline.copy(alpha = 0.45f),
+                shape = RoundedCornerShape(50),
+            )
+            .padding(4.dp),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(3.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
             content = tabs,
         )
     }
 }
 
-/** Miuix 分段控件的一个页签。 */
+/** Miuix 分段控件的一个页签（选中态为主题色立体胶囊，非选中态扁平弱化，对比清晰）。 */
 @Composable
 fun RowScope.WantTab(
     selected: Boolean,
@@ -467,19 +551,32 @@ fun RowScope.WantTab(
     @Suppress("UNUSED_PARAMETER") unselectedContentColor: Color = Color.Unspecified,
     @Suppress("UNUSED_PARAMETER") interactionSource: Any? = null,
 ) {
-    val background = if (selected) MiuixTheme.colorScheme.surface else Color.Transparent
     val contentColor = if (selected) {
-        MiuixTheme.colorScheme.primary
+        MiuixTheme.colorScheme.onPrimary
     } else {
         MiuixTheme.colorScheme.onSurfaceSecondary
     }
-    Box(
-        modifier = modifier
+    val tabModifier = if (selected) {
+        modifier
+            .weight(1f)
+            .liquidGlassSurface(
+                shape = RoundedCornerShape(50),
+                role = LiquidGlassSurfaceRole.BUTTON,
+                baseColor = MiuixTheme.colorScheme.primary,
+                elevationOverride = 6.dp,
+                borderWidth = 1.dp,
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 8.dp)
+    } else {
+        modifier
             .weight(1f)
             .clip(RoundedCornerShape(50))
-            .background(background)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(vertical = 7.dp),
+            .padding(vertical = 8.dp)
+    }
+    Box(
+        modifier = tabModifier,
         contentAlignment = Alignment.Center,
     ) {
         CompositionLocalProvider(LocalContentColor provides contentColor) {
@@ -504,10 +601,15 @@ fun WantDropdownMenu(
         onDismissRequest = onDismissRequest,
         properties = PopupProperties(focusable = true),
     ) {
-        Card(
-            modifier = modifier.widthIn(min = 180.dp, max = 320.dp),
-            cornerRadius = 16.dp,
-            insideMargin = PaddingValues(vertical = 6.dp),
+        Box(
+            modifier = modifier
+                .widthIn(min = 180.dp, max = 320.dp)
+                .liquidGlassSurface(
+                    shape = RoundedCornerShape(18.dp),
+                    role = LiquidGlassSurfaceRole.DIALOG,
+                    baseColor = MiuixTheme.colorScheme.surface,
+                )
+                .padding(vertical = 6.dp),
         ) {
             Column(
                 modifier = Modifier
@@ -627,16 +729,25 @@ fun WantListItem(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         leadingContent?.invoke()
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
             overlineContent?.invoke()
             headlineContent()
-            supportingContent?.invoke()
+            if (supportingContent != null) {
+                CompositionLocalProvider(
+                    LocalContentColor provides MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                ) {
+                    supportingContent()
+                }
+            }
         }
         trailingContent?.invoke()
     }
 }
 
-/** Miuix 底部导航栏。 */
+/** Miuix 底部导航栏（0.15.0：不再叠加内层系统底栏 inset，保证胶囊内图标与文字严格上下居中）。 */
 @Composable
 fun WantNavigationBar(
     modifier: Modifier = Modifier,
@@ -645,10 +756,19 @@ fun WantNavigationBar(
     @Suppress("UNUSED_PARAMETER") windowInsets: Any? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
-    NavigationBar(modifier = modifier, color = containerColor, content = content)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 66.dp)
+            .background(containerColor)
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        content = content,
+    )
 }
 
-/** Miuix 底部导航栏条目（ImageVector + 字符串标签）。 */
+/** Miuix 底部导航栏条目（ImageVector + 字符串标签，严格上下居中）。 */
 @Composable
 fun RowScope.WantNavigationBarItem(
     selected: Boolean,
@@ -658,14 +778,34 @@ fun RowScope.WantNavigationBarItem(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    NavigationBarItem(
-        selected = selected,
-        onClick = onClick,
-        icon = icon,
-        label = label,
-        modifier = modifier,
-        enabled = enabled,
-    )
+    val tint = if (selected) {
+        MiuixTheme.colorScheme.onSurface
+    } else {
+        MiuixTheme.colorScheme.onSurfaceSecondary.copy(alpha = 0.72f)
+    }
+    Column(
+        modifier = modifier
+            .weight(1f)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = tint,
+            modifier = Modifier.size(24.dp),
+        )
+        Text(
+            text = label,
+            style = MiuixTheme.textStyles.footnote1,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = tint,
+            maxLines = 1,
+        )
+    }
 }
 
 /** Miuix 悬浮操作按钮。 */
@@ -675,17 +815,29 @@ fun WantFab(
     modifier: Modifier = Modifier,
     shape: Shape = CircleShape,
     containerColor: Color = MiuixTheme.colorScheme.primary,
-    @Suppress("UNUSED_PARAMETER") contentColor: Color = Color.Unspecified,
+    contentColor: Color = Color.Unspecified,
     @Suppress("UNUSED_PARAMETER") elevation: Any? = null,
     content: @Composable () -> Unit,
 ) {
-    FloatingActionButton(
-        onClick = onClick,
-        modifier = modifier,
-        shape = shape,
-        containerColor = containerColor,
-        content = content,
-    )
+    val resolvedContentColor = if (contentColor != Color.Unspecified) {
+        contentColor
+    } else {
+        MiuixTheme.colorScheme.onPrimary
+    }
+    Box(
+        modifier = modifier
+            .liquidGlassSurface(
+                shape = shape,
+                role = LiquidGlassSurfaceRole.FAB,
+                baseColor = containerColor,
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        CompositionLocalProvider(LocalContentColor provides resolvedContentColor) {
+            content()
+        }
+    }
 }
 
 /** 设置分组标题（Miuix SmallTitle）。 */
@@ -700,7 +852,14 @@ fun WantCard(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(modifier = modifier, content = content)
+    Column(
+        modifier = modifier.liquidGlassSurface(
+            shape = RoundedCornerShape(18.dp),
+            role = LiquidGlassSurfaceRole.CARD,
+            baseColor = MiuixTheme.colorScheme.surfaceContainer,
+        ),
+        content = content,
+    )
 }
 
 /** Miuix 分割线。 */

@@ -1,25 +1,30 @@
 package com.davidzhu.wantnote.ui.settings
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import com.davidzhu.wantnote.ui.components.WantAlertDialog
-import com.davidzhu.wantnote.ui.components.WantButton
-import com.davidzhu.wantnote.ui.components.WantLinearProgressIndicator
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material3.MaterialTheme
-import com.davidzhu.wantnote.ui.components.WantTextButton
-import top.yukonga.miuix.kmp.basic.SnackbarHostState
-import com.davidzhu.wantnote.ui.components.WantTab
-import com.davidzhu.wantnote.ui.components.WantTabRow
-import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -27,15 +32,38 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.davidzhu.wantnote.data.NoteBox
 import com.davidzhu.wantnote.transfer.ExportBundle
 import com.davidzhu.wantnote.transfer.ImportFailure
+import com.davidzhu.wantnote.transfer.ImportSourceMode
+import com.davidzhu.wantnote.ui.LocalNotes
 import com.davidzhu.wantnote.ui.LocalTransfer
+import com.davidzhu.wantnote.ui.components.WantAlertDialog
+import com.davidzhu.wantnote.ui.components.WantButton
+import com.davidzhu.wantnote.ui.components.WantDropdownMenu
+import com.davidzhu.wantnote.ui.components.WantDropdownMenuItem
+import com.davidzhu.wantnote.ui.components.WantLinearProgressIndicator
+import com.davidzhu.wantnote.ui.components.WantListItem
+import com.davidzhu.wantnote.ui.components.WantTab
+import com.davidzhu.wantnote.ui.components.WantTabRow
+import com.davidzhu.wantnote.ui.components.WantTextButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** 0.10.0：「数据管理」外层 Tab 拆为 导入 / 导出 / 生态互联 三个。 */
 private val DataTabs = listOf("导入", "导出", "生态互联")
@@ -60,20 +88,199 @@ fun ImportExportScreen(onBack: () -> Unit) {
                 }
             }
             when (dataTabState) {
-                0 -> ImportTab(snackbar = snackbar)
+                0 -> ImportHubTab(snackbar = snackbar)
                 1 -> ExportTab(snackbar = snackbar)
-                else -> EcosystemTab(snackbar = snackbar)
+                else -> EcosystemHubTab(snackbar = snackbar)
             }
         }
     }
 }
 
-/** 导入 Tab：本地 Markdown / HTML / ZIP 文件导入（原「导入&导出」的导入半边）。 */
+/**
+ * 0.19.0：导入功能两级菜单。
+ * 一级菜单：通用导入、flomo压缩包导入、得到大脑压缩包导入、喵记多压缩包导入、Seeds压缩包导入。
+ */
 @Composable
-private fun ImportTab(snackbar: SnackbarHostState) {
+private fun ImportHubTab(snackbar: SnackbarHostState) {
+    var selectedMode by remember { mutableStateOf<ImportSourceMode?>(null) }
+
+    BackHandler(enabled = selectedMode != null) {
+        selectedMode = null
+    }
+
+    val mode = selectedMode
+    if (mode == null) {
+        val titleStyle = MiuixTheme.textStyles.body1
+        val descSizeSp = (titleStyle.fontSize.value - 2f).coerceAtLeast(11f).sp
+        val entries = listOf(
+            Triple(ImportSourceMode.GENERAL, "通用导入", "支持 .md / .html / .zip，完整支持 Markdown 语法与双链，可选目标卡片盒"),
+            Triple(ImportSourceMode.FLOMO_ZIP, "flomo压缩包导入", "选择 flomo 导出的 ZIP 包（内含 HTML，自动转 Markdown 并归入所选卡片盒）"),
+            Triple(ImportSourceMode.DEDAO_ZIP, "得到大脑压缩包导入", "选择得到大脑导出的 ZIP 包（内含 HTML，自动转 Markdown 并归入所选卡片盒）"),
+            Triple(ImportSourceMode.MIAOJIDUO_ZIP, "喵记多压缩包导入", "选择喵记多导出的 ZIP 包（同时支持包内 HTML 与 Markdown 文件）"),
+            Triple(ImportSourceMode.SEEDS_ZIP, "Seeds压缩包导入", "选择 Seeds 导出的 ZIP 包（支持包内 Markdown 文件与附件）"),
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            Text(
+                text = "选择导入来源，所有导入方式均支持指定导入到目标卡片盒。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(MiuixTheme.colorScheme.surfaceContainer.copy(alpha = 0.7f))
+                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f), RoundedCornerShape(18.dp)),
+            ) {
+                entries.forEachIndexed { idx, (m, title, subtitle) ->
+                    WantListItem(
+                        headlineContent = {
+                            Text(
+                                text = title,
+                                style = titleStyle,
+                                fontWeight = FontWeight.Medium,
+                                color = MiuixTheme.colorScheme.onSurface,
+                            )
+                        },
+                        supportingContent = {
+                            Text(
+                                text = subtitle,
+                                style = MiuixTheme.textStyles.footnote1.copy(fontSize = descSizeSp),
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        trailingContent = {
+                            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedMode = m },
+                    )
+                    if (idx < entries.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                        )
+                    }
+                }
+            }
+        }
+    } else {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { selectedMode = null }
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回导入列表")
+                Text(
+                    text = "导入 / ${mode.label}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+            ImportModeSubPage(mode = mode, snackbar = snackbar)
+        }
+    }
+}
+
+/** 通用卡片盒选择下拉框（导入、Readwise、微信读书复用）。 */
+@Composable
+internal fun BoxTargetDropdown(
+    label: String,
+    boxes: List<NoteBox>,
+    selectedBoxId: String,
+    onSelect: (String) -> Unit,
+    extraOptions: List<Pair<String, String>> = emptyList(),
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedName = extraOptions.firstOrNull { it.first == selectedBoxId }?.second
+        ?: boxes.firstOrNull { it.id == selectedBoxId }?.name
+        ?: "不指定（未分配）"
+    Box(modifier = modifier.fillMaxWidth()) {
+        WantTextButton(
+            onClick = { expanded = !expanded },
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = selectedName,
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Icon(Icons.Outlined.ArrowDropDown, contentDescription = null)
+            }
+        }
+        WantDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth(0.88f),
+        ) {
+            WantDropdownMenuItem(
+                text = { Text(if (selectedBoxId.isEmpty()) "✓ 不指定（未分配）" else "不指定（未分配）") },
+                onClick = {
+                    expanded = false
+                    onSelect("")
+                },
+            )
+            extraOptions.forEach { (optId, optLabel) ->
+                WantDropdownMenuItem(
+                    text = { Text(if (selectedBoxId == optId) "✓ $optLabel" else optLabel) },
+                    onClick = {
+                        expanded = false
+                        onSelect(optId)
+                    },
+                )
+            }
+            boxes.forEach { box ->
+                WantDropdownMenuItem(
+                    text = { Text(if (box.id == selectedBoxId) "✓ ${box.name}" else box.name) },
+                    onClick = {
+                        expanded = false
+                        onSelect(box.id)
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImportModeSubPage(
+    mode: ImportSourceMode,
+    snackbar: SnackbarHostState,
+) {
     val transfer = LocalTransfer.current
-    val context = LocalContext.current
+    val notesRepo = LocalNotes.current
+    val boxes by notesRepo.observeBoxes().collectAsStateWithLifecycle(initialValue = emptyList())
     val scope = rememberCoroutineScope()
+
+    var targetBoxId by remember(mode) { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var done by remember { mutableIntStateOf(0) }
     var total by remember { mutableIntStateOf(0) }
@@ -94,7 +301,11 @@ private fun ImportTab(snackbar: SnackbarHostState) {
         failures = emptyList()
         scope.launch {
             runCatching {
-                transfer.importUris(uris) { processed, count, label ->
+                transfer.importUris(
+                    uris = uris,
+                    targetBoxId = targetBoxId,
+                    mode = mode,
+                ) { processed, count, label ->
                     done = processed
                     total = count
                     currentFile = label
@@ -106,8 +317,9 @@ private fun ImportTab(snackbar: SnackbarHostState) {
                 } else {
                     ""
                 }
+                val boxSuffix = boxes.firstOrNull { it.id == targetBoxId }?.let { "至卡片盒「${it.name}」" }.orEmpty()
                 if (result.success > 0) {
-                    snackbar.showSnackbar("已导入 ${result.success} 篇笔记$missing")
+                    snackbar.showSnackbar("已导入 ${result.success} 篇笔记$boxSuffix$missing")
                 } else if (result.failures.isEmpty()) {
                     snackbar.showSnackbar("没有可导入的笔记")
                 }
@@ -131,6 +343,19 @@ private fun ImportTab(snackbar: SnackbarHostState) {
         }
     }
 
+    val desc = when (mode) {
+        ImportSourceMode.GENERAL ->
+            "支持单个或多个 .md / .markdown / .html / .htm 及 .zip，完整保留 Markdown 语法（标题、列表、表格、代码、Mermaid、LaTeX、图片/附件）与 [[双链]]。"
+        ImportSourceMode.FLOMO_ZIP ->
+            "请选择从 flomo 导出的 ZIP 压缩包。包内 HTML 文件会自动拆分并转换为 Markdown 存入想记数据库，图片/附件一并导入。"
+        ImportSourceMode.DEDAO_ZIP ->
+            "请选择从得到大脑导出的 ZIP 压缩包。包内 HTML 文件会自动转换为 Markdown 存入想记数据库。"
+        ImportSourceMode.MIAOJIDUO_ZIP ->
+            "请选择从喵记多导出的 ZIP 压缩包。同时支持包内 HTML 与 Markdown 文件自动解析入库，并拷贝关联附件。"
+        ImportSourceMode.SEEDS_ZIP ->
+            "请选择从 Seeds 导出的 ZIP 压缩包。支持包内 Markdown 文件与附件自动解析入库。"
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -138,29 +363,51 @@ private fun ImportTab(snackbar: SnackbarHostState) {
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
         Text(
-            "支持单个或多个 .md / .markdown / .html / .htm，也支持把这些文件打成的 .zip。每个文件生成一篇笔记；zip 里的图片/附件若被引用，会一并拷入媒体库。",
+            text = desc,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 16.dp),
+            modifier = Modifier.padding(bottom = 14.dp),
         )
+
+        BoxTargetDropdown(
+            label = "导入到卡片盒",
+            boxes = boxes,
+            selectedBoxId = targetBoxId,
+            onSelect = { targetBoxId = it },
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
         SectionTitle("选择文件")
-        WantTextButton(
-            onClick = {
-                if (busy) return@WantTextButton
-                multiLauncher.launch(arrayOf("*/*"))
-            },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("选择 Markdown / HTML 文件") }
-        Spacer(modifier = Modifier.height(8.dp))
-        WantTextButton(
-            onClick = {
-                if (busy) return@WantTextButton
-                zipLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
-            },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("选择 ZIP 压缩包") }
+
+        if (mode == ImportSourceMode.GENERAL) {
+            WantTextButton(
+                onClick = {
+                    if (busy) return@WantTextButton
+                    multiLauncher.launch(arrayOf("*/*"))
+                },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("选择 Markdown / HTML 文件") }
+            Spacer(modifier = Modifier.height(8.dp))
+            WantButton(
+                onClick = {
+                    if (busy) return@WantButton
+                    zipLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
+                },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("选择 ZIP 压缩包") }
+        } else {
+            // flomo / 得到大脑 / 喵记多 / Seeds 压缩包导入均只提供单一「选择zip包」按钮
+            WantButton(
+                onClick = {
+                    if (busy) return@WantButton
+                    zipLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
+                },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("选择zip包") }
+        }
 
         if (busy) {
             Spacer(modifier = Modifier.height(20.dp))
@@ -169,13 +416,19 @@ private fun ImportTab(snackbar: SnackbarHostState) {
                     progress = { done.toFloat() / total.toFloat() },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                val pct = (done * 100 / total.coerceAtLeast(1)).coerceIn(0, 100)
                 Text(
-                    "已处理 $done / $total",
+                    "导入进度：$done / $total（$pct%）",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 8.dp),
                 )
             } else {
                 WantLinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text(
+                    "正在解析导入文件…",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             }
             if (currentFile.isNotBlank()) {
                 Text(
@@ -186,14 +439,6 @@ private fun ImportTab(snackbar: SnackbarHostState) {
                 )
             }
         }
-
-        Spacer(modifier = Modifier.height(24.dp))
-        SectionTitle("说明")
-        Text(
-            "Markdown 块映射：# 标题、段落、- [ ] / - [x] 任务、1. 有序列表、- 无序列表、--- 分割线、缩进；行内 **粗体**、*斜体*、==高亮==、~~删除线~~ 会原样保留。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 
     if (failures.isNotEmpty()) {
@@ -213,7 +458,7 @@ private fun ImportTab(snackbar: SnackbarHostState) {
     }
 }
 
-/** 导出 Tab：全部笔记导出为 Markdown / ZIP（原「导入&导出」的导出半边）。 */
+/** 导出 Tab：全部笔记导出为 Markdown / ZIP。 */
 @Composable
 private fun ExportTab(snackbar: SnackbarHostState) {
     val transfer = LocalTransfer.current

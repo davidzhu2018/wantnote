@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
@@ -40,6 +41,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.davidzhu.wantnote.data.NoteLinkCodec
+import com.davidzhu.wantnote.transfer.LatexMath
+import com.davidzhu.wantnote.transfer.MarkdownCodec
 import com.davidzhu.wantnote.ui.LocalMedia
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -55,8 +58,10 @@ object MarkdownVisual {
     private val token = Regex(
         """\[\[note:([A-Za-z0-9._-]+)]]""" +
             """|!\[([^\]]*)]\(([^)]*)\)""" +
+            """|<[iI][mM][gG]\b([^>]*)>""" +
             """|\[([^\]]*)]\(([^)]*)\)""" +
             """|`([^`\n]*)`""" +
+            """|(?<!\$)\$(?!\$|\s)([^$\n]+?)(?<!\s)\$(?!\$)""" +
             """|\*\*(.+?)\*\*""" +
             """|(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)""" +
             """|==(.+?)==""" +
@@ -96,47 +101,74 @@ object MarkdownVisual {
             val range = match.range
             val noteId = match.groups[1]?.value
             val imageAlt = match.groups[2]?.value
-            val linkLabel = match.groups[4]?.value
-            val code = match.groups[6]?.value
-            val bold = match.groups[7]?.value
-            val italic = match.groups[8]?.value
-            val highlight = match.groups[9]?.value
-            val strike = match.groups[10]?.value
+            val htmlImgAttrs = match.groups[4]?.value
+            val linkLabel = match.groups[5]?.value
+            val code = match.groups[7]?.value
+            val latexInline = match.groups[8]?.value
+            val bold = match.groups[9]?.value
+            val italic = match.groups[10]?.value
+            val highlight = match.groups[11]?.value
+            val strike = match.groups[12]?.value
             when {
                 noteId != null -> {
                     val title = linkTitles[noteId]?.takeIf { it.isNotBlank() } ?: "已删除的笔记"
                     segments += Segment(
-                        range.first, range.last + 1, "→ $title",
-                        SpanStyle(color = linkColor, fontWeight = FontWeight.Medium),
+                        range.first, range.last + 1, "[[$title]]",
+                        SpanStyle(
+                            color = linkColor,
+                            fontWeight = FontWeight.Medium,
+                            textDecoration = TextDecoration.Underline,
+                        ),
                     )
                 }
                 imageAlt != null -> segments += Segment(
                     range.first, range.last + 1, if (imageAlt.isBlank()) "[图片]" else "[图片] $imageAlt",
                     SpanStyle(color = linkColor),
                 )
+                htmlImgAttrs != null -> {
+                    val alt = MarkdownCodec.extractHtmlAttr(htmlImgAttrs, "alt").orEmpty()
+                    segments += Segment(
+                        range.first, range.last + 1, if (alt.isBlank()) "[图片]" else "[图片] $alt",
+                        SpanStyle(color = linkColor),
+                    )
+                }
                 linkLabel != null -> segments += Segment(
-                    range.first, range.last + 1, linkLabel.ifBlank { match.groups[5]?.value.orEmpty() },
+                    range.first, range.last + 1, linkLabel.ifBlank { match.groups[6]?.value.orEmpty() },
                     SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline),
+                    visibleOffsetInSource = if (linkLabel.isNotBlank()) 1 else -1,
                 )
                 code != null -> segments += Segment(
                     range.first, range.last + 1, code,
                     SpanStyle(fontFamily = FontFamily.Monospace, background = highlightColor.copy(alpha = 0.25f)),
+                    visibleOffsetInSource = 1,
+                )
+                latexInline != null -> segments += Segment(
+                    range.first, range.last + 1, LatexMath.format(latexInline),
+                    SpanStyle(
+                        fontFamily = FontFamily.Serif,
+                        fontStyle = FontStyle.Italic,
+                        background = highlightColor.copy(alpha = 0.16f),
+                    ),
                 )
                 bold != null -> segments += Segment(
                     range.first, range.last + 1, bold,
                     SpanStyle(fontWeight = FontWeight.Bold),
+                    visibleOffsetInSource = 2,
                 )
                 italic != null -> segments += Segment(
                     range.first, range.last + 1, italic,
                     SpanStyle(fontStyle = FontStyle.Italic),
+                    visibleOffsetInSource = 1,
                 )
                 highlight != null -> segments += Segment(
                     range.first, range.last + 1, highlight,
                     SpanStyle(background = highlightColor),
+                    visibleOffsetInSource = 2,
                 )
                 strike != null -> segments += Segment(
                     range.first, range.last + 1, strike,
                     SpanStyle(textDecoration = TextDecoration.LineThrough),
+                    visibleOffsetInSource = 2,
                 )
             }
             cursor = range.last + 1
@@ -173,6 +205,21 @@ object MarkdownVisual {
                 for (offset in 1..segment.visible.length) {
                     originalTo[segment.start + offset] = outputIndex + offset
                 }
+            } else if (segment.visibleOffsetInSource >= 0 &&
+                segment.start + segment.visibleOffsetInSource + segment.visible.length <= segment.end
+            ) {
+                val prefixLen = segment.visibleOffsetInSource
+                val visLen = segment.visible.length
+                val totalLen = segment.end - segment.start
+                for (offset in 1..prefixLen) {
+                    originalTo[segment.start + offset] = outputIndex
+                }
+                for (offset in 1..visLen) {
+                    originalTo[segment.start + prefixLen + offset] = outputIndex + offset
+                }
+                for (offset in (prefixLen + visLen + 1)..totalLen) {
+                    originalTo[segment.start + offset] = outputIndex + visLen
+                }
             } else {
                 for (offset in 1 until segment.end - segment.start) {
                     originalTo[segment.start + offset] = outputIndex
@@ -187,14 +234,16 @@ object MarkdownVisual {
             sourceIndex += 1
         }
         val transformedLength = emittedLength(segments)
-        val reverse = IntArray(transformedLength + 1) { n }
+        val reverse = IntArray(transformedLength + 1) { -1 }
+        // 反向映射优先取最右侧的原文偏移（例如 `**abc**` 结尾映射到闭合 `**` 之后，
+        // 这样点在格式化文字末尾或拖到末尾后可以继续输入正文，不会卡在语法符号前面）。
         for (i in 0..n) {
             val t = originalTo[i].coerceIn(0, transformedLength)
-            if (reverse[t] == n || i < reverse[t]) reverse[t] = i
+            reverse[t] = i
         }
         var last = 0
         for (i in 0..transformedLength) {
-            if (reverse[i] == n && i > 0) reverse[i] = last else last = reverse[i]
+            if (reverse[i] < 0) reverse[i] = last else last = reverse[i]
         }
 
         return Rendered(
@@ -222,7 +271,9 @@ object MarkdownVisual {
         highlightColor: Color,
         linkTitles: Map<String, String> = emptyMap(),
         linkColor: Color = Color.Unspecified,
+        noteLinkColor: Color = Color(0xFF1A73E8),
         renderInlineImages: Boolean = true,
+        onOpenNote: ((String) -> Unit)? = null,
     ): RichRendered {
         if (source.isEmpty()) return RichRendered(AnnotatedString(""), emptyMap())
         val inlineImages = LinkedHashMap<String, String>()
@@ -236,17 +287,36 @@ object MarkdownVisual {
                 val range = match.range
                 val noteId = match.groups[1]?.value
                 val imageAlt = match.groups[2]?.value
-                val linkLabel = match.groups[4]?.value
-                val code = match.groups[6]?.value
-                val bold = match.groups[7]?.value
-                val italic = match.groups[8]?.value
-                val highlight = match.groups[9]?.value
-                val strike = match.groups[10]?.value
+                val htmlImgAttrs = match.groups[4]?.value
+                val linkLabel = match.groups[5]?.value
+                val code = match.groups[7]?.value
+                val latexInline = match.groups[8]?.value
+                val bold = match.groups[9]?.value
+                val italic = match.groups[10]?.value
+                val highlight = match.groups[11]?.value
+                val strike = match.groups[12]?.value
                 when {
                     noteId != null -> {
                         val title = linkTitles[noteId]?.takeIf { it.isNotBlank() } ?: "已删除的笔记"
-                        withStyle(SpanStyle(color = linkColor, fontWeight = FontWeight.Medium)) {
-                            append("→ $title")
+                        val linkStyle = SpanStyle(
+                            color = noteLinkColor,
+                            fontWeight = FontWeight.Medium,
+                            textDecoration = TextDecoration.Underline,
+                        )
+                        if (onOpenNote != null && linkTitles.containsKey(noteId)) {
+                            withLink(
+                                LinkAnnotation.Clickable(
+                                    tag = "note:$noteId",
+                                    styles = TextLinkStyles(style = linkStyle),
+                                    linkInteractionListener = { onOpenNote(noteId) },
+                                ),
+                            ) {
+                                append("[[$title]]")
+                            }
+                        } else {
+                            withStyle(linkStyle) {
+                                append("[[$title]]")
+                            }
                         }
                     }
                     imageAlt != null -> {
@@ -261,8 +331,21 @@ object MarkdownVisual {
                             }
                         }
                     }
+                    htmlImgAttrs != null -> {
+                        if (renderInlineImages) {
+                            val url = MarkdownCodec.extractHtmlAttr(htmlImgAttrs, "src").orEmpty().trim()
+                            val alt = MarkdownCodec.extractHtmlAttr(htmlImgAttrs, "alt").orEmpty().trim()
+                            if (url.isNotEmpty()) {
+                                val id = "img${imageIndex++}"
+                                inlineImages[id] = url
+                                appendInlineContent(id, if (alt.isBlank()) "[图片]" else "[图片] $alt")
+                            } else {
+                                append(source.substring(range))
+                            }
+                        }
+                    }
                     linkLabel != null -> {
-                        val url = match.groups[5]?.value.orEmpty().trim()
+                        val url = match.groups[6]?.value.orEmpty().trim()
                         val label = linkLabel.ifBlank { url }
                         if (url.startsWith("http://") || url.startsWith("https://")) {
                             withLink(
@@ -284,6 +367,13 @@ object MarkdownVisual {
                     code != null -> withStyle(
                         SpanStyle(fontFamily = FontFamily.Monospace, background = highlightColor.copy(alpha = 0.25f)),
                     ) { append(code) }
+                    latexInline != null -> withStyle(
+                        SpanStyle(
+                            fontFamily = FontFamily.Serif,
+                            fontStyle = FontStyle.Italic,
+                            background = highlightColor.copy(alpha = 0.16f),
+                        ),
+                    ) { append(LatexMath.format(latexInline)) }
                     bold != null -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(bold) }
                     italic != null -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(italic) }
                     highlight != null -> withStyle(SpanStyle(background = highlightColor)) { append(highlight) }
@@ -309,6 +399,8 @@ object MarkdownVisual {
         val end: Int,
         val visible: String,
         val style: SpanStyle?,
+        /** When >= 0, visible characters map 1-to-1 starting at `start + visibleOffsetInSource`. */
+        val visibleOffsetInSource: Int = -1,
     )
 }
 
@@ -322,12 +414,23 @@ fun MarkdownText(
     overflow: TextOverflow = TextOverflow.Ellipsis,
     linkTitles: Map<String, String> = emptyMap(),
     renderInlineImages: Boolean = true,
+    onOpenNote: ((String) -> Unit)? = null,
 ) {
     val highlight = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
     val linkColor = MaterialTheme.colorScheme.primary
-    // 0.10.0：只读渲染走 renderRich——超链接可点击；0.12.0 支持在主页卡片预览关闭行内图片。
-    val rendered = remember(text, linkTitles, highlight, linkColor, renderInlineImages) {
-        MarkdownVisual.renderRich(text, highlight, linkTitles, linkColor, renderInlineImages = renderInlineImages)
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val noteLinkColor = if (isDark) Color(0xFF6EA8FE) else Color(0xFF1A73E8)
+    // 0.10.0：只读渲染走 renderRich——超链接可点击；0.14.0：双链渲染为蓝色带下划线 [[标题]] 并支持点击跳转。
+    val rendered = remember(text, linkTitles, highlight, linkColor, noteLinkColor, renderInlineImages, onOpenNote) {
+        MarkdownVisual.renderRich(
+            source = text,
+            highlightColor = highlight,
+            linkTitles = linkTitles,
+            linkColor = linkColor,
+            noteLinkColor = noteLinkColor,
+            renderInlineImages = renderInlineImages,
+            onOpenNote = onOpenNote,
+        )
     }
     val inline = remember(rendered.inlineImages) {
         rendered.inlineImages.mapValues { (_, url) ->

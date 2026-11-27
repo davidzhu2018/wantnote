@@ -103,6 +103,17 @@ fun ThemeEditorScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
                 item {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    UiStyleDropdownRow(
+                        selected = settings.uiStyleOption,
+                        onSelect = { style ->
+                            scope.launch { settingsRepo.update { it.copy(uiStyle = style.name) } }
+                        },
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                }
+                item {
                     Text(
                         "选择主题",
                         style = MaterialTheme.typography.titleSmall,

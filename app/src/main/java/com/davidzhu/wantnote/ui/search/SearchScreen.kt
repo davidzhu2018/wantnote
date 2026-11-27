@@ -20,7 +20,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.Tag
+import androidx.compose.material.icons.rounded.Star
 import com.davidzhu.wantnote.ui.components.WantAlertDialog
 import com.davidzhu.wantnote.ui.components.WantCheckbox
 import com.davidzhu.wantnote.ui.components.WantFilterChip
@@ -76,6 +78,7 @@ fun SearchScreen(
 
     var query by rememberSaveable { mutableStateOf("") }
     var selectedTagIds by remember { mutableStateOf(setOf<String>()) }
+    var starredOnly by rememberSaveable { mutableStateOf(false) }
     var showTagDialog by remember { mutableStateOf(false) }
     var datePreset by rememberSaveable { mutableStateOf(DatePreset.ANY.name) }
     var customStart by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -88,17 +91,18 @@ fun SearchScreen(
         dateRange(preset, customStart, customEnd, now)
     }
 
-    val filtered = remember(items, query, selectedTagIds, startMs, endMs) {
+    val filtered = remember(items, query, selectedTagIds, startMs, endMs, starredOnly) {
         NoteRepository.filterNotes(
             items = items,
             keyword = query,
             tagIds = selectedTagIds,
             startMs = startMs,
             endMs = endMs,
+            starredOnly = starredOnly,
         )
     }
 
-    val hasFilter = query.isNotBlank() || selectedTagIds.isNotEmpty() || preset != DatePreset.ANY
+    val hasFilter = query.isNotBlank() || selectedTagIds.isNotEmpty() || preset != DatePreset.ANY || starredOnly
 
     WantScaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -136,6 +140,23 @@ fun SearchScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                WantFilterChip(
+                    selected = starredOnly,
+                    onClick = { starredOnly = !starredOnly },
+                    label = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(
+                                imageVector = if (starredOnly) Icons.Rounded.Star else Icons.Outlined.StarBorder,
+                                contentDescription = "星标",
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Text("星标")
+                        }
+                    },
+                )
                 WantTextButton(onClick = { showTagDialog = true }) {
                     Icon(
                         Icons.Outlined.Tag,

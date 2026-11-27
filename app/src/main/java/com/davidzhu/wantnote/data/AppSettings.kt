@@ -8,6 +8,7 @@ enum class ThemePalette(val label: String) {
     INK("墨色"),
     SAGE("青松"),
     ROSE("暮粉"),
+    AZURE("蔚蓝"),
     ;
 
     companion object {
@@ -49,6 +50,7 @@ enum class HomeViewMode(val label: String) {
     WATERFALL("瀑布流"),
     MINIMAL("极简"),
     TIMESTAMP("时间戳"),
+    MOMENTS("朋友圈"),
     ;
 
     companion object {
@@ -66,6 +68,18 @@ enum class SyncMethod(val label: String) {
     companion object {
         fun fromStorage(value: String?): SyncMethod {
             return entries.firstOrNull { it.name == value } ?: WEBDAV
+        }
+    }
+}
+
+enum class UiStyle(val label: String) {
+    MIUIX("MiuiX"),
+    COUI("COUI"),
+    ;
+
+    companion object {
+        fun fromStorage(value: String?): UiStyle {
+            return entries.firstOrNull { it.name.equals(value, ignoreCase = true) } ?: MIUIX
         }
     }
 }
@@ -132,6 +146,43 @@ data class AppSettings(
     val markdownMigrationDone: Boolean = false,
     /** 0.11.0：上次成功拉取 Dinox 卡片盒列表的时间（epoch ms，0 = 从未成功）。 */
     val dinoxBoxesFetchedAt: Long = 0L,
+    /** 0.16.5：AI 能力选择开关（默认全部开启）。 */
+    val aiEnableTitle: Boolean = true,
+    val aiEnableTag: Boolean = true,
+    val aiEnableBox: Boolean = true,
+    val aiEnableSummary: Boolean = true,
+    val aiEnableInsight: Boolean = true,
+    /** 0.17.0：是否自动检查更新（默认开启：冷启动与进入关于菜单时自动检查）。 */
+    val autoCheckUpdate: Boolean = true,
+    /** 0.17.2：账号管理（用户名与头像本地相对路径，用于朋友圈视图与后续账户体系）。 */
+    val profileNickname: String = "",
+    val profileAvatarPath: String = "",
+    /** 0.17.2：数据统计创作热力图颜色（默认绿色）。 */
+    val heatmapColorHex: String = "#2EA043",
+    /** 0.17.3：全局 UI 风格（MiuiX / COUI，默认 MiuiX）。 */
+    val uiStyle: String = UiStyle.MIUIX.name,
+    /** 0.18.0：编辑器位置 POI 地图服务商（AMAP 高德 / TENCENT 腾讯）与本机 Key。 */
+    val mapProvider: String = "AMAP",
+    val mapApiKey: String = "",
+    /** 0.18.2：生态互联 Flomo & 得到大脑 MCP 双向同步配置（仅存本机，随备份/云同步保存）。 */
+    val flomoMcpUrl: String = "",
+    val flomoMcpToken: String = "",
+    val flomoWebhookUrl: String = "",
+    val flomoLastSyncAt: Long = 0L,
+    val dedaoMcpUrl: String = "",
+    val dedaoMcpToken: String = "",
+    val dedaoLastSyncAt: Long = 0L,
+    /** 0.19.0：Readwise 单向同步配置（Token、类别→卡片盒映射 JSON、自动同步分钟数、上次同步时间）。 */
+    val readwiseToken: String = "",
+    val readwiseCategoryBoxesJson: String = "{}",
+    val readwiseCategoryTagsJson: String = "{}",
+    val readwiseAutoSyncMinutes: Int = 0,
+    val readwiseLastSyncAt: Long = 0L,
+    /** 0.19.0：微信读书单向同步配置（API Key、目标卡片盒、自动同步分钟数、上次同步时间）。 */
+    val wereadApiKey: String = "",
+    val wereadBoxId: String = "",
+    val wereadAutoSyncMinutes: Int = 0,
+    val wereadLastSyncAt: Long = 0L,
 ) {
     val palette: ThemePalette get() = ThemePalette.fromStorage(themeName)
     val fontScaleOption: FontScaleOption get() = FontScaleOption.fromStorage(fontScale)
@@ -140,6 +191,7 @@ data class AppSettings(
     val editorFont: EditorFontOption get() = EditorFontOption.fromStorage(editorFontId)
     val syncMethodOption: SyncMethod get() = SyncMethod.fromStorage(syncMethod)
     val editorModeOption: EditorMode get() = EditorMode.fromStorage(editorMode)
+    val uiStyleOption: UiStyle get() = UiStyle.fromStorage(uiStyle)
 
     companion object {
         val DEFAULT = AppSettings()

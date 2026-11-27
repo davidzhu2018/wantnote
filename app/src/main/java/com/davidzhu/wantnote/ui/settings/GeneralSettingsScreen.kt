@@ -45,6 +45,13 @@ fun GeneralSettingsScreen(onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
+            UiStyleDropdownRow(
+                selected = settings.uiStyleOption,
+                onSelect = { style ->
+                    scope.launch { settingsRepo.update { it.copy(uiStyle = style.name) } }
+                },
+            )
+            Spacer(modifier = Modifier.height(20.dp))
             SectionTitle("主题")
             ChipRow {
                 ThemePalette.entries.forEach { palette ->

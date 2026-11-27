@@ -3,10 +3,15 @@ package com.davidzhu.wantnote.ui
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
+import com.davidzhu.wantnote.data.LiquidGlassSurfaceRole
+import com.davidzhu.wantnote.ui.components.liquidGlassSurface
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CalendarMonth
@@ -21,6 +26,10 @@ import com.davidzhu.wantnote.ui.components.WantNavigationBarItem
 import com.davidzhu.wantnote.ui.components.WantScaffold
 import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import com.davidzhu.wantnote.update.UpdateCheck
+import com.davidzhu.wantnote.update.UpdateCheckResult
+import com.davidzhu.wantnote.update.UpdateInfo
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +55,8 @@ import com.davidzhu.wantnote.ui.insights.InsightsScreen
 import com.davidzhu.wantnote.ui.migration.MigrationGate
 import com.davidzhu.wantnote.ui.search.SearchScreen
 import com.davidzhu.wantnote.ui.settings.AboutScreen
+import com.davidzhu.wantnote.ui.settings.AccountSettingsScreen
+import com.davidzhu.wantnote.ui.settings.StatsScreen
 import com.davidzhu.wantnote.ui.settings.AiSettingsScreen
 import com.davidzhu.wantnote.ui.settings.AttachmentSettingsScreen
 import com.davidzhu.wantnote.ui.settings.BackupSyncScreen
@@ -73,7 +84,10 @@ private enum class MainTab(
 fun WantNoteApp() {
     val nav = rememberNavController()
     val notes = LocalNotes.current
+    val settingsRepo = LocalSettings.current
     val scope = rememberCoroutineScope()
+    var availableUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
+    var coldStartChecked by remember { mutableStateOf(false) }
     val backStack by nav.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
     val showBar = currentRoute in setOf("home", "calendar", "insights", "settings")
@@ -85,6 +99,21 @@ fun WantNoteApp() {
         return
     }
 
+    // 0.17.0：每次冷启动自动检查一次更新（仅当「自动检查更新」勾选开启时），
+    // 有新版本时不弹窗，仅在主页左上角显示蓝色向上箭头圆圈图标。
+    LaunchedEffect(Unit) {
+        if (!coldStartChecked) {
+            coldStartChecked = true
+            val currentSettings = runCatching { settingsRepo.get() }.getOrNull()
+            if (currentSettings == null || currentSettings.autoCheckUpdate) {
+                val res = runCatching { UpdateCheck.check() }.getOrNull()
+                if (res is UpdateCheckResult.Available) {
+                    availableUpdate = res.info
+                }
+            }
+        }
+    }
+
     fun openDetail(id: String) {
         nav.navigate("note/$id")
     }
@@ -93,10 +122,18 @@ fun WantNoteApp() {
         nav.navigate("editor/$id?mode=${mode.name}")
     }
 
+    var creatingNote by remember { mutableStateOf(false) }
+
     fun createAndOpen() {
+        if (creatingNote) return
+        creatingNote = true
         scope.launch {
-            val note = notes.createBlank()
-            openEditor(note.id, EditorMode.WYSIWYG)
+            try {
+                val note = notes.createBlank()
+                openEditor(note.id, EditorMode.WYSIWYG)
+            } finally {
+                creatingNote = false
+            }
         }
     }
 
@@ -132,6 +169,7 @@ fun WantNoteApp() {
                     onEditNote = { openEditor(it, EditorMode.WYSIWYG) },
                     onSearch = { nav.navigate("search") },
                     onCreate = { createAndOpen() },
+                    availableUpdate = availableUpdate,
                 )
             }
             composable("calendar") {
@@ -145,6 +183,12 @@ fun WantNoteApp() {
             }
             composable("settings") {
                 SettingsScreen(onOpen = { nav.navigate(it) })
+            }
+            composable("settings/account") {
+                AccountSettingsScreen(onBack = { nav.popBackStack() })
+            }
+            composable("settings/stats") {
+                StatsScreen(onBack = { nav.popBackStack() })
             }
             composable("settings/general") {
                 GeneralSettingsScreen(onBack = { nav.popBackStack() })
@@ -174,7 +218,10 @@ fun WantNoteApp() {
                 AiSettingsScreen(onBack = { nav.popBackStack() })
             }
             composable("settings/about") {
-                AboutScreen(onBack = { nav.popBackStack() })
+                AboutScreen(
+                    onBack = { nav.popBackStack() },
+                    onUpdateStatus = { info -> availableUpdate = info },
+                )
             }
             composable(
                 route = "note/{noteId}",
@@ -203,7 +250,25 @@ fun WantNoteApp() {
                 EditorScreen(
                     noteId = noteId,
                     initialMode = initialMode,
-                    onBack = { nav.popBackStack() },
+                    onBack = { deletedBlank ->
+                        if (deletedBlank) {
+                            // 空笔记返回时直接安全回到主页，避免回退到已删除详情页或退出应用。
+                            if (!nav.popBackStack(MainTab.Home.route, inclusive = false)) {
+                                nav.navigate(MainTab.Home.route) {
+                                    popUpTo(nav.graph.findStartDestination().id) { inclusive = false }
+                                    launchSingleTop = true
+                                }
+                            }
+                        } else {
+                            val hasPrev = nav.previousBackStackEntry != null
+                            if (!hasPrev || !nav.popBackStack()) {
+                                nav.navigate(MainTab.Home.route) {
+                                    popUpTo(nav.graph.findStartDestination().id) { inclusive = false }
+                                    launchSingleTop = true
+                                }
+                            }
+                        }
+                    },
                 )
             }
             composable("search") {
@@ -222,9 +287,21 @@ private fun WantNoteBottomBar(
     onTab: (String) -> Unit,
     onPlus: () -> Unit,
 ) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
     WantNavigationBar(
-        containerColor = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth(),
+        containerColor = Color.Transparent,
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidGlassSurface(
+                shape = RoundedCornerShape(26.dp),
+                role = LiquidGlassSurfaceRole.BAR,
+                baseColor = MaterialTheme.colorScheme.surface,
+            ),
     ) {
         WantNavigationBarItem(
             selected = currentRoute == MainTab.Home.route,
@@ -239,20 +316,22 @@ private fun WantNoteBottomBar(
             label = MainTab.Calendar.label,
         )
         Box(
-            modifier = Modifier
-                .weight(1f)
-                .padding(top = 4.dp),
-            contentAlignment = Alignment.TopCenter,
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.Center,
         ) {
             WantFab(
                 onClick = onPlus,
-                modifier = Modifier
-                    .size(52.dp)
-                    .offset(y = (-6).dp),
+                modifier = Modifier.size(50.dp),
                 shape = CircleShape,
                 containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
             ) {
-                Icon(Icons.Outlined.Add, contentDescription = "新建笔记")
+                Icon(
+                    Icons.Outlined.Add,
+                    contentDescription = "新建笔记",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(28.dp),
+                )
             }
         }
         WantNavigationBarItem(
@@ -267,5 +346,6 @@ private fun WantNoteBottomBar(
             icon = MainTab.Settings.icon,
             label = MainTab.Settings.label,
         )
+    }
     }
 }

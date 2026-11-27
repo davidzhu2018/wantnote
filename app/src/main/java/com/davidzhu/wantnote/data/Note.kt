@@ -24,4 +24,13 @@ data class Note(
      * Dinox / 云同步快照分发；远端合并进来的笔记保留本地原归属。
      */
     val boxId: String = "",
+    /** 0.18.0：笔记关联的地点 POI（高德/腾讯地图或自定义位置，朋友圈视图展示）。 */
+    val locationName: String = "",
+    val locationAddress: String = "",
+    val locationLat: Double = 0.0,
+    val locationLng: Double = 0.0,
+    /** 0.19.0：置顶（任意视图始终排在最前面）与星标（搜索页支持星标筛选）。 */
+    val pinned: Boolean = false,
+    val starred: Boolean = false,
+    val reviewed: Boolean = false,
 )

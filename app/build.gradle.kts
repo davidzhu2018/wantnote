@@ -36,8 +36,8 @@ android {
         applicationId = "com.davidzhu.wantnote"
         minSdk = 24
         targetSdk = 36
-        versionCode = 13
-        versionName = "0.13.0"
+        versionCode = 28
+        versionName = "0.20.1"
     }
 
     signingConfigs {
@@ -95,12 +95,15 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-icons:0.9.4")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
-    implementation("androidx.core:core-ktx:1.15.0")
-    implementation("androidx.activity:activity-compose:1.9.3")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
-    implementation("androidx.navigation:navigation-compose:2.8.3")
+    // 0.14.0：升级 activity-compose（及配套 core / lifecycle / navigation），为 Miuix 0.9.4
+    // WindowDialog 注册 NavigationBackHandler 提供 NavigationEventDispatcherOwner，
+    // 修复 0.13.0 详情页点击卡片盒名或标签行加号弹窗闪退。
+    implementation("androidx.core:core-ktx:1.19.1")
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.1")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.1")
+    implementation("androidx.navigation:navigation-compose:2.10.2")
 
     implementation("androidx.room:room-runtime:2.8.5")
     implementation("androidx.room:room-ktx:2.8.5")

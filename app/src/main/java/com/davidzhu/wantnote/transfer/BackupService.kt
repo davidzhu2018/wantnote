@@ -5,9 +5,13 @@ import androidx.room.withTransaction
 import com.davidzhu.wantnote.data.AiProvider
 import com.davidzhu.wantnote.data.AppSettings
 import com.davidzhu.wantnote.data.BlockType
+import com.davidzhu.wantnote.data.DinoxCachedBox
+import com.davidzhu.wantnote.data.DinoxSyncRule
 import com.davidzhu.wantnote.data.MediaStorage
+import com.davidzhu.wantnote.sync.dinox.DinoxBoxSyncWorker
 import com.davidzhu.wantnote.data.Note
 import com.davidzhu.wantnote.data.NoteBlock
+import com.davidzhu.wantnote.data.NoteBox
 import com.davidzhu.wantnote.data.NoteDatabase
 import com.davidzhu.wantnote.data.NoteLink
 import com.davidzhu.wantnote.data.NoteLinkCodec
@@ -76,6 +80,9 @@ class BackupService(
             val allTags = notes.getAllTags()
             val refs = notes.getAllCrossRefs()
             val allLinks = notes.getAllLinks()
+            val allBoxes = notes.getAllBoxes()
+            val allSyncRules = db.dinoxSyncRuleDao().getAll()
+            val allDinoxBoxes = db.dinoxBoxDao().getAll()
 
             val files = LinkedHashMap<String, File>()
             val included = LinkedHashSet<String>()
@@ -117,6 +124,8 @@ class BackupService(
                 tags = allTags.size,
                 noteTags = refs.size,
                 links = allLinks.size,
+                boxes = allBoxes.size,
+                dinoxSyncRules = allSyncRules.size,
                 attachments = included.size,
                 fonts = fontFiles.size,
             )
@@ -129,11 +138,14 @@ class BackupService(
                 }
 
                 putBytes(BackupManifest.MANIFEST_ENTRY, manifest.toText())
-                putBytes("data/notes.json", notesToJson(allNotes))
+                putBytes("data/notes.json", notesToJson(allNotes, allBoxes))
                 putBytes("data/blocks.json", blocksToJson(allBlocks))
                 putBytes("data/tags.json", tagsToJson(allTags))
                 putBytes("data/note_tags.json", refsToJson(refs))
                 putBytes("data/note_links.json", linksToJson(allLinks))
+                putBytes("data/note_boxes.json", boxesToJson(allBoxes))
+                putBytes("data/dinox_sync_rules.json", syncRulesToJson(allSyncRules, allBoxes))
+                putBytes("data/dinox_cached_boxes.json", dinoxBoxesToJson(allDinoxBoxes))
                 putBytes("data/settings.json", settingsToJson(settings))
                 putBytes("data/ai_providers.json", providersToJson(providers))
 
@@ -200,7 +212,27 @@ class BackupService(
             }
         }
 
-        val noteList = parseNotes(readText(zip, byName.getValue("data/notes.json")))
+        val rawNotes = parseNotes(readText(zip, byName.getValue("data/notes.json")))
+        // note_boxes.json 为可选文件，兼容 0.13.0 及更早未含卡片盒的旧备份。
+        val storedBoxes = byName["data/note_boxes.json"]?.let { entry ->
+            parseBoxes(readText(zip, entry))
+        }.orEmpty()
+        val rawSyncRules = byName["data/dinox_sync_rules.json"]?.let { entry ->
+            parseSyncRules(readText(zip, entry))
+        }.orEmpty()
+        val storedDinoxBoxes = byName["data/dinox_cached_boxes.json"]?.let { entry ->
+            parseDinoxBoxes(readText(zip, entry))
+        }.orEmpty()
+        val boxPlan = BackupBoxPlan.prepare(
+            boxes = storedBoxes,
+            notes = rawNotes.map { it.note },
+            noteBoxNames = rawNotes.associate { it.note.id to it.boxName },
+            syncRules = rawSyncRules.map { it.rule },
+            ruleTargetBoxNames = rawSyncRules.associate { it.rule.id to it.targetBoxName },
+            now = System.currentTimeMillis(),
+        )
+        val noteList = boxPlan.notes
+        val syncRuleList = boxPlan.syncRules
         val blockList = parseBlocks(readText(zip, byName.getValue("data/blocks.json")))
         val tagList = parseTags(readText(zip, byName.getValue("data/tags.json")))
         val refList = parseRefs(readText(zip, byName.getValue("data/note_tags.json")))
@@ -269,9 +301,15 @@ class BackupService(
             db.noteLinkDao().deleteAll()
             db.blockDao().deleteAll()
             db.noteDao().deleteAll()
+            db.noteBoxDao().deleteAll()
+            db.dinoxSyncRuleDao().deleteAll()
+            db.dinoxBoxDao().deleteAll()
             db.tagDao().deleteAll()
             db.aiProviderDao().deleteAll()
 
+            if (boxPlan.boxes.isNotEmpty()) db.noteBoxDao().upsertAll(boxPlan.boxes)
+            if (syncRuleList.isNotEmpty()) db.dinoxSyncRuleDao().upsertAll(syncRuleList)
+            if (storedDinoxBoxes.isNotEmpty()) db.dinoxBoxDao().upsertAll(storedDinoxBoxes)
             if (noteList.isNotEmpty()) db.noteDao().upsertAll(noteList)
             if (validBlocks.isNotEmpty()) {
                 db.blockDao().upsertAll(
@@ -291,6 +329,7 @@ class BackupService(
         // 保证正文源文件与数据库一致；再尝试导入随设置恢复的 Dinox Token。
         runCatching { notes.ensureMarkdownFiles() }
         runCatching { dinox?.importSealedToken() }
+        runCatching { DinoxBoxSyncWorker.syncAllSchedules(context, syncRuleList) }
 
         return RestoreResult(
             notes = noteList.size,
@@ -321,16 +360,73 @@ class BackupService(
 
     // ---- JSON 序列化 -----------------------------------------------------
 
-    private fun notesToJson(items: List<Note>): String = JSONArray().also { arr ->
-        items.forEach { note ->
+    private fun notesToJson(items: List<Note>, boxes: List<NoteBox>): String {
+        val boxNameById = boxes.associate { it.id to it.name }
+        return JSONArray().also { arr ->
+            items.forEach { note ->
+                arr.put(
+                    JSONObject()
+                        .put("id", note.id)
+                        .put("title", note.title)
+                        .put("body", note.body)
+                        .put("mdPath", note.mdPath)
+                        .put("boxId", note.boxId)
+                        .put("boxName", boxNameById[note.boxId].orEmpty())
+                        .put("locationName", note.locationName)
+                        .put("locationAddress", note.locationAddress)
+                        .put("locationLat", note.locationLat)
+                        .put("locationLng", note.locationLng)
+                        .put("pinned", note.pinned)
+                        .put("starred", note.starred)
+                        .put("createdAt", note.createdAt)
+                        .put("updatedAt", note.updatedAt),
+                )
+            }
+        }.toString()
+    }
+
+    private fun boxesToJson(items: List<NoteBox>): String = JSONArray().also { arr ->
+        items.forEach { box ->
             arr.put(
                 JSONObject()
-                    .put("id", note.id)
-                    .put("title", note.title)
-                    .put("body", note.body)
-                    .put("mdPath", note.mdPath)
-                    .put("createdAt", note.createdAt)
-                    .put("updatedAt", note.updatedAt),
+                    .put("id", box.id)
+                    .put("name", box.name)
+                    .put("createdAt", box.createdAt),
+            )
+        }
+    }.toString()
+
+    private fun syncRulesToJson(items: List<DinoxSyncRule>, boxes: List<NoteBox>): String {
+        val boxNameById = boxes.associate { it.id to it.name }
+        return JSONArray().also { arr ->
+            items.forEach { rule ->
+                arr.put(
+                    JSONObject()
+                        .put("id", rule.id)
+                        .put("ruleType", rule.ruleType)
+                        .put("sourceBoxesJson", rule.sourceBoxesJson)
+                        .put("targetBoxId", rule.targetBoxId)
+                        .put("targetBoxName", boxNameById[rule.targetBoxId].orEmpty())
+                        .put("followDinoxName", rule.followDinoxName)
+                        .put("syncMode", rule.syncMode)
+                        .put("autoIntervalMinutes", rule.autoIntervalMinutes)
+                        .put("lastSyncAt", rule.lastSyncAt)
+                        .put("lastRunAt", rule.lastRunAt)
+                        .put("lastStatus", rule.lastStatus)
+                        .put("createdAt", rule.createdAt)
+                        .put("updatedAt", rule.updatedAt),
+                )
+            }
+        }.toString()
+    }
+
+    private fun dinoxBoxesToJson(items: List<DinoxCachedBox>): String = JSONArray().also { arr ->
+        items.forEach { box ->
+            arr.put(
+                JSONObject()
+                    .put("name", box.name)
+                    .put("fetchedAt", box.fetchedAt)
+                    .put("remoteId", box.remoteId),
             )
         }
     }.toString()
@@ -434,19 +530,105 @@ class BackupService(
         .put("dinoxAutoSyncMinutes", settings.dinoxAutoSyncMinutes)
         .put("markdownMigrationDone", settings.markdownMigrationDone)
         .put("dinoxBoxesFetchedAt", settings.dinoxBoxesFetchedAt)
+        .put("aiEnableTitle", settings.aiEnableTitle)
+        .put("aiEnableTag", settings.aiEnableTag)
+        .put("aiEnableBox", settings.aiEnableBox)
+        .put("aiEnableSummary", settings.aiEnableSummary)
+        .put("aiEnableInsight", settings.aiEnableInsight)
+        .put("autoCheckUpdate", settings.autoCheckUpdate)
+        .put("profileNickname", settings.profileNickname)
+        .put("profileAvatarPath", settings.profileAvatarPath)
+        .put("heatmapColorHex", settings.heatmapColorHex)
+        .put("uiStyle", settings.uiStyle)
+        .put("mapProvider", settings.mapProvider)
+        .put("mapApiKey", settings.mapApiKey)
+        .put("flomoMcpUrl", settings.flomoMcpUrl)
+        .put("flomoMcpToken", settings.flomoMcpToken)
+        .put("flomoWebhookUrl", settings.flomoWebhookUrl)
+        .put("flomoLastSyncAt", settings.flomoLastSyncAt)
+        .put("dedaoMcpUrl", settings.dedaoMcpUrl)
+        .put("dedaoMcpToken", settings.dedaoMcpToken)
+        .put("dedaoLastSyncAt", settings.dedaoLastSyncAt)
+        .put("readwiseToken", settings.readwiseToken)
+        .put("readwiseCategoryBoxesJson", settings.readwiseCategoryBoxesJson)
+        .put("readwiseAutoSyncMinutes", settings.readwiseAutoSyncMinutes)
+        .put("readwiseLastSyncAt", settings.readwiseLastSyncAt)
+        .put("wereadApiKey", settings.wereadApiKey)
+        .put("wereadBoxId", settings.wereadBoxId)
+        .put("wereadAutoSyncMinutes", settings.wereadAutoSyncMinutes)
+        .put("wereadLastSyncAt", settings.wereadLastSyncAt)
         .toString()
 
     // ---- JSON 反序列化（缺字段用当前默认值，兼容未来/旧版备份） -------------
 
-    private fun parseNotes(text: String): List<Note> =
+    private data class ParsedBackupNote(
+        val note: Note,
+        val boxName: String,
+    )
+
+    private fun parseNotes(text: String): List<ParsedBackupNote> =
         JSONArray(text).objects { obj ->
-            Note(
+            ParsedBackupNote(
+                note = Note(
+                    id = obj.getString("id"),
+                    title = obj.optString("title"),
+                    body = obj.optString("body"),
+                    createdAt = obj.optLong("createdAt"),
+                    updatedAt = obj.optLong("updatedAt"),
+                    mdPath = obj.optString("mdPath"),
+                    boxId = obj.optString("boxId"),
+                    locationName = obj.optString("locationName"),
+                    locationAddress = obj.optString("locationAddress"),
+                    locationLat = obj.optDouble("locationLat", 0.0),
+                    locationLng = obj.optDouble("locationLng", 0.0),
+                    pinned = obj.optBoolean("pinned", false),
+                    starred = obj.optBoolean("starred", false),
+                ),
+                boxName = obj.optString("boxName"),
+            )
+        }
+
+    private fun parseBoxes(text: String): List<NoteBox> =
+        JSONArray(text).objects { obj ->
+            NoteBox(
                 id = obj.getString("id"),
-                title = obj.optString("title"),
-                body = obj.optString("body"),
+                name = obj.optString("name"),
                 createdAt = obj.optLong("createdAt"),
-                updatedAt = obj.optLong("updatedAt"),
-                mdPath = obj.optString("mdPath"),
+            )
+        }
+
+    private data class ParsedSyncRule(
+        val rule: DinoxSyncRule,
+        val targetBoxName: String,
+    )
+
+    private fun parseSyncRules(text: String): List<ParsedSyncRule> =
+        JSONArray(text).objects { obj ->
+            ParsedSyncRule(
+                rule = DinoxSyncRule(
+                    id = obj.getString("id"),
+                    ruleType = obj.optString("ruleType"),
+                    sourceBoxesJson = obj.optString("sourceBoxesJson", "[]"),
+                    targetBoxId = obj.optString("targetBoxId"),
+                    followDinoxName = obj.optBoolean("followDinoxName", false),
+                    syncMode = obj.optString("syncMode"),
+                    autoIntervalMinutes = obj.optInt("autoIntervalMinutes", 0),
+                    lastSyncAt = obj.optLong("lastSyncAt", 0L),
+                    lastRunAt = obj.optLong("lastRunAt", 0L),
+                    lastStatus = obj.optString("lastStatus"),
+                    createdAt = obj.optLong("createdAt", 0L),
+                    updatedAt = obj.optLong("updatedAt", 0L),
+                ),
+                targetBoxName = obj.optString("targetBoxName"),
+            )
+        }
+
+    private fun parseDinoxBoxes(text: String): List<DinoxCachedBox> =
+        JSONArray(text).objects { obj ->
+            DinoxCachedBox(
+                name = obj.getString("name"),
+                fetchedAt = obj.optLong("fetchedAt", 0L),
+                remoteId = obj.optString("remoteId"),
             )
         }
 
@@ -546,6 +728,33 @@ class BackupService(
             dinoxAutoSyncMinutes = obj.optInt("dinoxAutoSyncMinutes", default.dinoxAutoSyncMinutes),
             markdownMigrationDone = obj.optBoolean("markdownMigrationDone", default.markdownMigrationDone),
             dinoxBoxesFetchedAt = obj.optLong("dinoxBoxesFetchedAt", default.dinoxBoxesFetchedAt),
+            aiEnableTitle = obj.optBoolean("aiEnableTitle", default.aiEnableTitle),
+            aiEnableTag = obj.optBoolean("aiEnableTag", default.aiEnableTag),
+            aiEnableBox = obj.optBoolean("aiEnableBox", default.aiEnableBox),
+            aiEnableSummary = obj.optBoolean("aiEnableSummary", default.aiEnableSummary),
+            aiEnableInsight = obj.optBoolean("aiEnableInsight", default.aiEnableInsight),
+            autoCheckUpdate = obj.optBoolean("autoCheckUpdate", default.autoCheckUpdate),
+            profileNickname = obj.optString("profileNickname", default.profileNickname),
+            profileAvatarPath = obj.optString("profileAvatarPath", default.profileAvatarPath),
+            heatmapColorHex = obj.optString("heatmapColorHex", default.heatmapColorHex),
+            uiStyle = obj.optString("uiStyle", default.uiStyle),
+            mapProvider = obj.optString("mapProvider", default.mapProvider),
+            mapApiKey = obj.optString("mapApiKey", default.mapApiKey),
+            flomoMcpUrl = obj.optString("flomoMcpUrl", default.flomoMcpUrl),
+            flomoMcpToken = obj.optString("flomoMcpToken", default.flomoMcpToken),
+            flomoWebhookUrl = obj.optString("flomoWebhookUrl", default.flomoWebhookUrl),
+            flomoLastSyncAt = obj.optLong("flomoLastSyncAt", default.flomoLastSyncAt),
+            dedaoMcpUrl = obj.optString("dedaoMcpUrl", default.dedaoMcpUrl),
+            dedaoMcpToken = obj.optString("dedaoMcpToken", default.dedaoMcpToken),
+            dedaoLastSyncAt = obj.optLong("dedaoLastSyncAt", default.dedaoLastSyncAt),
+            readwiseToken = obj.optString("readwiseToken", default.readwiseToken),
+            readwiseCategoryBoxesJson = obj.optString("readwiseCategoryBoxesJson", default.readwiseCategoryBoxesJson),
+            readwiseAutoSyncMinutes = obj.optInt("readwiseAutoSyncMinutes", default.readwiseAutoSyncMinutes),
+            readwiseLastSyncAt = obj.optLong("readwiseLastSyncAt", default.readwiseLastSyncAt),
+            wereadApiKey = obj.optString("wereadApiKey", default.wereadApiKey),
+            wereadBoxId = obj.optString("wereadBoxId", default.wereadBoxId),
+            wereadAutoSyncMinutes = obj.optInt("wereadAutoSyncMinutes", default.wereadAutoSyncMinutes),
+            wereadLastSyncAt = obj.optLong("wereadLastSyncAt", default.wereadLastSyncAt),
         )
     }
 
@@ -568,5 +777,125 @@ class BackupService(
 
     companion object {
         private const val MAX_JSON_BYTES = 64L * 1024 * 1024
+    }
+}
+
+internal data class PreparedBoxRestore(
+    val boxes: List<NoteBox>,
+    val notes: List<Note>,
+    val syncRules: List<DinoxSyncRule> = emptyList(),
+)
+
+/**
+ * 0.14.0：备份恢复时的卡片盒规划器（纯 Kotlin，可直接 JVM 单测）。
+ *
+ * - 始终保证默认「暂存箱」（[NoteBox.DEFAULT_ID]）存在；
+ * - 按卡片盒名称去重，避免违反 `note_boxes.name` 唯一索引，并把重名盒子的笔记重映射到存活 ID；
+ * - 若笔记携带了 `boxName` 但 `note_boxes.json` 缺失该盒，则自动补建该卡片盒，确保归属不丢失。
+ */
+internal object BackupBoxPlan {
+    fun prepare(
+        boxes: List<NoteBox>,
+        notes: List<Note>,
+        noteBoxNames: Map<String, String> = emptyMap(),
+        syncRules: List<DinoxSyncRule> = emptyList(),
+        ruleTargetBoxNames: Map<String, String> = emptyMap(),
+        now: Long = 0L,
+    ): PreparedBoxRestore {
+        val byName = LinkedHashMap<String, NoteBox>()
+        val idRemap = HashMap<String, String>()
+
+        // 先纳入所有备份里的卡片盒（规范化名称并按名称去重）。
+        boxes.forEach { raw ->
+            val name = raw.name.trim()
+            if (name.isEmpty()) return@forEach
+            val existing = byName[name]
+            if (existing != null) {
+                idRemap[raw.id] = existing.id
+            } else {
+                val normalized = if (name == NoteBox.DEFAULT_NAME) {
+                    raw.copy(id = NoteBox.DEFAULT_ID, name = NoteBox.DEFAULT_NAME)
+                } else {
+                    raw.copy(name = name)
+                }
+                byName[name] = normalized
+                idRemap[raw.id] = normalized.id
+            }
+        }
+
+        // 确保默认「暂存箱」一定存在。
+        if (!byName.containsKey(NoteBox.DEFAULT_NAME)) {
+            byName[NoteBox.DEFAULT_NAME] = NoteBox(
+                id = NoteBox.DEFAULT_ID,
+                name = NoteBox.DEFAULT_NAME,
+                createdAt = 0L,
+            )
+        }
+        idRemap[NoteBox.DEFAULT_ID] = byName.getValue(NoteBox.DEFAULT_NAME).id
+
+        val validIds = byName.values.mapTo(HashSet()) { it.id }
+
+        // 遍历笔记：映射 boxId；若 note_boxes.json 漏了某个盒子但笔记带了 boxName，则就地补建。
+        val remappedNotes = notes.map { note ->
+            val rawBoxId = note.boxId.trim()
+            val rawBoxName = noteBoxNames[note.id].orEmpty().trim()
+            val targetBoxId = when {
+                rawBoxId.isNotEmpty() && idRemap.containsKey(rawBoxId) -> idRemap.getValue(rawBoxId)
+                rawBoxId.isNotEmpty() && rawBoxId in validIds -> rawBoxId
+                rawBoxName.isNotEmpty() -> {
+                    val existing = byName[rawBoxName]
+                    if (existing != null) {
+                        existing.id
+                    } else {
+                        val createdId = rawBoxId.ifEmpty { "box_restored_${byName.size}" }
+                        val created = NoteBox(
+                            id = createdId,
+                            name = rawBoxName,
+                            createdAt = now,
+                        )
+                        byName[rawBoxName] = created
+                        validIds += created.id
+                        if (rawBoxId.isNotEmpty()) idRemap[rawBoxId] = created.id
+                        created.id
+                    }
+                }
+                else -> ""
+            }
+            if (targetBoxId == note.boxId) note else note.copy(boxId = targetBoxId)
+        }
+
+        val remappedRules = syncRules.map { rule ->
+            if (rule.followDinoxName) {
+                rule.copy(targetBoxId = "")
+            } else {
+                val rawTargetId = rule.targetBoxId.trim()
+                val rawTargetName = ruleTargetBoxNames[rule.id].orEmpty().trim()
+                val mappedTargetId = when {
+                    rawTargetId.isNotEmpty() && idRemap.containsKey(rawTargetId) -> idRemap.getValue(rawTargetId)
+                    rawTargetId.isNotEmpty() && rawTargetId in validIds -> rawTargetId
+                    rawTargetName.isNotEmpty() -> {
+                        val existing = byName[rawTargetName]
+                        if (existing != null) {
+                            existing.id
+                        } else {
+                            val createdId = rawTargetId.ifEmpty { "box_restored_${byName.size}" }
+                            val created = NoteBox(id = createdId, name = rawTargetName, createdAt = now)
+                            byName[rawTargetName] = created
+                            validIds += created.id
+                            if (rawTargetId.isNotEmpty()) idRemap[rawTargetId] = created.id
+                            created.id
+                        }
+                    }
+                    else -> rawTargetId
+                }
+                if (mappedTargetId == rule.targetBoxId) rule else rule.copy(targetBoxId = mappedTargetId)
+            }
+        }
+
+        return PreparedBoxRestore(
+            boxes = byName.values.toList(),
+            notes = remappedNotes,
+            syncRules = remappedRules,
+        )
     }
 }

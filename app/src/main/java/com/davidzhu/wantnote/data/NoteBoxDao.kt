@@ -27,6 +27,12 @@ interface NoteBoxDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIfAbsent(box: NoteBox): Long
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(boxes: List<NoteBox>)
+
+    @Query("DELETE FROM note_boxes")
+    suspend fun deleteAll()
+
     @Update
     suspend fun update(box: NoteBox)
 

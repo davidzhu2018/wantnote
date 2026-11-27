@@ -4,6 +4,9 @@
 
     <!-- AI 提炼、自动标题/标签、拉取模型需要访问外部接口。密钥只存在本机。 -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 0.18.0：编辑器位置工具获取当前坐标与附近 POI。 -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <!--
       笔记数据（数据库 + 附件）保存在用户可见的 Documents/WantNote，卸载后仍能找回。

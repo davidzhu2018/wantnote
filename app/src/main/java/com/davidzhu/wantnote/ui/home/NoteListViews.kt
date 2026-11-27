@@ -13,9 +13,46 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.LocationOn
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import com.davidzhu.wantnote.ui.components.WantCheckbox
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import com.davidzhu.wantnote.data.BlockType
+import com.davidzhu.wantnote.transfer.MarkdownCodec
+import com.davidzhu.wantnote.ui.LocalMedia
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.basic.Icon
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -24,13 +61,18 @@ import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.material3.MaterialTheme
-import com.davidzhu.wantnote.ui.components.WantSurface
+import com.davidzhu.wantnote.data.LiquidGlassSurfaceRole
+import com.davidzhu.wantnote.data.UiStyle
+import com.davidzhu.wantnote.ui.theme.LocalUiStyle
+import com.davidzhu.wantnote.ui.components.liquidGlassSurface
 import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -49,7 +91,7 @@ import com.davidzhu.wantnote.ui.components.TagChipRow
  * card plus a hairline top edge, so each note card reads as lifted off the
  * paper background instead of flat against it.
  */
-private val NoteCardShape = RoundedCornerShape(16.dp)
+private val NoteCardShape = RoundedCornerShape(20.dp)
 
 @Composable
 private fun Modifier.noteCardShadow(elevation: Int): Modifier {
@@ -68,20 +110,96 @@ private fun NoteCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
-    elevation: Int = 8,
+    elevation: Int = 11,
+    multiSelectMode: Boolean = false,
+    selected: Boolean = false,
+    onToggleSelect: () -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    WantSurface(
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val isCoui = LocalUiStyle.current == UiStyle.COUI
+    val shape = if (isCoui) RoundedCornerShape(24.dp) else NoteCardShape
+    // MiuiX 保持高对比立体浮起；COUI 使用 ColorOS 17 纯净白/深灰凝光卡片与 24dp 大圆角。
+    val liftedSurface = if (isCoui) {
+        if (isDark) {
+            lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.06f)
+        } else {
+            lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.78f)
+        }
+    } else if (isDark) {
+        lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.14f)
+    } else {
+        lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.80f)
+    }
+    val cardElevation = maxOf(elevation, 13)
+    val selectedBorder = if (multiSelectMode && selected) {
+        Modifier.border(2.dp, MaterialTheme.colorScheme.primary, shape)
+    } else {
+        Modifier
+    }
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .noteCardShadow(elevation)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-        shape = NoteCardShape,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        tonalElevation = 2.dp,
-        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)),
+            .liquidGlassSurface(
+                shape = shape,
+                role = LiquidGlassSurfaceRole.CARD,
+                baseColor = liftedSurface,
+                elevationOverride = cardElevation.dp,
+                borderWidth = 1.3.dp,
+            )
+            .then(selectedBorder)
+            .combinedClickable(
+                onClick = { if (multiSelectMode) onToggleSelect() else onClick() },
+                onLongClick = { if (multiSelectMode) onToggleSelect() else onLongClick() },
+            ),
     ) {
-        Column(content = content)
+        Column(modifier = Modifier.fillMaxWidth(), content = content)
+        if (multiSelectMode) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
+                    .padding(2.dp),
+            ) {
+                WantCheckbox(
+                    checked = selected,
+                    onCheckedChange = { onToggleSelect() },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NoteStatusBadges(
+    pinned: Boolean,
+    starred: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    if (!pinned && !starred) return
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        if (pinned) {
+            Icon(
+                imageVector = Icons.Outlined.PushPin,
+                contentDescription = "已置顶",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+        if (starred) {
+            Icon(
+                imageVector = Icons.Rounded.Star,
+                contentDescription = "已星标",
+                tint = Color(0xFFF59E0B),
+                modifier = Modifier.size(15.dp),
+            )
+        }
     }
 }
 
@@ -94,6 +212,11 @@ fun NoteCollection(
     modifier: Modifier = Modifier,
     emptyText: String? = null,
     links: List<NoteLink> = emptyList(),
+    profileNickname: String = "",
+    profileAvatarPath: String = "",
+    multiSelectMode: Boolean = false,
+    selectedIds: Set<String> = emptySet(),
+    onToggleSelect: (String) -> Unit = {},
 ) {
     if (items.isEmpty()) {
         if (emptyText != null) {
@@ -105,11 +228,41 @@ fun NoteCollection(
         }
         return
     }
+    val ordered = remember(items) {
+        items.sortedWith(compareByDescending<NoteWithDetails> { it.note.pinned }.thenByDescending { it.note.updatedAt })
+    }
+    // 0.20.0：主页卡片懒加载分页，默认先加载 50 条，向上滑动时边滑边加载后续批次。
+    val pageSize = 50
+    var loadedCount by remember(viewMode) { mutableIntStateOf(pageSize) }
+    val visibleItems = remember(ordered, loadedCount) {
+        ordered.take(loadedCount.coerceAtMost(ordered.size))
+    }
+    val hasMore = visibleItems.size < ordered.size
+    val loadMore: () -> Unit = {
+        if (loadedCount < ordered.size) {
+            loadedCount = (loadedCount + pageSize).coerceAtMost(ordered.size)
+        }
+    }
     when (viewMode) {
-        HomeViewMode.CARD -> CardView(items, onOpenNote, onLongPressNote, links, modifier)
-        HomeViewMode.WATERFALL -> WaterfallView(items, onOpenNote, onLongPressNote, links, modifier)
-        HomeViewMode.MINIMAL -> MinimalView(items, onOpenNote, onLongPressNote, links, modifier)
-        HomeViewMode.TIMESTAMP -> TimestampView(items, onOpenNote, onLongPressNote, links, modifier)
+        HomeViewMode.CARD -> CardView(visibleItems, ordered.size, hasMore, loadMore, onOpenNote, onLongPressNote, links, multiSelectMode, selectedIds, onToggleSelect, modifier)
+        HomeViewMode.WATERFALL -> WaterfallView(visibleItems, ordered.size, hasMore, loadMore, onOpenNote, onLongPressNote, links, multiSelectMode, selectedIds, onToggleSelect, modifier)
+        HomeViewMode.MINIMAL -> MinimalView(visibleItems, ordered.size, hasMore, loadMore, onOpenNote, onLongPressNote, links, multiSelectMode, selectedIds, onToggleSelect, modifier)
+        HomeViewMode.TIMESTAMP -> TimestampView(visibleItems, ordered.size, hasMore, loadMore, onOpenNote, onLongPressNote, links, multiSelectMode, selectedIds, onToggleSelect, modifier)
+        HomeViewMode.MOMENTS -> MomentsView(
+            items = visibleItems,
+            totalCount = ordered.size,
+            hasMore = hasMore,
+            onLoadMore = loadMore,
+            onOpenNote = onOpenNote,
+            onLongPressNote = onLongPressNote,
+            links = links,
+            profileNickname = profileNickname,
+            profileAvatarPath = profileAvatarPath,
+            multiSelectMode = multiSelectMode,
+            selectedIds = selectedIds,
+            onToggleSelect = onToggleSelect,
+            modifier = modifier,
+        )
     }
 }
 
@@ -181,17 +334,24 @@ private fun PreviewText(
 }
 
 @Composable
-private fun CardView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, modifier: Modifier = Modifier) {
+private fun CardView(items: List<NoteWithDetails>, totalCount: Int, hasMore: Boolean, onLoadMore: () -> Unit, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, multiSelectMode: Boolean = false, selectedIds: Set<String> = emptySet(), onToggleSelect: (String) -> Unit = {}, modifier: Modifier = Modifier) {
+    val gridState = rememberLazyGridState()
+    LaunchedEffect(gridState, items.size, hasMore) {
+        snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .distinctUntilChanged()
+            .collect { last -> if (hasMore && last >= items.size - 8) onLoadMore() }
+    }
     val linkTitles = items.associate { it.note.id to SearchText.displayTitle(it.note) }
     LazyVerticalGrid(
+        state = gridState,
         columns = GridCells.Fixed(2),
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 28.dp),
+        contentPadding = PaddingValues(start = 14.dp, top = 10.dp, end = 14.dp, bottom = if (multiSelectMode) 104.dp else 28.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(items, key = { it.note.id }) { item ->
-            NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 8) {
+            NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 8, multiSelectMode = multiSelectMode, selected = item.note.id in selectedIds, onToggleSelect = { onToggleSelect(item.note.id) }) {
                 val media = item.firstMedia
                 if (media != null) {
                     NoteMediaThumb(
@@ -203,12 +363,20 @@ private fun CardView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit,
                     )
                 }
                 Column(modifier = Modifier.padding(14.dp)) {
-                    Text(
-                        text = SearchText.displayTitle(item.note),
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = SearchText.displayTitle(item.note),
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        NoteStatusBadges(pinned = item.note.pinned, starred = item.note.starred)
+                    }
                     val preview = SearchText.previewMarkdown(item.note)
                     PreviewText(
                         text = preview,
@@ -232,16 +400,45 @@ private fun CardView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit,
                 }
             }
         }
+        if (hasMore) {
+            item(key = "load-more-card", span = { GridItemSpan(maxLineSpan) }) {
+                LazyLoadFooter(loaded = items.size, total = totalCount, onClick = onLoadMore)
+            }
+        }
     }
 }
 
 @Composable
-private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, modifier: Modifier = Modifier) {
+private fun LazyLoadFooter(loaded: Int, total: Int, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "已加载 $loaded / $total 篇，继续上滑加载更多…",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun WaterfallView(items: List<NoteWithDetails>, totalCount: Int, hasMore: Boolean, onLoadMore: () -> Unit, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, multiSelectMode: Boolean = false, selectedIds: Set<String> = emptySet(), onToggleSelect: (String) -> Unit = {}, modifier: Modifier = Modifier) {
+    val staggeredState = rememberLazyStaggeredGridState()
+    LaunchedEffect(staggeredState, items.size, hasMore) {
+        snapshotFlow { staggeredState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .distinctUntilChanged()
+            .collect { last -> if (hasMore && last >= items.size - 8) onLoadMore() }
+    }
     val linkTitles = items.associate { it.note.id to SearchText.displayTitle(it.note) }
     LazyVerticalStaggeredGrid(
+        state = staggeredState,
         columns = StaggeredGridCells.Fixed(2),
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 28.dp),
+        contentPadding = PaddingValues(start = 14.dp, top = 10.dp, end = 14.dp, bottom = if (multiSelectMode) 104.dp else 28.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalItemSpacing = 12.dp,
     ) {
@@ -253,7 +450,7 @@ private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
                 preview.length > 20 -> 3
                 else -> 2
             }
-            NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 8) {
+            NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 8, multiSelectMode = multiSelectMode, selected = item.note.id in selectedIds, onToggleSelect = { onToggleSelect(item.note.id) }) {
                 val media = item.firstMedia
                 if (media != null) {
                     val ratio = if (media.blockType.name == "VIDEO") 16f / 9f else 1f
@@ -266,13 +463,21 @@ private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
                     )
                 }
                 Column(modifier = Modifier.padding(14.dp)) {
-                    Text(
-                        text = SearchText.displayTitle(item.note),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = SearchText.displayTitle(item.note),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        NoteStatusBadges(pinned = item.note.pinned, starred = item.note.starred)
+                    }
                     PreviewText(
                         text = preview,
                         linkTitles = linkTitles,
@@ -295,19 +500,31 @@ private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
                 }
             }
         }
+        if (hasMore) {
+            item(key = "load-more-waterfall", span = StaggeredGridItemSpan.FullLine) {
+                LazyLoadFooter(loaded = items.size, total = totalCount, onClick = onLoadMore)
+            }
+        }
     }
 }
 
 @Composable
-private fun MinimalView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, modifier: Modifier = Modifier) {
+private fun MinimalView(items: List<NoteWithDetails>, totalCount: Int, hasMore: Boolean, onLoadMore: () -> Unit, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, multiSelectMode: Boolean = false, selectedIds: Set<String> = emptySet(), onToggleSelect: (String) -> Unit = {}, modifier: Modifier = Modifier) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(listState, items.size, hasMore) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .distinctUntilChanged()
+            .collect { last -> if (hasMore && last >= items.size - 8) onLoadMore() }
+    }
     val linkTitles = items.associate { it.note.id to SearchText.displayTitle(it.note) }
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = 28.dp),
+        contentPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = if (multiSelectMode) 104.dp else 28.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         items(items, key = { it.note.id }) { item ->
-            NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 5) {
+            NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 5, multiSelectMode = multiSelectMode, selected = item.note.id in selectedIds, onToggleSelect = { onToggleSelect(item.note.id) }) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -325,12 +542,19 @@ private fun MinimalView(items: List<NoteWithDetails>, onOpenNote: (String) -> Un
                         )
                     }
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = SearchText.displayTitle(item.note),
-                            style = MaterialTheme.typography.bodyLarge,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                text = SearchText.displayTitle(item.note),
+                                style = MaterialTheme.typography.bodyLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            NoteStatusBadges(pinned = item.note.pinned, starred = item.note.starred)
+                        }
                         TagChipRow(tags = item.tags, max = 2)
                         NoteLinkFooter(
                             noteId = item.note.id,
@@ -348,19 +572,62 @@ private fun MinimalView(items: List<NoteWithDetails>, onOpenNote: (String) -> Un
                 }
             }
         }
+        if (hasMore) {
+            item(key = "load-more-minimal") {
+                LazyLoadFooter(loaded = items.size, total = totalCount, onClick = onLoadMore)
+            }
+        }
     }
 }
 
 @Composable
-private fun TimestampView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, modifier: Modifier = Modifier) {
+private fun TimestampView(
+    items: List<NoteWithDetails>,
+    totalCount: Int,
+    hasMore: Boolean,
+    onLoadMore: () -> Unit,
+    onOpenNote: (String) -> Unit,
+    onLongPressNote: (String) -> Unit,
+    links: List<NoteLink>,
+    multiSelectMode: Boolean = false,
+    selectedIds: Set<String> = emptySet(),
+    onToggleSelect: (String) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     val linkTitles = items.associate { it.note.id to SearchText.displayTitle(it.note) }
-    val grouped = items.groupBy { Dates.dayKey(it.note.updatedAt) }
+    val pinnedNotes = items.filter { it.note.pinned }
+    val normalNotes = items.filter { !it.note.pinned }
+    val grouped = normalNotes.groupBy { Dates.dayKey(it.note.updatedAt) }
     val keys = grouped.keys.toList()
+    val listState = rememberLazyListState()
+    LaunchedEffect(listState, items.size, hasMore) {
+        snapshotFlow {
+            val totalRendered = listState.layoutInfo.totalItemsCount
+            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            last to totalRendered
+        }.distinctUntilChanged().collect { (last, totalRendered) ->
+            if (hasMore && totalRendered > 0 && last >= totalRendered - 8) onLoadMore()
+        }
+    }
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = 28.dp),
+        contentPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = if (multiSelectMode) 104.dp else 28.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        if (pinnedNotes.isNotEmpty()) {
+            item(key = "header-pinned") {
+                Text(
+                    text = "置顶",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+                )
+            }
+            items(pinnedNotes, key = { it.note.id }) { item ->
+                TimestampNoteRow(item, linkTitles, links, onOpenNote, onLongPressNote, multiSelectMode, item.note.id in selectedIds) { onToggleSelect(item.note.id) }
+            }
+        }
         keys.forEach { key ->
             val dayNotes = grouped.getValue(key)
             val dayLabel = Dates.formatDay(dayNotes.first().note.updatedAt)
@@ -373,54 +640,372 @@ private fun TimestampView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
                 )
             }
             items(dayNotes, key = { it.note.id }) { item ->
-                NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 5) {
-                    Row(
+                TimestampNoteRow(item, linkTitles, links, onOpenNote, onLongPressNote, multiSelectMode, item.note.id in selectedIds) { onToggleSelect(item.note.id) }
+            }
+        }
+        if (hasMore) {
+            item(key = "load-more-ts") {
+                LazyLoadFooter(loaded = items.size, total = totalCount, onClick = onLoadMore)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimestampNoteRow(
+    item: NoteWithDetails,
+    linkTitles: Map<String, String>,
+    links: List<NoteLink>,
+    onOpenNote: (String) -> Unit,
+    onLongPressNote: (String) -> Unit,
+    multiSelectMode: Boolean,
+    selected: Boolean,
+    onToggleSelect: () -> Unit,
+) {
+    NoteCard(
+        onClick = { onOpenNote(item.note.id) },
+        onLongClick = { onLongPressNote(item.note.id) },
+        elevation = 5,
+        multiSelectMode = multiSelectMode,
+        selected = selected,
+        onToggleSelect = onToggleSelect,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            val media = item.firstMedia
+            if (media != null) {
+                NoteMediaThumb(
+                    media = media,
+                    modifier = Modifier
+                        .padding(end = 12.dp, top = 4.dp)
+                        .size(56.dp),
+                    corner = 6.dp,
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = Dates.formatTimestamp(item.note.updatedAt),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    NoteStatusBadges(pinned = item.note.pinned, starred = item.note.starred)
+                }
+                Text(
+                    text = SearchText.displayTitle(item.note),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+                val preview = SearchText.previewMarkdown(item.note)
+                PreviewText(
+                    text = preview,
+                    linkTitles = linkTitles,
+                    maxLines = 2,
+                )
+                TagChipRow(tags = item.tags, modifier = Modifier.padding(top = 6.dp), max = 3)
+                NoteLinkFooter(
+                    noteId = item.note.id,
+                    links = links,
+                    linkTitles = linkTitles,
+                    onOpenNote = onOpenNote,
+                )
+            }
+        }
+    }
+}
+
+
+/**
+ * 0.17.2：仿微信朋友圈视图。
+ * 展示用户头像、昵称、正文前 200 字、最多 9 张图片九宫格以及发布时间。
+ */
+@Composable
+private fun MomentsView(
+    items: List<NoteWithDetails>,
+    totalCount: Int,
+    hasMore: Boolean,
+    onLoadMore: () -> Unit,
+    onOpenNote: (String) -> Unit,
+    onLongPressNote: (String) -> Unit,
+    links: List<NoteLink>,
+    profileNickname: String,
+    profileAvatarPath: String,
+    multiSelectMode: Boolean = false,
+    selectedIds: Set<String> = emptySet(),
+    onToggleSelect: (String) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    val media = LocalMedia.current
+    val linkTitles = remember(items) { items.associate { it.note.id to SearchText.displayTitle(it.note) } }
+    val displayName = profileNickname.trim().ifBlank { "想记用户" }
+    val avatarBitmap by produceState<Bitmap?>(initialValue = null, profileAvatarPath) {
+        value = if (profileAvatarPath.isBlank()) {
+            null
+        } else {
+            withContext(Dispatchers.IO) { media.loadPreview(profileAvatarPath, maxSide = 256) }
+        }
+    }
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val nicknameColor = if (isDark) Color(0xFF7DA7D9) else Color(0xFF576B95)
+
+    val listState = rememberLazyListState()
+    LaunchedEffect(listState, items.size, hasMore) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .distinctUntilChanged()
+            .collect { last -> if (hasMore && last >= items.size - 8) onLoadMore() }
+    }
+    LazyColumn(
+        state = listState,
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 14.dp, top = 8.dp, end = 14.dp, bottom = if (multiSelectMode) 104.dp else 28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(items, key = { it.note.id }) { item ->
+            val images = remember(item.note.id, item.note.body, item.blocks) {
+                extractMomentImages(item)
+            }
+            val bodyExcerpt = remember(item.note.id, item.note.title, item.note.body) {
+                extractMomentsExcerpt(item.note.body, maxChars = 200)
+            }
+            NoteCard(
+                onClick = { onOpenNote(item.note.id) },
+                onLongClick = { onLongPressNote(item.note.id) },
+                elevation = 7,
+                multiSelectMode = multiSelectMode,
+                selected = item.note.id in selectedIds,
+                onToggleSelect = { onToggleSelect(item.note.id) },
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    // 左侧用户头像（圆角方形，仿微信朋友圈）
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.Top,
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        val media = item.firstMedia
-                        if (media != null) {
-                            NoteMediaThumb(
-                                media = media,
-                                modifier = Modifier
-                                    .padding(end = 12.dp, top = 4.dp)
-                                    .size(56.dp),
-                                corner = 6.dp,
+                        val bmp = avatarBitmap
+                        if (bmp != null) {
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = displayName,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
                             )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = Dates.formatTimestamp(item.note.updatedAt),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                            Text(
-                                text = SearchText.displayTitle(item.note),
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(top = 2.dp),
-                            )
-                            val preview = SearchText.previewMarkdown(item.note)
-                            PreviewText(
-                                text = preview,
-                                linkTitles = linkTitles,
-                                maxLines = 2,
-                            )
-                            TagChipRow(tags = item.tags, modifier = Modifier.padding(top = 6.dp), max = 3)
-                            NoteLinkFooter(
-                                noteId = item.note.id,
-                                links = links,
-                                linkTitles = linkTitles,
-                                onOpenNote = onOpenNote,
+                        } else {
+                            Icon(
+                                imageVector = Icons.Outlined.Person,
+                                contentDescription = displayName,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(26.dp),
                             )
                         }
                     }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                text = displayName,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = nicknameColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            NoteStatusBadges(pinned = item.note.pinned, starred = item.note.starred)
+                        }
+                        if (item.note.title.isNotBlank()) {
+                            Text(
+                                text = item.note.title.trim(),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(top = 4.dp),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (bodyExcerpt.isNotBlank()) {
+                            MarkdownText(
+                                text = bodyExcerpt,
+                                linkTitles = linkTitles,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                renderInlineImages = false,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                        if (images.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            MomentsNineGrid(images = images)
+                        }
+                        TagChipRow(tags = item.tags, modifier = Modifier.padding(top = 8.dp), max = 3)
+                        if (item.note.locationName.isNotBlank()) {
+                            Row(
+                                modifier = Modifier.padding(top = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.LocationOn,
+                                    contentDescription = "位置",
+                                    tint = nicknameColor,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                                Text(
+                                    text = item.note.locationName,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = nicknameColor,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        Text(
+                            text = Dates.formatTimestamp(
+                                if (item.note.createdAt > 0L) item.note.createdAt else item.note.updatedAt,
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                        NoteLinkFooter(
+                            noteId = item.note.id,
+                            links = links,
+                            linkTitles = linkTitles,
+                            onOpenNote = onOpenNote,
+                        )
+                    }
                 }
             }
+        }
+        if (hasMore) {
+            item(key = "load-more-moments") {
+                LazyLoadFooter(loaded = items.size, total = totalCount, onClick = onLoadMore)
+            }
+        }
+    }
+}
+
+/** 从块列表与正文 Markdown / HTML `<img>` 中提取最多 9 张图片路径或 URL。 */
+private fun extractMomentImages(item: NoteWithDetails): List<String> {
+    val result = LinkedHashSet<String>()
+    item.blocks
+        .filter { it.blockType == BlockType.IMAGE && it.mediaPath.isNotBlank() }
+        .forEach { result += it.mediaPath.trim() }
+    val mdImgRegex = Regex("""!\[[^\]]*]\(([^)\s]+)[^)]*\)""")
+    mdImgRegex.findAll(item.note.body).forEach { m ->
+        val url = m.groupValues[1].trim()
+        if (url.isNotEmpty()) result += url
+    }
+    val htmlImgRegex = Regex("""(?i)<img\b([^>]*)>""")
+    htmlImgRegex.findAll(item.note.body).forEach { m ->
+        val url = MarkdownCodec.extractHtmlAttr(m.groupValues[1], "src").orEmpty().trim()
+        if (url.isNotEmpty()) result += url
+    }
+    return result.take(9)
+}
+
+/** 提取正文前 200 字（剥离图片源码与块级前缀，保留可读文字）。 */
+private fun extractMomentsExcerpt(body: String, maxChars: Int = 200): String {
+    val cleaned = body.trim().lineSequence()
+        .map { line ->
+            var text = line.trim()
+            text = text.removePrefix("[x] ").removePrefix("[ ] ")
+            text = text.replace(Regex("""^#{1,6}\s+"""), "")
+            text = text.replace(Regex("""^>\s?"""), "")
+            text = text.replace(Regex("""^```.*$"""), "")
+            text = text.replace(Regex("""^~~~.*$"""), "")
+            text = text.replace(Regex("""^[-*+]\s+"""), "")
+            text = text.replace(Regex("""^\d+[.)]\s+"""), "")
+            text = text.replace(Regex("""^---+$"""), "")
+            SearchText.stripImagesForPreview(text)
+        }
+        .filter { it.isNotBlank() }
+        .joinToString("\n")
+    return if (cleaned.length > maxChars) cleaned.take(maxChars) + "…" else cleaned
+}
+
+@Composable
+private fun MomentsNineGrid(images: List<String>) {
+    if (images.size == 1) {
+        MomentImageTile(
+            path = images.first(),
+            modifier = Modifier
+                .fillMaxWidth(0.72f)
+                .aspectRatio(4f / 3f),
+        )
+        return
+    }
+    val cols = if (images.size == 4) 2 else 3
+    val rows = images.chunked(cols)
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        rows.forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                row.forEach { path ->
+                    MomentImageTile(
+                        path = path,
+                        modifier = Modifier
+                            .weight(1f)
+                            .aspectRatio(1f),
+                    )
+                }
+                repeat(cols - row.size) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MomentImageTile(path: String, modifier: Modifier = Modifier) {
+    val media = LocalMedia.current
+    val bitmap by produceState<Bitmap?>(initialValue = null, path) {
+        value = withContext(Dispatchers.IO) { media.loadPreview(path, maxSide = 720) }
+    }
+    val bmp = bitmap
+    if (bmp != null) {
+        Image(
+            bitmap = bmp.asImageBitmap(),
+            contentDescription = "笔记图片",
+            modifier = modifier.clip(RoundedCornerShape(6.dp)),
+            contentScale = ContentScale.Crop,
+        )
+    } else {
+        Box(
+            modifier = modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "图片",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

@@ -133,6 +133,9 @@ class AiService(
 
     suspend fun generateSummary(corpus: String): Result<String> {
         val settings = settingsRepository.get()
+        if (!settings.aiEnableSummary) {
+            return Result.failure(AiException("AI提炼能力已关闭"))
+        }
         val providerId = settings.aiSummaryProviderId
         val modelId = settings.aiSummaryModelId
         if (providerId.isBlank() || modelId.isBlank()) {
@@ -144,8 +147,53 @@ class AiService(
         return complete(providerId, modelId, system, user)
     }
 
+    suspend fun generateDailyReport(corpus: String, dateLabel: String): Result<String> {
+        val settings = settingsRepository.get()
+        if (settings.aiSummaryProviderId.isBlank() || settings.aiSummaryModelId.isBlank()) {
+            return Result.failure(IllegalStateException("请先在「设置 → AI」里配置总结模型"))
+        }
+        return complete(
+            providerId = settings.aiSummaryProviderId,
+            modelId = settings.aiSummaryModelId,
+            system = "你是一位擅长复盘的中文个人知识助理。请基于用户今天（$dateLabel）记录的全部笔记生成一份结构清晰的「AI 日报」，包含：1) 今日核心主题；2) 关键进展与收获；3) 重要想法/摘录；4) 明日待办或行动建议。只使用笔记里的真实内容，不要编造。",
+            user = corpus.take(12_000),
+        )
+    }
+
+    suspend fun generateWeeklyReport(corpus: String, weekLabel: String): Result<String> {
+        val settings = settingsRepository.get()
+        if (settings.aiSummaryProviderId.isBlank() || settings.aiSummaryModelId.isBlank()) {
+            return Result.failure(IllegalStateException("请先在「设置 → AI」里配置总结模型"))
+        }
+        return complete(
+            providerId = settings.aiSummaryProviderId,
+            modelId = settings.aiSummaryModelId,
+            system = "你是一位擅长周度复盘的中文个人知识助理。请基于用户本自然周（$weekLabel）记录的全部笔记生成一份结构清晰的「AI 周报」，包含：1) 本周概览与主线；2) 重点成果与知识沉淀；3) 跨笔记的共性洞察与模式；4) 下周聚焦建议。只使用笔记里的真实内容，不要编造。",
+            user = corpus.take(14_000),
+        )
+    }
+
+    suspend fun generateInsight(corpus: String): Result<String> {
+        val settings = settingsRepository.get()
+        if (!settings.aiEnableInsight) {
+            return Result.failure(AiException("AI洞察能力已关闭"))
+        }
+        val providerId = settings.aiSummaryProviderId
+        val modelId = settings.aiSummaryModelId
+        if (providerId.isBlank() || modelId.isBlank()) {
+            return Result.failure(AiException("请先在设置里配置 AI，并选择用于提炼与洞察的模型"))
+        }
+        val clipped = corpus.take(12_000)
+        val system = "你是笔记洞察助手。根据用户的多篇笔记，发掘跨笔记的隐含关联、高频关注点、潜在风险与下一步行动建议（约 250 到 450 字中文）。不要编造笔记中没有的事实。只输出洞察正文，不要加寒暄。"
+        val user = if (clipped.isBlank()) "（目前没有笔记正文）" else clipped
+        return complete(providerId, modelId, system, user)
+    }
+
     suspend fun generateTitleAndTags(title: String, body: String): Result<TitleTagSuggestion> {
         val settings = settingsRepository.get()
+        if (!settings.aiEnableBox) {
+            return Result.failure(AiException("AI分配卡片盒能力已关闭"))
+        }
         val providerId = settings.aiTitleTagProviderId
         val modelId = settings.aiTitleTagModelId
         if (providerId.isBlank() || modelId.isBlank()) {
