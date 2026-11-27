@@ -256,16 +256,12 @@ private fun WantNoteBottomBar(
             label = MainTab.Calendar.label,
         )
         Box(
-            modifier = Modifier
-                .weight(1f)
-                .padding(top = 4.dp),
-            contentAlignment = Alignment.TopCenter,
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.Center,
         ) {
             WantFab(
                 onClick = onPlus,
-                modifier = Modifier
-                    .size(52.dp)
-                    .offset(y = (-6).dp),
+                modifier = Modifier.size(50.dp),
                 shape = CircleShape,
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,

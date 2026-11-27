@@ -2,6 +2,10 @@
 
 Android 速记应用。包名：`com.davidzhu.wantnote`
 
+## 0.15.0
+
+在 0.14.0 / 0.14.1 之上：修复悬浮液态玻璃底部导航栏因重复叠加系统导航栏 inset 导致图标、文字与居中加号整体偏上、下方大块留白的问题——重排 `WantNavigationBar` / `WantNavigationBarItem` 与居中加号按钮，全部条目在胶囊容器内严格上下居中对齐；延续 0.14.x 全部已验证能力（详情页改盒与加标签弹窗闪退修复、Miuix 液态玻璃立体层次与 API 24 退路、高对比度按钮与 20dp 大圆角立体卡片、主色胶囊 Tab 区分、长按弹窗圆角容器与间距优化、生态互联同行按钮等宽等高、双链蓝色下划线 `[[标题]]` 超链接与含前 100 字预览的相关链接卡片、本地备份与 WebDAV/S3 全量设置与 Dinox 同步规则同步、公开仓库检查更新）。版本 versionName 0.15.0 / versionCode 16。
+
 ## 0.14.0
 
 在 0.13.0 之上：修复详情页点击卡片盒名称与标签行「+」打开弹窗闪退的问题——根因是 Miuix 0.9.4 的 `WindowDialog` 内部注册 `NavigationBackHandler` 依赖 `NavigationEventDispatcherOwner`，而旧版 `activity-compose:1.9.3` 尚未提供该接口；本包将 `activity-compose` 升至 `1.13.0`（配套升级 `core-ktx:1.19.1`、`lifecycle:2.11.1`、`navigation-compose:2.10.2`），并在 `WantAlertDialog` 增加 `LocalNavigationEventDispatcherOwner` 兜底防护，详情页改盒/加标签及全局弹窗不再闪退。在现有 Miuix 0.9.4 基础上新增液态玻璃立体层次（悬浮胶囊底栏、居中立体加号按钮、主页四视图笔记卡片、设置分组卡片、下拉菜单、分段控件与详情页卡片盒胶囊均配备半透明玻璃底、顶部镜面高光棱边与立体阴影），并按系统版本自动分档：Android 13+（API 33+）启用 AGSL `RuntimeShader` 液态玻璃折射光泽，Android 12（API 31–32）使用磨砂玻璃质感，Android 7–11（API 24–30）自动退路到高对比纯 Compose 立体玻璃层，保持 `minSdk = 24` 且完全兼容用户主题、深色模式与字体缩放；修复首页底栏居中加号按钮图标对比度不足看不清「+」的问题；本地备份/恢复新增 `data/note_boxes.json` 及笔记 `boxId`/`boxName` 持久化（恢复时自动重建缺失卡片盒并完整还原归属，同时兼容旧版备份），本地备份/恢复与 WebDAV / S3 云同步全量覆盖所有设置项与用户配置数据（含通用/主题与自建主题/编辑器/自定义字体/AI 提供商与默认模型、卡片盒清单与笔记归属、生态互联 Dinox 卡片盒同步规则与盒缓存及双链；云同步下载时不覆盖本机 WebDAV/S3 连接凭据，并自动重建 Dinox 定时同步调度）。版本 versionName 0.14.0 / versionCode 14。

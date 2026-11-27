@@ -43,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
@@ -731,7 +732,7 @@ fun WantListItem(
     }
 }
 
-/** Miuix 底部导航栏。 */
+/** Miuix 底部导航栏（0.15.0：不再叠加内层系统底栏 inset，保证胶囊内图标与文字严格上下居中）。 */
 @Composable
 fun WantNavigationBar(
     modifier: Modifier = Modifier,
@@ -740,10 +741,19 @@ fun WantNavigationBar(
     @Suppress("UNUSED_PARAMETER") windowInsets: Any? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
-    NavigationBar(modifier = modifier, color = containerColor, content = content)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 66.dp)
+            .background(containerColor)
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        content = content,
+    )
 }
 
-/** Miuix 底部导航栏条目（ImageVector + 字符串标签）。 */
+/** Miuix 底部导航栏条目（ImageVector + 字符串标签，严格上下居中）。 */
 @Composable
 fun RowScope.WantNavigationBarItem(
     selected: Boolean,
@@ -753,14 +763,34 @@ fun RowScope.WantNavigationBarItem(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    NavigationBarItem(
-        selected = selected,
-        onClick = onClick,
-        icon = icon,
-        label = label,
-        modifier = modifier,
-        enabled = enabled,
-    )
+    val tint = if (selected) {
+        MiuixTheme.colorScheme.onSurface
+    } else {
+        MiuixTheme.colorScheme.onSurfaceSecondary.copy(alpha = 0.72f)
+    }
+    Column(
+        modifier = modifier
+            .weight(1f)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = tint,
+            modifier = Modifier.size(24.dp),
+        )
+        Text(
+            text = label,
+            style = MiuixTheme.textStyles.footnote1,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = tint,
+            maxLines = 1,
+        )
+    }
 }
 
 /** Miuix 悬浮操作按钮。 */
