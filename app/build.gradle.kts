@@ -36,8 +36,8 @@ android {
         applicationId = "com.davidzhu.wantnote"
         minSdk = 24
         targetSdk = 36
-        versionCode = 21
-        versionName = "0.17.2"
+        versionCode = 22
+        versionName = "0.17.3"
     }
 
     signingConfigs {

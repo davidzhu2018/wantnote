@@ -533,6 +533,7 @@ class BackupService(
         .put("profileNickname", settings.profileNickname)
         .put("profileAvatarPath", settings.profileAvatarPath)
         .put("heatmapColorHex", settings.heatmapColorHex)
+        .put("uiStyle", settings.uiStyle)
         .toString()
 
     // ---- JSON 反序列化（缺字段用当前默认值，兼容未来/旧版备份） -------------
@@ -707,6 +708,7 @@ class BackupService(
             profileNickname = obj.optString("profileNickname", default.profileNickname),
             profileAvatarPath = obj.optString("profileAvatarPath", default.profileAvatarPath),
             heatmapColorHex = obj.optString("heatmapColorHex", default.heatmapColorHex),
+            uiStyle = obj.optString("uiStyle", default.uiStyle),
         )
     }
 

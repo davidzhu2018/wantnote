@@ -1,7 +1,13 @@
 package com.davidzhu.wantnote.ui.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import com.davidzhu.wantnote.data.UiStyle
+import com.davidzhu.wantnote.ui.theme.LocalUiStyle
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -55,39 +61,96 @@ fun SettingsScreen(onOpen: (String) -> Unit) {
             )
         },
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(vertical = 8.dp),
-        ) {
-            items(SettingsEntries) { entry ->
-                val titleStyle = MiuixTheme.textStyles.body1
-                val descSizeSp = (titleStyle.fontSize.value - 2f).coerceAtLeast(11f).sp
-                WantListItem(
-                    headlineContent = {
-                        Text(
-                            text = entry.title,
-                            style = titleStyle,
-                            fontWeight = FontWeight.Medium,
-                            color = MiuixTheme.colorScheme.onSurface,
-                        )
-                    },
-                    supportingContent = {
-                        Text(
-                            text = entry.subtitle,
-                            style = MiuixTheme.textStyles.footnote1.copy(fontSize = descSizeSp),
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        )
-                    },
-                    trailingContent = {
-                        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpen(entry.route) },
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+        val isCoui = LocalUiStyle.current == UiStyle.COUI
+        val titleStyle = MiuixTheme.textStyles.body1
+        val descSizeSp = (titleStyle.fontSize.value - 2f).coerceAtLeast(11f).sp
+        if (isCoui) {
+            // COUI 标志性连体圆角卡片列表
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            ) {
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(MiuixTheme.colorScheme.surface)
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
+                                RoundedCornerShape(22.dp),
+                            ),
+                    ) {
+                        SettingsEntries.forEachIndexed { idx, entry ->
+                            WantListItem(
+                                headlineContent = {
+                                    Text(
+                                        text = entry.title,
+                                        style = titleStyle,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MiuixTheme.colorScheme.onSurface,
+                                    )
+                                },
+                                supportingContent = {
+                                    Text(
+                                        text = entry.subtitle,
+                                        style = MiuixTheme.textStyles.footnote1.copy(fontSize = descSizeSp),
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    )
+                                },
+                                trailingContent = {
+                                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null)
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onOpen(entry.route) },
+                            )
+                            if (idx < SettingsEntries.lastIndex) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentPadding = PaddingValues(vertical = 8.dp),
+            ) {
+                items(SettingsEntries) { entry ->
+                    WantListItem(
+                        headlineContent = {
+                            Text(
+                                text = entry.title,
+                                style = titleStyle,
+                                fontWeight = FontWeight.Medium,
+                                color = MiuixTheme.colorScheme.onSurface,
+                            )
+                        },
+                        supportingContent = {
+                            Text(
+                                text = entry.subtitle,
+                                style = MiuixTheme.textStyles.footnote1.copy(fontSize = descSizeSp),
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        },
+                        trailingContent = {
+                            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpen(entry.route) },
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+                }
             }
         }
     }

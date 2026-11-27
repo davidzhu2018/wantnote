@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.dp
 import com.davidzhu.wantnote.data.LiquidGlassSpec
 import com.davidzhu.wantnote.data.LiquidGlassSurfaceRole
 import com.davidzhu.wantnote.data.LiquidGlassTier
+import com.davidzhu.wantnote.data.UiStyle
+import com.davidzhu.wantnote.ui.theme.LocalUiStyle
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -44,6 +46,44 @@ fun Modifier.liquidGlassSurface(
     apiLevel: Int = Build.VERSION.SDK_INT,
 ): Modifier {
     val isDark = MiuixTheme.colorScheme.background.luminance() < 0.5f || isSystemInDarkTheme()
+    val uiStyle = LocalUiStyle.current
+    if (uiStyle == UiStyle.COUI) {
+        // 0.17.3：COUI（ColorOS 17 凝光视效）表面：柔和凝光轮廓光 + 轻量通透投影 + 纯净面色。
+        val couiElevation = when (role) {
+            LiquidGlassSurfaceRole.BUTTON -> 2.dp
+            LiquidGlassSurfaceRole.CARD -> 4.dp
+            LiquidGlassSurfaceRole.BAR -> 8.dp
+            LiquidGlassSurfaceRole.DIALOG -> 12.dp
+            LiquidGlassSurfaceRole.CHIP -> 2.dp
+            LiquidGlassSurfaceRole.FAB -> 10.dp
+        }
+        val luminousRim = Brush.linearGradient(
+            colorStops = arrayOf(
+                0.0f to (if (isDark) Color(0xFF7CAEFF).copy(alpha = 0.42f) else Color.White.copy(alpha = 0.95f)),
+                0.45f to MiuixTheme.colorScheme.primary.copy(alpha = if (isDark) 0.22f else 0.16f),
+                1.0f to MiuixTheme.colorScheme.outline.copy(alpha = if (isDark) 0.35f else 0.55f),
+            ),
+        )
+        val luminousSheen = Brush.verticalGradient(
+            colorStops = arrayOf(
+                0.0f to Color.White.copy(alpha = if (isDark) 0.08f else 0.26f),
+                0.5f to Color.Transparent,
+                1.0f to Color.Transparent,
+            ),
+        )
+        return this
+            .shadow(
+                elevation = couiElevation,
+                shape = shape,
+                clip = false,
+                ambientColor = MiuixTheme.colorScheme.primary.copy(alpha = if (isDark) 0.16f else 0.10f),
+                spotColor = Color.Black.copy(alpha = if (isDark) 0.26f else 0.12f),
+            )
+            .clip(shape)
+            .background(baseColor)
+            .background(luminousSheen)
+            .border(width = 1.dp, brush = luminousRim, shape = shape)
+    }
     val style = remember(apiLevel, role, isDark) {
         LiquidGlassSpec.resolve(apiLevel = apiLevel, role = role, isDark = isDark)
     }

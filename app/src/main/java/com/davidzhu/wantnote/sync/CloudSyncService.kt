@@ -428,6 +428,7 @@ internal data class SyncUserSettings(
     val profileNickname: String = AppSettings.DEFAULT.profileNickname,
     val profileAvatarPath: String = AppSettings.DEFAULT.profileAvatarPath,
     val heatmapColorHex: String = AppSettings.DEFAULT.heatmapColorHex,
+    val uiStyle: String = AppSettings.DEFAULT.uiStyle,
 ) {
     fun applyOnto(local: AppSettings): AppSettings = local.copy(
         themeName = themeName,
@@ -460,6 +461,7 @@ internal data class SyncUserSettings(
         profileNickname = profileNickname,
         profileAvatarPath = profileAvatarPath,
         heatmapColorHex = heatmapColorHex,
+        uiStyle = uiStyle,
     )
 
     fun toJsonObject(): JSONObject = JSONObject()
@@ -493,6 +495,7 @@ internal data class SyncUserSettings(
         .put("profileNickname", profileNickname)
         .put("profileAvatarPath", profileAvatarPath)
         .put("heatmapColorHex", heatmapColorHex)
+        .put("uiStyle", uiStyle)
 
     companion object {
         fun from(settings: AppSettings): SyncUserSettings = SyncUserSettings(
@@ -526,6 +529,7 @@ internal data class SyncUserSettings(
             profileNickname = settings.profileNickname,
             profileAvatarPath = settings.profileAvatarPath,
             heatmapColorHex = settings.heatmapColorHex,
+            uiStyle = settings.uiStyle,
         )
 
         fun fromJsonObject(obj: JSONObject): SyncUserSettings {
@@ -561,6 +565,7 @@ internal data class SyncUserSettings(
                 profileNickname = obj.optString("profileNickname", d.profileNickname),
                 profileAvatarPath = obj.optString("profileAvatarPath", d.profileAvatarPath),
                 heatmapColorHex = obj.optString("heatmapColorHex", d.heatmapColorHex),
+                uiStyle = obj.optString("uiStyle", d.uiStyle),
             )
         }
     }

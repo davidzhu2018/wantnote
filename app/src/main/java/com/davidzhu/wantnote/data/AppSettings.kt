@@ -71,6 +71,18 @@ enum class SyncMethod(val label: String) {
     }
 }
 
+enum class UiStyle(val label: String) {
+    MIUIX("MiuiX"),
+    COUI("COUI"),
+    ;
+
+    companion object {
+        fun fromStorage(value: String?): UiStyle {
+            return entries.firstOrNull { it.name.equals(value, ignoreCase = true) } ?: MIUIX
+        }
+    }
+}
+
 enum class EditorFontOption(val id: String, val label: String, val assetPath: String?) {
     SYSTEM("SYSTEM", "系统默认", null),
     NOTO_SANS_SC("NOTO_SANS_SC", "Noto Sans SC", "fonts/NotoSansSC-Regular.ttf"),
@@ -146,6 +158,8 @@ data class AppSettings(
     val profileAvatarPath: String = "",
     /** 0.17.2：数据统计创作热力图颜色（默认绿色）。 */
     val heatmapColorHex: String = "#2EA043",
+    /** 0.17.3：全局 UI 风格（MiuiX / COUI，默认 MiuiX）。 */
+    val uiStyle: String = UiStyle.MIUIX.name,
 ) {
     val palette: ThemePalette get() = ThemePalette.fromStorage(themeName)
     val fontScaleOption: FontScaleOption get() = FontScaleOption.fromStorage(fontScale)
@@ -154,6 +168,7 @@ data class AppSettings(
     val editorFont: EditorFontOption get() = EditorFontOption.fromStorage(editorFontId)
     val syncMethodOption: SyncMethod get() = SyncMethod.fromStorage(syncMethod)
     val editorModeOption: EditorMode get() = EditorMode.fromStorage(editorMode)
+    val uiStyleOption: UiStyle get() = UiStyle.fromStorage(uiStyle)
 
     companion object {
         val DEFAULT = AppSettings()

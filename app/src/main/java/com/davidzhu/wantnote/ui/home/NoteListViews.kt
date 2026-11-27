@@ -46,6 +46,8 @@ import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.material3.MaterialTheme
 import com.davidzhu.wantnote.data.LiquidGlassSurfaceRole
+import com.davidzhu.wantnote.data.UiStyle
+import com.davidzhu.wantnote.ui.theme.LocalUiStyle
 import com.davidzhu.wantnote.ui.components.liquidGlassSurface
 import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
@@ -96,8 +98,12 @@ private fun NoteCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    // 让卡片背景比页面底色更明亮/通透，配合 20dp 大圆角与立体阴影明显浮起。
-    val liftedSurface = if (isDark) {
+    val isCoui = LocalUiStyle.current == UiStyle.COUI
+    val shape = if (isCoui) RoundedCornerShape(24.dp) else NoteCardShape
+    // MiuiX 保持高对比立体浮起；COUI 使用 ColorOS 17 纯净白/深灰凝光卡片与 24dp 大圆角。
+    val liftedSurface = if (isCoui) {
+        if (isDark) Color(0xFF1B1E26) else Color(0xFFFFFFFF)
+    } else if (isDark) {
         lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.14f)
     } else {
         lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.80f)
@@ -107,7 +113,7 @@ private fun NoteCard(
         modifier = modifier
             .fillMaxWidth()
             .liquidGlassSurface(
-                shape = NoteCardShape,
+                shape = shape,
                 role = LiquidGlassSurfaceRole.CARD,
                 baseColor = liftedSurface,
                 elevationOverride = cardElevation.dp,

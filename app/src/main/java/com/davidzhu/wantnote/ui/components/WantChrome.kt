@@ -75,6 +75,8 @@ import androidx.navigationevent.NavigationEventDispatcher
 import androidx.navigationevent.NavigationEventDispatcherOwner
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import com.davidzhu.wantnote.data.LiquidGlassSurfaceRole
+import com.davidzhu.wantnote.data.UiStyle
+import com.davidzhu.wantnote.ui.theme.LocalUiStyle
 import top.yukonga.miuix.kmp.window.WindowDialog
 import java.util.Calendar
 
@@ -251,7 +253,8 @@ fun WantButton(
     content: @Composable RowScope.() -> Unit,
 ) {
     val fill = LocalFillDialogButtons.current
-    val btnShape = shape ?: RoundedCornerShape(13.dp)
+    val isCoui = LocalUiStyle.current == UiStyle.COUI
+    val btnShape = shape ?: if (isCoui) RoundedCornerShape(999.dp) else RoundedCornerShape(13.dp)
     val baseColor = if (enabled) {
         MiuixTheme.colorScheme.primary
     } else {
@@ -297,16 +300,19 @@ fun WantTextButton(
     content: @Composable RowScope.() -> Unit,
 ) {
     val fill = LocalFillDialogButtons.current
-    val btnShape = shape ?: RoundedCornerShape(13.dp)
+    val isCoui = LocalUiStyle.current == UiStyle.COUI
+    val btnShape = shape ?: if (isCoui) RoundedCornerShape(999.dp) else RoundedCornerShape(13.dp)
     val isDark = MiuixTheme.colorScheme.background.luminance() < 0.5f
-    val liftedSurface = if (isDark) {
+    val liftedSurface = if (isCoui) {
+        if (isDark) MiuixTheme.colorScheme.primary.copy(alpha = 0.18f) else MiuixTheme.colorScheme.primary.copy(alpha = 0.10f)
+    } else if (isDark) {
         lerp(MiuixTheme.colorScheme.surface, Color.White, 0.14f)
     } else {
         lerp(MiuixTheme.colorScheme.surface, Color.White, 0.78f)
     }
     val baseColor = if (enabled) liftedSurface else MiuixTheme.colorScheme.surfaceContainer
     val textColor = if (enabled) {
-        MiuixTheme.colorScheme.onSurface
+        if (isCoui) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface
     } else {
         MiuixTheme.colorScheme.onSurfaceSecondary
     }

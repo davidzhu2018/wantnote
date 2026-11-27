@@ -21,7 +21,7 @@ import java.util.UUID
         DinoxCachedBox::class,
         DinoxSyncRule::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = false,
 )
 abstract class NoteDatabase : RoomDatabase() {
@@ -329,6 +329,12 @@ abstract class NoteDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE settings ADD COLUMN uiStyle TEXT NOT NULL DEFAULT 'MIUIX'")
+            }
+        }
+
         fun create(context: Context): NoteDatabase {
             // 0.6.0：数据库优先放在 Documents/WantNote（卸载后可找回），
             // 未授权时回退到旧私有位置；首次启动由 AppStorage.prepare 迁移旧数据。
@@ -345,6 +351,7 @@ abstract class NoteDatabase : RoomDatabase() {
                     MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
                     MIGRATION_11_12,
                     MIGRATION_12_13,
+                    MIGRATION_13_14,
                 )
                 .build()
         }

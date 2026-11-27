@@ -65,12 +65,19 @@ fun AccountSettingsScreen(onBack: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
 
     var nickname by remember { mutableStateOf("") }
-    var initialized by remember { mutableStateOf(false) }
+    var dirty by remember { mutableStateOf(false) }
 
+    // 0.17.3：从数据库直接读初始值并监听后续变更，避免首帧 initialValue = DEFAULT("")
+    // 抢先置位导致已保存用户名在重新进入页面时显示为空。
+    LaunchedEffect(Unit) {
+        val stored = runCatching { settingsRepo.get().profileNickname }.getOrNull().orEmpty()
+        if (!dirty) {
+            nickname = stored
+        }
+    }
     LaunchedEffect(settings.profileNickname) {
-        if (!initialized) {
+        if (!dirty && settings.profileNickname.isNotEmpty()) {
             nickname = settings.profileNickname
-            initialized = true
         }
     }
 
@@ -168,7 +175,10 @@ fun AccountSettingsScreen(onBack: () -> Unit) {
                 )
                 WantTextField(
                     value = nickname,
-                    onValueChange = { nickname = it },
+                    onValueChange = {
+                        nickname = it
+                        dirty = true
+                    },
                     label = "用户名",
                     placeholder = "例如：想记用户",
                     singleLine = true,
@@ -180,6 +190,8 @@ fun AccountSettingsScreen(onBack: () -> Unit) {
                         val trimmed = nickname.trim()
                         scope.launch {
                             settingsRepo.update { it.copy(profileNickname = trimmed) }
+                            nickname = trimmed
+                            dirty = false
                             snackbar.showSnackbar("用户名已保存")
                         }
                     },
