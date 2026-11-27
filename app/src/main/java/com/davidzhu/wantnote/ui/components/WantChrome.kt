@@ -232,53 +232,94 @@ fun WantAlertDialog(
     }
 }
 
-/** Miuix 主按钮（主题色底）。 */
+/** Miuix 立体液态玻璃主按钮（主题色底 + 顶部光泽 + 立体投影）。 */
 @Composable
 fun WantButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     @Suppress("UNUSED_PARAMETER") colors: Any? = null,
-    @Suppress("UNUSED_PARAMETER") shape: Shape? = null,
-    @Suppress("UNUSED_PARAMETER") contentPadding: PaddingValues? = null,
+    shape: Shape? = null,
+    contentPadding: PaddingValues? = null,
     @Suppress("UNUSED_PARAMETER") elevation: Any? = null,
     @Suppress("UNUSED_PARAMETER") border: Any? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     val fill = LocalFillDialogButtons.current
-    Button(
-        onClick = onClick,
-        modifier = if (fill) modifier.fillMaxWidth() else modifier,
-        enabled = enabled,
-        colors = ButtonDefaults.buttonColorsPrimary(),
-        content = content,
-    )
+    val btnShape = shape ?: RoundedCornerShape(14.dp)
+    val baseColor = if (enabled) {
+        MiuixTheme.colorScheme.primary
+    } else {
+        MiuixTheme.colorScheme.disabledPrimaryButton
+    }
+    val textColor = if (enabled) {
+        MiuixTheme.colorScheme.onPrimary
+    } else {
+        MiuixTheme.colorScheme.disabledOnPrimaryButton
+    }
+    Row(
+        modifier = (if (fill) modifier.fillMaxWidth() else modifier)
+            .liquidGlassSurface(
+                shape = btnShape,
+                role = LiquidGlassSurfaceRole.BUTTON,
+                baseColor = baseColor,
+                elevationOverride = if (enabled) 8.dp else 1.dp,
+                borderWidth = 1.2.dp,
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(contentPadding ?: PaddingValues(horizontal = 18.dp, vertical = 11.dp)),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CompositionLocalProvider(LocalContentColor provides textColor) {
+            content()
+        }
+    }
 }
 
-/** Miuix 次按钮（浅色底，用于「取消 / 完成 / 工具栏」）。 */
+/** Miuix 立体液态玻璃次按钮（用于「取消 / 完成 / 工具栏」）。 */
 @Composable
 fun WantTextButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     @Suppress("UNUSED_PARAMETER") colors: Any? = null,
-    @Suppress("UNUSED_PARAMETER") shape: Shape? = null,
-    @Suppress("UNUSED_PARAMETER") contentPadding: PaddingValues? = null,
+    shape: Shape? = null,
+    contentPadding: PaddingValues? = null,
     @Suppress("UNUSED_PARAMETER") elevation: Any? = null,
     @Suppress("UNUSED_PARAMETER") border: Any? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     val fill = LocalFillDialogButtons.current
-    Button(
-        onClick = onClick,
-        modifier = if (fill) modifier.fillMaxWidth() else modifier,
-        enabled = enabled,
-        minWidth = 0.dp,
-        minHeight = 34.dp,
-        insideMargin = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-        colors = ButtonDefaults.buttonColors(),
-        content = content,
-    )
+    val btnShape = shape ?: RoundedCornerShape(12.dp)
+    val baseColor = if (enabled) {
+        MiuixTheme.colorScheme.surface
+    } else {
+        MiuixTheme.colorScheme.surfaceContainer
+    }
+    val textColor = if (enabled) {
+        MiuixTheme.colorScheme.onSurface
+    } else {
+        MiuixTheme.colorScheme.onSurfaceSecondary
+    }
+    Row(
+        modifier = (if (fill) modifier.fillMaxWidth() else modifier)
+            .liquidGlassSurface(
+                shape = btnShape,
+                role = LiquidGlassSurfaceRole.CHIP,
+                baseColor = baseColor,
+                elevationOverride = if (enabled) 5.dp else 1.dp,
+                borderWidth = 1.dp,
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(contentPadding ?: PaddingValues(horizontal = 14.dp, vertical = 8.dp)),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CompositionLocalProvider(LocalContentColor provides textColor) {
+            content()
+        }
+    }
 }
 
 /** Miuix 输入框（浮动标签 / 聚焦描边 / 圆角底色）。 */
@@ -412,19 +453,21 @@ fun WantFilterChip(
     } else {
         MiuixTheme.colorScheme.onSurfaceContainer
     }
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(50),
-        color = container,
-        contentColor = content,
+    Row(
+        modifier = modifier
+            .liquidGlassSurface(
+                shape = RoundedCornerShape(50),
+                role = LiquidGlassSurfaceRole.CHIP,
+                baseColor = container,
+                elevationOverride = if (selected) 7.dp else 4.dp,
+                borderWidth = 1.dp,
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .clickable(enabled = enabled, onClick = onClick)
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
+        CompositionLocalProvider(LocalContentColor provides content) {
             leadingIcon?.invoke()
             label()
         }

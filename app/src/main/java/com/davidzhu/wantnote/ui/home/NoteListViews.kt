@@ -32,6 +32,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,7 +52,7 @@ import com.davidzhu.wantnote.ui.components.TagChipRow
  * card plus a hairline top edge, so each note card reads as lifted off the
  * paper background instead of flat against it.
  */
-private val NoteCardShape = RoundedCornerShape(16.dp)
+private val NoteCardShape = RoundedCornerShape(20.dp)
 
 @Composable
 private fun Modifier.noteCardShadow(elevation: Int): Modifier {
@@ -69,17 +71,26 @@ private fun NoteCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
-    elevation: Int = 8,
+    elevation: Int = 11,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    // 让卡片背景比页面底色更明亮/通透，配合 20dp 大圆角与立体阴影明显浮起。
+    val liftedSurface = if (isDark) {
+        lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.08f)
+    } else {
+        lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.58f)
+    }
+    val cardElevation = maxOf(elevation, 10)
     Column(
         modifier = modifier
             .fillMaxWidth()
             .liquidGlassSurface(
                 shape = NoteCardShape,
                 role = LiquidGlassSurfaceRole.CARD,
-                baseColor = MaterialTheme.colorScheme.surfaceVariant,
-                elevationOverride = elevation.dp,
+                baseColor = liftedSurface,
+                elevationOverride = cardElevation.dp,
+                borderWidth = 1.2.dp,
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         content = content,

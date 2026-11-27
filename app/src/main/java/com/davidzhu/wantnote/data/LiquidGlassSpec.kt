@@ -47,6 +47,9 @@ enum class LiquidGlassSurfaceRole {
 
     /** 居中悬浮新建按钮（FAB）。 */
     FAB,
+
+    /** 立体液态玻璃主按钮。 */
+    BUTTON,
 }
 
 /**
@@ -106,53 +109,58 @@ object LiquidGlassSpec {
                 else -> 0.82f
             }
             LiquidGlassSurfaceRole.FAB -> 1.0f
+            LiquidGlassSurfaceRole.BUTTON -> 0.98f
         }
 
         val topSheenAlpha = when (role) {
-            LiquidGlassSurfaceRole.FAB -> if (isDark) 0.30f else 0.36f
-            LiquidGlassSurfaceRole.BAR, LiquidGlassSurfaceRole.DIALOG -> if (isDark) 0.16f else 0.44f
-            LiquidGlassSurfaceRole.CARD -> if (isDark) 0.12f else 0.34f
-            LiquidGlassSurfaceRole.CHIP -> if (isDark) 0.14f else 0.38f
+            LiquidGlassSurfaceRole.FAB -> if (isDark) 0.34f else 0.44f
+            LiquidGlassSurfaceRole.BUTTON -> if (isDark) 0.28f else 0.42f
+            LiquidGlassSurfaceRole.BAR, LiquidGlassSurfaceRole.DIALOG -> if (isDark) 0.18f else 0.48f
+            LiquidGlassSurfaceRole.CARD -> if (isDark) 0.16f else 0.42f
+            LiquidGlassSurfaceRole.CHIP -> if (isDark) 0.18f else 0.44f
         }
 
         val bottomSheenAlpha = when (role) {
-            LiquidGlassSurfaceRole.FAB -> if (isDark) 0.10f else 0.08f
-            else -> if (isDark) 0.03f else 0.06f
+            LiquidGlassSurfaceRole.FAB, LiquidGlassSurfaceRole.BUTTON -> if (isDark) 0.18f else 0.16f
+            LiquidGlassSurfaceRole.CARD -> if (isDark) 0.08f else 0.10f
+            else -> if (isDark) 0.06f else 0.09f
         }
 
-        // 顶部左侧镜面高光棱边 + 底部右侧柔和暗边，塑造立体玻璃厚度。
+        // 顶部左侧镜面高光棱边 + 底部右侧清晰暗边，塑造立体玻璃厚度。
         val rimTopAlpha = when (role) {
-            LiquidGlassSurfaceRole.FAB -> if (isDark) 0.45f else 0.62f
-            LiquidGlassSurfaceRole.BAR, LiquidGlassSurfaceRole.DIALOG -> if (isDark) 0.28f else 0.78f
-            LiquidGlassSurfaceRole.CARD -> if (isDark) 0.22f else 0.68f
-            LiquidGlassSurfaceRole.CHIP -> if (isDark) 0.26f else 0.72f
+            LiquidGlassSurfaceRole.FAB -> if (isDark) 0.52f else 0.76f
+            LiquidGlassSurfaceRole.BUTTON -> if (isDark) 0.44f else 0.74f
+            LiquidGlassSurfaceRole.BAR, LiquidGlassSurfaceRole.DIALOG -> if (isDark) 0.34f else 0.85f
+            LiquidGlassSurfaceRole.CARD -> if (isDark) 0.30f else 0.85f
+            LiquidGlassSurfaceRole.CHIP -> if (isDark) 0.32f else 0.82f
         }
 
-        val rimBottomAlpha = if (isDark) 0.08f else 0.18f
+        val rimBottomAlpha = if (isDark) 0.16f else 0.28f
 
         val shadowElevationDp = when (role) {
-            LiquidGlassSurfaceRole.BAR -> 14f
-            LiquidGlassSurfaceRole.DIALOG -> 18f
-            LiquidGlassSurfaceRole.FAB -> 12f
-            LiquidGlassSurfaceRole.CARD -> 9f
-            LiquidGlassSurfaceRole.CHIP -> 4f
+            LiquidGlassSurfaceRole.BAR -> 16f
+            LiquidGlassSurfaceRole.DIALOG -> 20f
+            LiquidGlassSurfaceRole.FAB -> 14f
+            LiquidGlassSurfaceRole.CARD -> 12f
+            LiquidGlassSurfaceRole.BUTTON -> 8f
+            LiquidGlassSurfaceRole.CHIP -> 6f
         }
 
-        val ambientShadowAlpha = if (isDark) 0.42f else 0.20f
-        val spotShadowAlpha = if (isDark) 0.62f else 0.34f
+        val ambientShadowAlpha = if (isDark) 0.56f else 0.30f
+        val spotShadowAlpha = if (isDark) 0.78f else 0.52f
 
         val blurRadiusDp = when (tier) {
             LiquidGlassTier.LIQUID_GLASS_SHADER -> when (role) {
                 LiquidGlassSurfaceRole.BAR, LiquidGlassSurfaceRole.DIALOG -> 18f
                 LiquidGlassSurfaceRole.CARD -> 10f
                 LiquidGlassSurfaceRole.CHIP -> 8f
-                LiquidGlassSurfaceRole.FAB -> 0f
+                LiquidGlassSurfaceRole.FAB, LiquidGlassSurfaceRole.BUTTON -> 0f
             }
             LiquidGlassTier.FROSTED_RENDER_EFFECT -> when (role) {
                 LiquidGlassSurfaceRole.BAR, LiquidGlassSurfaceRole.DIALOG -> 14f
                 LiquidGlassSurfaceRole.CARD -> 8f
                 LiquidGlassSurfaceRole.CHIP -> 6f
-                LiquidGlassSurfaceRole.FAB -> 0f
+                LiquidGlassSurfaceRole.FAB, LiquidGlassSurfaceRole.BUTTON -> 0f
             }
             LiquidGlassTier.LAYERED_FALLBACK -> 0f
         }
@@ -162,7 +170,8 @@ object LiquidGlassSpec {
                 LiquidGlassSurfaceRole.BAR, LiquidGlassSurfaceRole.DIALOG -> 0.24f
                 LiquidGlassSurfaceRole.CARD -> 0.14f
                 LiquidGlassSurfaceRole.CHIP -> 0.18f
-                LiquidGlassSurfaceRole.FAB -> 0.22f
+                LiquidGlassSurfaceRole.FAB -> 0.24f
+                LiquidGlassSurfaceRole.BUTTON -> 0.20f
             }
             LiquidGlassTier.FROSTED_RENDER_EFFECT,
             LiquidGlassTier.LAYERED_FALLBACK,
