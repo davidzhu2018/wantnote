@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -102,7 +103,11 @@ private fun NoteCard(
     val shape = if (isCoui) RoundedCornerShape(24.dp) else NoteCardShape
     // MiuiX 保持高对比立体浮起；COUI 使用 ColorOS 17 纯净白/深灰凝光卡片与 24dp 大圆角。
     val liftedSurface = if (isCoui) {
-        if (isDark) Color(0xFF1B1E26) else Color(0xFFFFFFFF)
+        if (isDark) {
+            lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.06f)
+        } else {
+            lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.78f)
+        }
     } else if (isDark) {
         lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.14f)
     } else {
@@ -586,6 +591,27 @@ private fun MomentsView(
                             MomentsNineGrid(images = images)
                         }
                         TagChipRow(tags = item.tags, modifier = Modifier.padding(top = 8.dp), max = 3)
+                        if (item.note.locationName.isNotBlank()) {
+                            Row(
+                                modifier = Modifier.padding(top = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.LocationOn,
+                                    contentDescription = "位置",
+                                    tint = nicknameColor,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                                Text(
+                                    text = item.note.locationName,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = nicknameColor,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
                         Text(
                             text = Dates.formatTimestamp(
                                 if (item.note.createdAt > 0L) item.note.createdAt else item.note.updatedAt,

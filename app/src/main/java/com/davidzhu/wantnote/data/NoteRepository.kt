@@ -533,6 +533,22 @@ class NoteRepository(
     }
 
     /** 把笔记分配到卡片盒；boxId 必须已存在（空串 = 取消分配）。 */
+    suspend fun updateLocation(
+        noteId: String,
+        locationName: String,
+        locationAddress: String,
+        locationLat: Double,
+        locationLng: Double,
+    ) {
+        notes.updateLocation(
+            noteId = noteId,
+            locationName = locationName.trim(),
+            locationAddress = locationAddress.trim(),
+            locationLat = locationLat,
+            locationLng = locationLng,
+        )
+    }
+
     suspend fun assignNoteToBox(noteId: String, boxId: String) {
         if (boxId.isNotEmpty() && boxes.getById(boxId) == null) return
         notes.assignBox(noteId, boxId)

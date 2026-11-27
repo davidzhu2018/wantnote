@@ -160,6 +160,9 @@ data class AppSettings(
     val heatmapColorHex: String = "#2EA043",
     /** 0.17.3：全局 UI 风格（MiuiX / COUI，默认 MiuiX）。 */
     val uiStyle: String = UiStyle.MIUIX.name,
+    /** 0.18.0：编辑器位置 POI 地图服务商（AMAP 高德 / TENCENT 腾讯）与本机 Key。 */
+    val mapProvider: String = "AMAP",
+    val mapApiKey: String = "",
 ) {
     val palette: ThemePalette get() = ThemePalette.fromStorage(themeName)
     val fontScaleOption: FontScaleOption get() = FontScaleOption.fromStorage(fontScale)

@@ -429,6 +429,8 @@ internal data class SyncUserSettings(
     val profileAvatarPath: String = AppSettings.DEFAULT.profileAvatarPath,
     val heatmapColorHex: String = AppSettings.DEFAULT.heatmapColorHex,
     val uiStyle: String = AppSettings.DEFAULT.uiStyle,
+    val mapProvider: String = AppSettings.DEFAULT.mapProvider,
+    val mapApiKey: String = AppSettings.DEFAULT.mapApiKey,
 ) {
     fun applyOnto(local: AppSettings): AppSettings = local.copy(
         themeName = themeName,
@@ -462,6 +464,8 @@ internal data class SyncUserSettings(
         profileAvatarPath = profileAvatarPath,
         heatmapColorHex = heatmapColorHex,
         uiStyle = uiStyle,
+        mapProvider = mapProvider,
+        mapApiKey = mapApiKey,
     )
 
     fun toJsonObject(): JSONObject = JSONObject()
@@ -496,6 +500,8 @@ internal data class SyncUserSettings(
         .put("profileAvatarPath", profileAvatarPath)
         .put("heatmapColorHex", heatmapColorHex)
         .put("uiStyle", uiStyle)
+        .put("mapProvider", mapProvider)
+        .put("mapApiKey", mapApiKey)
 
     companion object {
         fun from(settings: AppSettings): SyncUserSettings = SyncUserSettings(
@@ -530,6 +536,8 @@ internal data class SyncUserSettings(
             profileAvatarPath = settings.profileAvatarPath,
             heatmapColorHex = settings.heatmapColorHex,
             uiStyle = settings.uiStyle,
+            mapProvider = settings.mapProvider,
+            mapApiKey = settings.mapApiKey,
         )
 
         fun fromJsonObject(obj: JSONObject): SyncUserSettings {
@@ -566,6 +574,8 @@ internal data class SyncUserSettings(
                 profileAvatarPath = obj.optString("profileAvatarPath", d.profileAvatarPath),
                 heatmapColorHex = obj.optString("heatmapColorHex", d.heatmapColorHex),
                 uiStyle = obj.optString("uiStyle", d.uiStyle),
+                mapProvider = obj.optString("mapProvider", d.mapProvider),
+                mapApiKey = obj.optString("mapApiKey", d.mapApiKey),
             )
         }
     }
@@ -615,6 +625,10 @@ internal data class SyncSnapshot(
                             .put("body", note.body)
                             .put("mdPath", note.mdPath)
                             .put("boxId", note.boxId)
+                            .put("locationName", note.locationName)
+                            .put("locationAddress", note.locationAddress)
+                            .put("locationLat", note.locationLat)
+                            .put("locationLng", note.locationLng)
                             .put("boxName", boxName)
                             .put("createdAt", note.createdAt)
                             .put("updatedAt", note.updatedAt),
@@ -779,6 +793,10 @@ internal data class SyncSnapshot(
                     updatedAt = obj.optLong("updatedAt"),
                     mdPath = obj.optString("mdPath"),
                     boxId = obj.optString("boxId"),
+                    locationName = obj.optString("locationName"),
+                    locationAddress = obj.optString("locationAddress"),
+                    locationLat = obj.optDouble("locationLat", 0.0),
+                    locationLng = obj.optDouble("locationLng", 0.0),
                 )
             }
             val blocks = root.optJSONArray("blocks").orEmpty().mapObjects { obj ->

@@ -18,6 +18,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
@@ -186,20 +187,21 @@ fun WantNoteTheme(
     val uiStyle = settings.uiStyleOption
     val customs = remember(settings.themeCustomJson) { ThemeCustoms.parse(settings.themeCustomJson) }
     val rawPalette = resolvePalette(settings.themeName, customs)
-    // 0.17.3：COUI（ColorOS 17 凝光视效）风格色板——通透中性灰底 + 纯白圆角卡片 + 凝光蓝主强调色。
+    // 0.18.0：COUI 风格基于用户所选主题（纸色/墨色/青松/暮粉/自建主题）派生凝光通透表面，
+    // 切换主题时背景、卡片、强调色与描边全部实时联动，不再锁死单一色板。
     val palette = if (uiStyle == UiStyle.COUI) {
         Palette(
-            lightBg = Color(0xFFF5F6F8),
-            lightInk = Color(0xFF1A1C1E),
-            lightMuted = Color(0xFF6B7280),
-            lightVariant = Color(0xFFFFFFFF),
-            lightOutline = Color(0xFFD9E1EC),
-            darkBg = Color(0xFF0E1014),
-            darkInk = Color(0xFFF2F4F8),
-            darkMuted = Color(0xFF98A2B3),
-            darkVariant = Color(0xFF1B1E26),
-            darkOutline = Color(0xFF2D3442),
-            highlight = Color(0xFF7CC4FF),
+            lightBg = lerp(rawPalette.lightBg, Color(0xFFF6F7F9), 0.22f),
+            lightInk = rawPalette.lightInk,
+            lightMuted = rawPalette.lightMuted,
+            lightVariant = lerp(rawPalette.lightVariant, Color.White, 0.72f),
+            lightOutline = lerp(rawPalette.lightOutline, Color.White, 0.20f),
+            darkBg = rawPalette.darkBg,
+            darkInk = rawPalette.darkInk,
+            darkMuted = rawPalette.darkMuted,
+            darkVariant = lerp(rawPalette.darkVariant, Color.White, 0.06f),
+            darkOutline = rawPalette.darkOutline,
+            highlight = rawPalette.highlight,
         )
     } else {
         rawPalette
@@ -210,11 +212,15 @@ fun WantNoteTheme(
         DayNightMode.SYSTEM -> isSystemInDarkTheme()
     }
     val scale = settings.fontScaleOption.scale
-    val couiAccent = if (dark) Color(0xFF4B8BFF) else Color(0xFF1677FF)
+    val couiAccent = if (dark) {
+        lerp(palette.darkInk, Color(0xFF4B8BFF), 0.35f)
+    } else {
+        lerp(palette.lightInk, Color(0xFF1677FF), 0.35f)
+    }
     val scheme = if (dark) {
         darkColorScheme(
             primary = if (uiStyle == UiStyle.COUI) couiAccent else palette.darkInk,
-            onPrimary = if (uiStyle == UiStyle.COUI) Color.White else palette.darkBg,
+            onPrimary = if (uiStyle == UiStyle.COUI) palette.darkBg else palette.darkBg,
             background = palette.darkBg,
             onBackground = palette.darkInk,
             surface = if (uiStyle == UiStyle.COUI) palette.darkVariant else palette.darkBg,
@@ -262,14 +268,15 @@ fun WantNoteTheme(
     val miuixColors = remember(palette, dark, uiStyle) {
         val base = miuixColorsFor(palette, dark)
         if (uiStyle == UiStyle.COUI) {
+            val cardBg = if (dark) palette.darkVariant else palette.lightVariant
             base.copy(
                 primary = couiAccent,
-                onPrimary = Color.White,
+                onPrimary = if (dark) palette.darkBg else Color.White,
                 primaryVariant = couiAccent,
-                surface = if (dark) Color(0xFF1B1E26) else Color(0xFFFFFFFF),
-                surfaceContainer = if (dark) Color(0xFF1B1E26) else Color(0xFFFFFFFF),
-                surfaceContainerHigh = if (dark) Color(0xFF232732) else Color(0xFFF0F4FA),
-                surfaceContainerHighest = if (dark) Color(0xFF2B303D) else Color(0xFFE6EEF8),
+                surface = cardBg,
+                surfaceContainer = cardBg,
+                surfaceContainerHigh = if (dark) lerp(cardBg, Color.White, 0.05f) else lerp(cardBg, palette.lightBg, 0.35f),
+                surfaceContainerHighest = if (dark) lerp(cardBg, Color.White, 0.10f) else lerp(cardBg, palette.lightBg, 0.60f),
             )
         } else {
             base

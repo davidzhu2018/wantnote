@@ -55,6 +55,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Highlight
 import androidx.compose.material.icons.outlined.HorizontalRule
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.StrikethroughS
 import androidx.compose.material.icons.outlined.TableChart
 import androidx.compose.material.icons.outlined.Tag
@@ -159,6 +160,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 import com.davidzhu.wantnote.ui.components.BoxPickerDialog
+import com.davidzhu.wantnote.ui.components.LocationPickerDialog
 import com.davidzhu.wantnote.ui.components.TagAddDialog
 import com.davidzhu.wantnote.data.NoteBoxActions
 import com.davidzhu.wantnote.data.BoxCreateResult
@@ -208,6 +210,7 @@ fun EditorScreen(
     val boxes by repository.observeBoxes().collectAsStateWithLifecycle(initialValue = emptyList())
     val noteRow by repository.observeById(noteId).collectAsStateWithLifecycle(initialValue = null)
     var showBoxPicker by remember { mutableStateOf(false) }
+    var showLocationPicker by remember { mutableStateOf(false) }
     var showOverwriteDialog by remember { mutableStateOf(false) }
     var generating by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
@@ -1187,6 +1190,7 @@ fun EditorScreen(
                     ?.takeIf { it.blockType == BlockType.HEADING }
                     ?.headingLevel ?: 0,
                 onAt = { showLinkPicker = true },
+                onLocation = { showLocationPicker = true },
                 onQuote = { insertQuote() },
                 onAddTask = { addTypedBlock(BlockType.TASK) },
                 onOrdered = { addTypedBlock(BlockType.ORDERED) },
@@ -1268,6 +1272,30 @@ fun EditorScreen(
                     boxName = boxes.firstOrNull { it.id == noteRow?.boxId.orEmpty() }?.name,
                     onPick = { showBoxPicker = true },
                 )
+                val locName = noteRow?.locationName.orEmpty()
+                if (locName.isNotBlank()) {
+                    Row(
+                        modifier = Modifier
+                            .padding(bottom = 8.dp)
+                            .clickable { showLocationPicker = true },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.LocationOn,
+                            contentDescription = "位置",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            text = locName,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
                 if (mode == EditorMode.SOURCE) {
                     // 源码模式：上半屏编辑 Markdown 源，下半屏实时预览
                     // （图片/多媒体/标题/列表/表格/缩进/引用/强调/任务/代码）。
@@ -1373,6 +1401,34 @@ fun EditorScreen(
                 }
             },
             onDismiss = { showTagPicker = false },
+        )
+    }
+
+    if (showLocationPicker) {
+        LocationPickerDialog(
+            currentLocationName = noteRow?.locationName.orEmpty(),
+            settings = settings,
+            onPick = { poi ->
+                showLocationPicker = false
+                scope.launch {
+                    repository.updateLocation(
+                        noteId = noteId,
+                        locationName = poi.displayLabel(),
+                        locationAddress = poi.address,
+                        locationLat = poi.lat,
+                        locationLng = poi.lng,
+                    )
+                    snackbar.showSnackbar("已添加位置：${poi.displayLabel()}")
+                }
+            },
+            onClear = {
+                showLocationPicker = false
+                scope.launch {
+                    repository.updateLocation(noteId, "", "", 0.0, 0.0)
+                    snackbar.showSnackbar("已清除位置")
+                }
+            },
+            onDismiss = { showLocationPicker = false },
         )
     }
 
@@ -1696,6 +1752,7 @@ private fun OutlineToolbar(
     sourceMode: Boolean,
     currentHeadingLevel: Int,
     onAt: () -> Unit,
+    onLocation: () -> Unit,
     onQuote: () -> Unit,
     onAddTask: () -> Unit,
     onOrdered: () -> Unit,
@@ -1723,6 +1780,7 @@ private fun OutlineToolbar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ToolButton("@", Icons.Outlined.AlternateEmail, onAt)
+        ToolButton("位置", Icons.Outlined.LocationOn, onLocation)
         Box {
             ToolButton(
                 label = if (!sourceMode && currentHeadingLevel in 1..6) "H$currentHeadingLevel" else "标题",

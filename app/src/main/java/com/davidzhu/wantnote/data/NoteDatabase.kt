@@ -21,7 +21,7 @@ import java.util.UUID
         DinoxCachedBox::class,
         DinoxSyncRule::class,
     ],
-    version = 14,
+    version = 15,
     exportSchema = false,
 )
 abstract class NoteDatabase : RoomDatabase() {
@@ -335,6 +335,17 @@ abstract class NoteDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE notes ADD COLUMN locationName TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE notes ADD COLUMN locationAddress TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE notes ADD COLUMN locationLat REAL NOT NULL DEFAULT 0.0")
+                db.execSQL("ALTER TABLE notes ADD COLUMN locationLng REAL NOT NULL DEFAULT 0.0")
+                db.execSQL("ALTER TABLE settings ADD COLUMN mapProvider TEXT NOT NULL DEFAULT 'AMAP'")
+                db.execSQL("ALTER TABLE settings ADD COLUMN mapApiKey TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun create(context: Context): NoteDatabase {
             // 0.6.0：数据库优先放在 Documents/WantNote（卸载后可找回），
             // 未授权时回退到旧私有位置；首次启动由 AppStorage.prepare 迁移旧数据。
@@ -352,6 +363,7 @@ abstract class NoteDatabase : RoomDatabase() {
                     MIGRATION_11_12,
                     MIGRATION_12_13,
                     MIGRATION_13_14,
+                    MIGRATION_14_15,
                 )
                 .build()
         }

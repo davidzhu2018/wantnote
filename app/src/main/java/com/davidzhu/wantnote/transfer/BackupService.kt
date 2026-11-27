@@ -372,6 +372,10 @@ class BackupService(
                         .put("mdPath", note.mdPath)
                         .put("boxId", note.boxId)
                         .put("boxName", boxNameById[note.boxId].orEmpty())
+                        .put("locationName", note.locationName)
+                        .put("locationAddress", note.locationAddress)
+                        .put("locationLat", note.locationLat)
+                        .put("locationLng", note.locationLng)
                         .put("createdAt", note.createdAt)
                         .put("updatedAt", note.updatedAt),
                 )
@@ -534,6 +538,8 @@ class BackupService(
         .put("profileAvatarPath", settings.profileAvatarPath)
         .put("heatmapColorHex", settings.heatmapColorHex)
         .put("uiStyle", settings.uiStyle)
+        .put("mapProvider", settings.mapProvider)
+        .put("mapApiKey", settings.mapApiKey)
         .toString()
 
     // ---- JSON 反序列化（缺字段用当前默认值，兼容未来/旧版备份） -------------
@@ -554,6 +560,10 @@ class BackupService(
                     updatedAt = obj.optLong("updatedAt"),
                     mdPath = obj.optString("mdPath"),
                     boxId = obj.optString("boxId"),
+                    locationName = obj.optString("locationName"),
+                    locationAddress = obj.optString("locationAddress"),
+                    locationLat = obj.optDouble("locationLat", 0.0),
+                    locationLng = obj.optDouble("locationLng", 0.0),
                 ),
                 boxName = obj.optString("boxName"),
             )
@@ -709,6 +719,8 @@ class BackupService(
             profileAvatarPath = obj.optString("profileAvatarPath", default.profileAvatarPath),
             heatmapColorHex = obj.optString("heatmapColorHex", default.heatmapColorHex),
             uiStyle = obj.optString("uiStyle", default.uiStyle),
+            mapProvider = obj.optString("mapProvider", default.mapProvider),
+            mapApiKey = obj.optString("mapApiKey", default.mapApiKey),
         )
     }
 

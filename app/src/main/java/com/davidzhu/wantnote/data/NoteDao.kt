@@ -85,7 +85,9 @@ interface NoteDao {
     @Query(
         """
         UPDATE notes SET title = :title, body = :body, mdPath = :mdPath,
-            createdAt = :createdAt, updatedAt = :updatedAt, boxId = :boxId
+            createdAt = :createdAt, updatedAt = :updatedAt, boxId = :boxId,
+            locationName = :locationName, locationAddress = :locationAddress,
+            locationLat = :locationLat, locationLng = :locationLng
         WHERE id = :id
         """,
     )
@@ -97,12 +99,19 @@ interface NoteDao {
         createdAt: Long,
         updatedAt: Long,
         boxId: String,
+        locationName: String,
+        locationAddress: String,
+        locationLat: Double,
+        locationLng: Double,
     )
 
     @Transaction
     suspend fun upsert(note: Note) {
         if (insertIfAbsent(note) == -1L) {
-            updateColumns(note.id, note.title, note.body, note.mdPath, note.createdAt, note.updatedAt, note.boxId)
+            updateColumns(
+                note.id, note.title, note.body, note.mdPath, note.createdAt, note.updatedAt, note.boxId,
+                note.locationName, note.locationAddress, note.locationLat, note.locationLng,
+            )
         }
     }
 
@@ -110,10 +119,29 @@ interface NoteDao {
     suspend fun upsertAll(notes: List<Note>) {
         notes.forEach { note ->
             if (insertIfAbsent(note) == -1L) {
-                updateColumns(note.id, note.title, note.body, note.mdPath, note.createdAt, note.updatedAt, note.boxId)
+                updateColumns(
+                    note.id, note.title, note.body, note.mdPath, note.createdAt, note.updatedAt, note.boxId,
+                    note.locationName, note.locationAddress, note.locationLat, note.locationLng,
+                )
             }
         }
     }
+
+    /** 0.18.0：更新笔记的地点 POI（传空串即清除位置）。 */
+    @Query(
+        """
+        UPDATE notes SET locationName = :locationName, locationAddress = :locationAddress,
+            locationLat = :locationLat, locationLng = :locationLng
+        WHERE id = :noteId
+        """,
+    )
+    suspend fun updateLocation(
+        noteId: String,
+        locationName: String,
+        locationAddress: String,
+        locationLat: Double,
+        locationLng: Double,
+    )
 
     /** 0.10.0：把一篇笔记分配到卡片盒（boxId 传空串 = 取消分配）。 */
     @Query("UPDATE notes SET boxId = :boxId WHERE id = :noteId")
