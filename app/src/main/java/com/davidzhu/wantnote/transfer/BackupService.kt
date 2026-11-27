@@ -5,7 +5,10 @@ import androidx.room.withTransaction
 import com.davidzhu.wantnote.data.AiProvider
 import com.davidzhu.wantnote.data.AppSettings
 import com.davidzhu.wantnote.data.BlockType
+import com.davidzhu.wantnote.data.DinoxCachedBox
+import com.davidzhu.wantnote.data.DinoxSyncRule
 import com.davidzhu.wantnote.data.MediaStorage
+import com.davidzhu.wantnote.sync.dinox.DinoxBoxSyncWorker
 import com.davidzhu.wantnote.data.Note
 import com.davidzhu.wantnote.data.NoteBlock
 import com.davidzhu.wantnote.data.NoteBox
@@ -78,6 +81,8 @@ class BackupService(
             val refs = notes.getAllCrossRefs()
             val allLinks = notes.getAllLinks()
             val allBoxes = notes.getAllBoxes()
+            val allSyncRules = db.dinoxSyncRuleDao().getAll()
+            val allDinoxBoxes = db.dinoxBoxDao().getAll()
 
             val files = LinkedHashMap<String, File>()
             val included = LinkedHashSet<String>()
@@ -120,6 +125,7 @@ class BackupService(
                 noteTags = refs.size,
                 links = allLinks.size,
                 boxes = allBoxes.size,
+                dinoxSyncRules = allSyncRules.size,
                 attachments = included.size,
                 fonts = fontFiles.size,
             )
@@ -138,6 +144,8 @@ class BackupService(
                 putBytes("data/note_tags.json", refsToJson(refs))
                 putBytes("data/note_links.json", linksToJson(allLinks))
                 putBytes("data/note_boxes.json", boxesToJson(allBoxes))
+                putBytes("data/dinox_sync_rules.json", syncRulesToJson(allSyncRules, allBoxes))
+                putBytes("data/dinox_cached_boxes.json", dinoxBoxesToJson(allDinoxBoxes))
                 putBytes("data/settings.json", settingsToJson(settings))
                 putBytes("data/ai_providers.json", providersToJson(providers))
 
@@ -209,13 +217,22 @@ class BackupService(
         val storedBoxes = byName["data/note_boxes.json"]?.let { entry ->
             parseBoxes(readText(zip, entry))
         }.orEmpty()
+        val rawSyncRules = byName["data/dinox_sync_rules.json"]?.let { entry ->
+            parseSyncRules(readText(zip, entry))
+        }.orEmpty()
+        val storedDinoxBoxes = byName["data/dinox_cached_boxes.json"]?.let { entry ->
+            parseDinoxBoxes(readText(zip, entry))
+        }.orEmpty()
         val boxPlan = BackupBoxPlan.prepare(
             boxes = storedBoxes,
             notes = rawNotes.map { it.note },
             noteBoxNames = rawNotes.associate { it.note.id to it.boxName },
+            syncRules = rawSyncRules.map { it.rule },
+            ruleTargetBoxNames = rawSyncRules.associate { it.rule.id to it.targetBoxName },
             now = System.currentTimeMillis(),
         )
         val noteList = boxPlan.notes
+        val syncRuleList = boxPlan.syncRules
         val blockList = parseBlocks(readText(zip, byName.getValue("data/blocks.json")))
         val tagList = parseTags(readText(zip, byName.getValue("data/tags.json")))
         val refList = parseRefs(readText(zip, byName.getValue("data/note_tags.json")))
@@ -285,10 +302,14 @@ class BackupService(
             db.blockDao().deleteAll()
             db.noteDao().deleteAll()
             db.noteBoxDao().deleteAll()
+            db.dinoxSyncRuleDao().deleteAll()
+            db.dinoxBoxDao().deleteAll()
             db.tagDao().deleteAll()
             db.aiProviderDao().deleteAll()
 
             if (boxPlan.boxes.isNotEmpty()) db.noteBoxDao().upsertAll(boxPlan.boxes)
+            if (syncRuleList.isNotEmpty()) db.dinoxSyncRuleDao().upsertAll(syncRuleList)
+            if (storedDinoxBoxes.isNotEmpty()) db.dinoxBoxDao().upsertAll(storedDinoxBoxes)
             if (noteList.isNotEmpty()) db.noteDao().upsertAll(noteList)
             if (validBlocks.isNotEmpty()) {
                 db.blockDao().upsertAll(
@@ -308,6 +329,7 @@ class BackupService(
         // 保证正文源文件与数据库一致；再尝试导入随设置恢复的 Dinox Token。
         runCatching { notes.ensureMarkdownFiles() }
         runCatching { dinox?.importSealedToken() }
+        runCatching { DinoxBoxSyncWorker.syncAllSchedules(context, syncRuleList) }
 
         return RestoreResult(
             notes = noteList.size,
@@ -364,6 +386,41 @@ class BackupService(
                     .put("id", box.id)
                     .put("name", box.name)
                     .put("createdAt", box.createdAt),
+            )
+        }
+    }.toString()
+
+    private fun syncRulesToJson(items: List<DinoxSyncRule>, boxes: List<NoteBox>): String {
+        val boxNameById = boxes.associate { it.id to it.name }
+        return JSONArray().also { arr ->
+            items.forEach { rule ->
+                arr.put(
+                    JSONObject()
+                        .put("id", rule.id)
+                        .put("ruleType", rule.ruleType)
+                        .put("sourceBoxesJson", rule.sourceBoxesJson)
+                        .put("targetBoxId", rule.targetBoxId)
+                        .put("targetBoxName", boxNameById[rule.targetBoxId].orEmpty())
+                        .put("followDinoxName", rule.followDinoxName)
+                        .put("syncMode", rule.syncMode)
+                        .put("autoIntervalMinutes", rule.autoIntervalMinutes)
+                        .put("lastSyncAt", rule.lastSyncAt)
+                        .put("lastRunAt", rule.lastRunAt)
+                        .put("lastStatus", rule.lastStatus)
+                        .put("createdAt", rule.createdAt)
+                        .put("updatedAt", rule.updatedAt),
+                )
+            }
+        }.toString()
+    }
+
+    private fun dinoxBoxesToJson(items: List<DinoxCachedBox>): String = JSONArray().also { arr ->
+        items.forEach { box ->
+            arr.put(
+                JSONObject()
+                    .put("name", box.name)
+                    .put("fetchedAt", box.fetchedAt)
+                    .put("remoteId", box.remoteId),
             )
         }
     }.toString()
@@ -501,6 +558,41 @@ class BackupService(
             )
         }
 
+    private data class ParsedSyncRule(
+        val rule: DinoxSyncRule,
+        val targetBoxName: String,
+    )
+
+    private fun parseSyncRules(text: String): List<ParsedSyncRule> =
+        JSONArray(text).objects { obj ->
+            ParsedSyncRule(
+                rule = DinoxSyncRule(
+                    id = obj.getString("id"),
+                    ruleType = obj.optString("ruleType"),
+                    sourceBoxesJson = obj.optString("sourceBoxesJson", "[]"),
+                    targetBoxId = obj.optString("targetBoxId"),
+                    followDinoxName = obj.optBoolean("followDinoxName", false),
+                    syncMode = obj.optString("syncMode"),
+                    autoIntervalMinutes = obj.optInt("autoIntervalMinutes", 0),
+                    lastSyncAt = obj.optLong("lastSyncAt", 0L),
+                    lastRunAt = obj.optLong("lastRunAt", 0L),
+                    lastStatus = obj.optString("lastStatus"),
+                    createdAt = obj.optLong("createdAt", 0L),
+                    updatedAt = obj.optLong("updatedAt", 0L),
+                ),
+                targetBoxName = obj.optString("targetBoxName"),
+            )
+        }
+
+    private fun parseDinoxBoxes(text: String): List<DinoxCachedBox> =
+        JSONArray(text).objects { obj ->
+            DinoxCachedBox(
+                name = obj.getString("name"),
+                fetchedAt = obj.optLong("fetchedAt", 0L),
+                remoteId = obj.optString("remoteId"),
+            )
+        }
+
     private fun parseBlocks(text: String): List<NoteBlock> =
         JSONArray(text).objects { obj ->
             NoteBlock(
@@ -625,6 +717,7 @@ class BackupService(
 internal data class PreparedBoxRestore(
     val boxes: List<NoteBox>,
     val notes: List<Note>,
+    val syncRules: List<DinoxSyncRule> = emptyList(),
 )
 
 /**
@@ -639,6 +732,8 @@ internal object BackupBoxPlan {
         boxes: List<NoteBox>,
         notes: List<Note>,
         noteBoxNames: Map<String, String> = emptyMap(),
+        syncRules: List<DinoxSyncRule> = emptyList(),
+        ruleTargetBoxNames: Map<String, String> = emptyMap(),
         now: Long = 0L,
     ): PreparedBoxRestore {
         val byName = LinkedHashMap<String, NoteBox>()
@@ -703,9 +798,38 @@ internal object BackupBoxPlan {
             if (targetBoxId == note.boxId) note else note.copy(boxId = targetBoxId)
         }
 
+        val remappedRules = syncRules.map { rule ->
+            if (rule.followDinoxName) {
+                rule.copy(targetBoxId = "")
+            } else {
+                val rawTargetId = rule.targetBoxId.trim()
+                val rawTargetName = ruleTargetBoxNames[rule.id].orEmpty().trim()
+                val mappedTargetId = when {
+                    rawTargetId.isNotEmpty() && idRemap.containsKey(rawTargetId) -> idRemap.getValue(rawTargetId)
+                    rawTargetId.isNotEmpty() && rawTargetId in validIds -> rawTargetId
+                    rawTargetName.isNotEmpty() -> {
+                        val existing = byName[rawTargetName]
+                        if (existing != null) {
+                            existing.id
+                        } else {
+                            val createdId = rawTargetId.ifEmpty { "box_restored_${byName.size}" }
+                            val created = NoteBox(id = createdId, name = rawTargetName, createdAt = now)
+                            byName[rawTargetName] = created
+                            validIds += created.id
+                            if (rawTargetId.isNotEmpty()) idRemap[rawTargetId] = created.id
+                            created.id
+                        }
+                    }
+                    else -> rawTargetId
+                }
+                if (mappedTargetId == rule.targetBoxId) rule else rule.copy(targetBoxId = mappedTargetId)
+            }
+        }
+
         return PreparedBoxRestore(
             boxes = byName.values.toList(),
             notes = remappedNotes,
+            syncRules = remappedRules,
         )
     }
 }

@@ -113,6 +113,12 @@ interface DinoxSyncRuleDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(rule: DinoxSyncRule)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(rules: List<DinoxSyncRule>)
+
     @Query("DELETE FROM dinox_sync_rules WHERE id = :id")
     suspend fun delete(id: String)
+
+    @Query("DELETE FROM dinox_sync_rules")
+    suspend fun deleteAll()
 }

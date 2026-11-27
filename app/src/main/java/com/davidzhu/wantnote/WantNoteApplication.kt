@@ -51,6 +51,8 @@ class WantNoteApplication : Application() {
             settingsRepository = settingsRepository,
             media = mediaStorage,
             dinox = dinoxSync,
+            db = database,
+            context = this,
         )
     }
     val backupService by lazy {
