@@ -1,66 +1,87 @@
-
 package com.davidzhu.wantnote.ui.home
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
-import top.yukonga.miuix.kmp.theme.MiuixTheme
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ArrowDropDown
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Label
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import com.davidzhu.wantnote.BuildConfig
-import com.davidzhu.wantnote.update.UpdateInfo
-import com.davidzhu.wantnote.ui.components.WantAlertDialog
-import com.davidzhu.wantnote.ui.components.WantCircularProgressIndicator
-import com.davidzhu.wantnote.ui.components.WantDropdownMenu
-import com.davidzhu.wantnote.ui.components.WantDropdownMenuItem
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
+import androidx.compose.material.icons.outlined.Send
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.MaterialTheme
-import com.davidzhu.wantnote.ui.components.WantTextButton
-import com.davidzhu.wantnote.ui.components.WantScaffold
-import top.yukonga.miuix.kmp.basic.SnackbarHost
-import top.yukonga.miuix.kmp.basic.SnackbarHostState
-import top.yukonga.miuix.kmp.basic.Text
-import com.davidzhu.wantnote.ui.components.WantTopBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.davidzhu.wantnote.BuildConfig
 import com.davidzhu.wantnote.data.AppSettings
+import com.davidzhu.wantnote.data.BoxCreateResult
 import com.davidzhu.wantnote.data.HomeViewMode
+import com.davidzhu.wantnote.data.LiquidGlassSurfaceRole
 import com.davidzhu.wantnote.data.NoteBox
 import com.davidzhu.wantnote.data.NoteRepository
 import com.davidzhu.wantnote.data.NoteWithDetails
 import com.davidzhu.wantnote.data.SearchText
 import com.davidzhu.wantnote.data.Tag
+import com.davidzhu.wantnote.sync.ExternalReadingSyncService
 import com.davidzhu.wantnote.ui.LocalAi
 import com.davidzhu.wantnote.ui.LocalDinox
 import com.davidzhu.wantnote.ui.LocalNotes
 import com.davidzhu.wantnote.ui.LocalSettings
+import com.davidzhu.wantnote.ui.components.BoxPickerDialog
+import com.davidzhu.wantnote.ui.components.TagAddDialog
+import com.davidzhu.wantnote.ui.components.WantAlertDialog
+import com.davidzhu.wantnote.ui.components.WantCircularProgressIndicator
+import com.davidzhu.wantnote.ui.components.WantDropdownMenu
+import com.davidzhu.wantnote.ui.components.WantDropdownMenuItem
+import com.davidzhu.wantnote.ui.components.WantLinearProgressIndicator
+import com.davidzhu.wantnote.ui.components.WantScaffold
+import com.davidzhu.wantnote.ui.components.WantTextButton
+import com.davidzhu.wantnote.ui.components.WantTopBar
+import com.davidzhu.wantnote.ui.components.liquidGlassSurface
+import com.davidzhu.wantnote.update.UpdateInfo
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.SnackbarHost
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** 主页筛选维度：全部 / 未分配 / 按卡片盒 / 按标签（0.10.0 单选）。 */
 private sealed interface HomeFilter {
@@ -69,6 +90,14 @@ private sealed interface HomeFilter {
     data class ByBox(val boxId: String) : HomeFilter
     data class ByTag(val tagId: String) : HomeFilter
 }
+
+/** 0.19.0：批量发送队列进度状态（发送到 Flomo / Dinox）。 */
+private data class SendQueueProgress(
+    val targetLabel: String,
+    val current: Int,
+    val total: Int,
+    val currentTitle: String,
+)
 
 @Composable
 fun HomeScreen(
@@ -96,6 +125,16 @@ fun HomeScreen(
     var showUpdateDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
     var busy by remember { mutableStateOf(false) }
+
+    // 0.19.0：多选模式状态与批量操作弹窗/队列进度
+    var multiSelectMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showBatchBoxDialog by remember { mutableStateOf(false) }
+    var showBatchTagDialog by remember { mutableStateOf(false) }
+    var showBatchDeleteDialog by remember { mutableStateOf(false) }
+    var showBatchDinoxDialog by remember { mutableStateOf(false) }
+    var sendQueue by remember { mutableStateOf<SendQueueProgress?>(null) }
+
     // 0.10.0：卡片盒 / 标签筛选（会话级，不持久化）。
     var filter by remember { mutableStateOf<HomeFilter>(HomeFilter.All) }
 
@@ -109,13 +148,101 @@ fun HomeScreen(
         }
     }
 
+    val selectedNotes = remember(items, selectedIds) {
+        items.filter { it.note.id in selectedIds }
+    }
+
+    fun exitMultiSelect() {
+        multiSelectMode = false
+        selectedIds = emptySet()
+    }
+
+    BackHandler(enabled = multiSelectMode) {
+        if (sendQueue == null) {
+            exitMultiSelect()
+        }
+    }
+
+    /** 0.19.0：批量发送到 Flomo（顺序队列 + 实时进度展示）。 */
+    fun runBatchSendFlomo(targets: List<NoteWithDetails>) {
+        if (targets.isEmpty() || sendQueue != null) return
+        val webhook = settings.flomoWebhookUrl.trim()
+        if (webhook.isEmpty()) {
+            scope.launch {
+                snackbar.showSnackbar("请先在「设置 → 数据管理 → 生态互联 → Flomo」填写 Flomo API URL")
+            }
+            return
+        }
+        scope.launch {
+            var ok = 0
+            var fail = 0
+            var lastErr = ""
+            targets.forEachIndexed { index, item ->
+                sendQueue = SendQueueProgress(
+                    targetLabel = "Flomo",
+                    current = index + 1,
+                    total = targets.size,
+                    currentTitle = SearchText.displayTitle(item.note),
+                )
+                val res = ExternalReadingSyncService.sendNoteToFlomo(webhook, item.note, item.tags)
+                if (res.isSuccess) {
+                    ok++
+                } else {
+                    fail++
+                    lastErr = res.exceptionOrNull()?.message.orEmpty()
+                }
+            }
+            sendQueue = null
+            exitMultiSelect()
+            val summary = if (fail == 0) {
+                "已发送 $ok 篇笔记到 Flomo"
+            } else {
+                "发送到 Flomo 完成：成功 $ok 篇，失败 $fail 篇${if (lastErr.isNotBlank()) "（$lastErr）" else ""}"
+            }
+            snackbar.showSnackbar(summary)
+        }
+    }
+
+    /** 0.19.0：批量发送到 Dinox（顺序队列 + 实时进度展示）。 */
+    fun runBatchSendDinox(targets: List<NoteWithDetails>, boxName: String?) {
+        if (targets.isEmpty() || sendQueue != null) return
+        scope.launch {
+            var ok = 0
+            var fail = 0
+            var lastErr = ""
+            targets.forEachIndexed { index, item ->
+                sendQueue = SendQueueProgress(
+                    targetLabel = "Dinox",
+                    current = index + 1,
+                    total = targets.size,
+                    currentTitle = SearchText.displayTitle(item.note),
+                )
+                val res = dinox.sendNote(item.note.id, boxName)
+                if (res.isSuccess) {
+                    ok++
+                } else {
+                    fail++
+                    lastErr = res.exceptionOrNull()?.message.orEmpty()
+                }
+            }
+            sendQueue = null
+            exitMultiSelect()
+            val summary = if (fail == 0) {
+                "已发送 $ok 篇笔记到 Dinox"
+            } else {
+                "发送到 Dinox 完成：成功 $ok 篇，失败 $fail 篇${if (lastErr.isNotBlank()) "（$lastErr）" else ""}"
+            }
+            snackbar.showSnackbar(summary)
+        }
+    }
+
     WantScaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             WantTopBar(
-                title = "想记",
-                navigationIcon = if (availableUpdate != null) {
+                title = if (multiSelectMode) "已选 ${selectedIds.size} 篇" else "想记",
+                navigationIcon = if (!multiSelectMode && availableUpdate != null) {
                     {
                         IconButton(onClick = { showUpdateDialog = true }) {
                             Box(
@@ -138,63 +265,192 @@ fun HomeScreen(
                     null
                 },
                 actions = {
-                    IconButton(onClick = onSearch) {
-                        Icon(Icons.Outlined.Search, contentDescription = "搜索")
+                    if (multiSelectMode) {
+                        WantTextButton(
+                            onClick = { if (sendQueue == null) exitMultiSelect() },
+                            enabled = sendQueue == null,
+                        ) {
+                            Text("完成")
+                        }
+                    } else {
+                        IconButton(onClick = onSearch) {
+                            Icon(Icons.Outlined.Search, contentDescription = "搜索")
+                        }
                     }
                 },
             )
         },
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            // 0.10.0：顶部展示控件改为两个下拉框（视图模式 + 卡片盒/标签筛选），
-            // 不再是平铺的选项行。
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ViewModeDropdown(
-                    selected = viewMode,
-                    onSelect = { mode ->
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (multiSelectMode) {
+                    // 0.19.0：多选顶部控制栏（全选 / 取消全选 / 反选）
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        WantTextButton(
+                            onClick = { selectedIds = filtered.map { it.note.id }.toSet() },
+                            enabled = sendQueue == null,
+                        ) { Text("全选") }
+                        WantTextButton(
+                            onClick = { selectedIds = emptySet() },
+                            enabled = sendQueue == null,
+                        ) { Text("取消全选") }
+                        WantTextButton(
+                            onClick = {
+                                val visibleIds = filtered.map { it.note.id }.toSet()
+                                selectedIds = visibleIds - selectedIds
+                            },
+                            enabled = sendQueue == null,
+                        ) { Text("反选") }
+                    }
+                } else {
+                    // 0.10.0：顶部展示控件改为两个下拉框（视图模式 + 卡片盒/标签筛选），
+                    // 不再是平铺的选项行。
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ViewModeDropdown(
+                            selected = viewMode,
+                            onSelect = { mode ->
+                                scope.launch {
+                                    settingsRepo.update { it.copy(homeView = mode.name) }
+                                }
+                            },
+                        )
+                        FilterDropdown(
+                            filter = filter,
+                            boxes = boxes,
+                            tags = allTags,
+                            onSelect = { filter = it },
+                        )
+                    }
+                }
+
+                // 0.19.0：发送队列实时进度横幅
+                sendQueue?.let { progress ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f))
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "正在发送到 ${progress.targetLabel}（${progress.current}/${progress.total}）",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = "${(progress.current * 100 / progress.total.coerceAtLeast(1))}%",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        Text(
+                            text = progress.currentTitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        WantLinearProgressIndicator(
+                            progress = { progress.current.toFloat() / progress.total.coerceAtLeast(1) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+
+                if (filtered.isEmpty()) {
+                    Text(
+                        text = if (items.isEmpty()) {
+                            "还没有笔记。点中间的加号就可以开始写，不必先起标题。"
+                        } else {
+                            "当前筛选条件下没有笔记。"
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .padding(horizontal = 24.dp, vertical = 24.dp)
+                            .clickable(onClick = onCreate),
+                    )
+                } else {
+                    NoteCollection(
+                        items = filtered,
+                        links = allLinks,
+                        viewMode = viewMode,
+                        onOpenNote = onOpenNote,
+                        onLongPressNote = { id -> menuNote = items.firstOrNull { it.note.id == id } },
+                        profileNickname = settings.profileNickname,
+                        profileAvatarPath = settings.profileAvatarPath,
+                        multiSelectMode = multiSelectMode,
+                        selectedIds = selectedIds,
+                        onToggleSelect = { id ->
+                            if (sendQueue == null) {
+                                selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+                            }
+                        },
+                    )
+                }
+            }
+
+            // 0.19.0：多选底部操作胶囊（置顶 / 星标 / 删除 / 设置卡片盒 / 设置标签 / 发送到flomo / 发送到Dinox）
+            if (multiSelectMode) {
+                val hasSelection = selectedNotes.isNotEmpty() && sendQueue == null
+                val allPinned = selectedNotes.isNotEmpty() && selectedNotes.all { it.note.pinned }
+                val allStarred = selectedNotes.isNotEmpty() && selectedNotes.all { it.note.starred }
+                MultiSelectBottomCapsule(
+                    enabled = hasSelection,
+                    allPinned = allPinned,
+                    allStarred = allStarred,
+                    onPin = {
+                        val targets = selectedNotes
+                        val targetPinned = !allPinned
                         scope.launch {
-                            settingsRepo.update { it.copy(homeView = mode.name) }
+                            targets.forEach { repository.setPinned(it.note.id, targetPinned) }
+                            snackbar.showSnackbar(
+                                if (targetPinned) "已置顶 ${targets.size} 篇笔记" else "已取消置顶 ${targets.size} 篇笔记",
+                            )
+                            exitMultiSelect()
                         }
                     },
-                )
-                FilterDropdown(
-                    filter = filter,
-                    boxes = boxes,
-                    tags = allTags,
-                    onSelect = { filter = it },
-                )
-            }
-            if (filtered.isEmpty()) {
-                Text(
-                    text = if (items.isEmpty()) {
-                        "还没有笔记。点中间的加号就可以开始写，不必先起标题。"
-                    } else {
-                        "当前筛选条件下没有笔记。"
+                    onStar = {
+                        val targets = selectedNotes
+                        val targetStarred = !allStarred
+                        scope.launch {
+                            targets.forEach { repository.setStarred(it.note.id, targetStarred) }
+                            snackbar.showSnackbar(
+                                if (targetStarred) "已星标 ${targets.size} 篇笔记" else "已取消星标 ${targets.size} 篇笔记",
+                            )
+                            exitMultiSelect()
+                        }
                     },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    onDelete = { showBatchDeleteDialog = true },
+                    onSetBox = { showBatchBoxDialog = true },
+                    onSetTags = { showBatchTagDialog = true },
+                    onSendFlomo = { runBatchSendFlomo(selectedNotes) },
+                    onSendDinox = { showBatchDinoxDialog = true },
                     modifier = Modifier
-                        .padding(horizontal = 24.dp, vertical = 24.dp)
-                        .clickable(onClick = onCreate),
-                )
-            } else {
-                NoteCollection(
-                    items = filtered,
-                    links = allLinks,
-                    viewMode = viewMode,
-                    onOpenNote = onOpenNote,
-                    onLongPressNote = { id -> menuNote = items.firstOrNull { it.note.id == id } },
-                    profileNickname = settings.profileNickname,
-                    profileAvatarPath = settings.profileAvatarPath,
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
                 )
             }
         }
@@ -203,10 +459,7 @@ fun HomeScreen(
     /**
      * Fill-only generation for ONE field: 生成标题 fills only a blank title,
      * 生成标签 fills only a missing tag set; the other field is never touched
-     * (its suggestion side is passed as empty). A field that already has
-     * content is reported without spending an AI request. Failure messages
-     * come from AiService and are user-safe: they name the missing setup
-     * without echoing keys or endpoints.
+     * (its suggestion side is passed as empty).
      */
     fun generateField(target: NoteWithDetails, wantTitle: Boolean) {
         val id = target.note.id
@@ -320,11 +573,34 @@ fun HomeScreen(
                             shape = RoundedCornerShape(18.dp),
                         )
                         .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     HomeMenuAction("编辑笔记") {
                         menuNote = null
                         onEditNote(target.note.id)
+                    }
+                    HomeMenuAction(if (target.note.pinned) "取消置顶" else "置顶", enabled = !busy) {
+                        val nextPinned = !target.note.pinned
+                        val id = target.note.id
+                        menuNote = null
+                        scope.launch {
+                            repository.setPinned(id, nextPinned)
+                            snackbar.showSnackbar(if (nextPinned) "已置顶笔记" else "已取消置顶")
+                        }
+                    }
+                    HomeMenuAction(if (target.note.starred) "取消星标" else "星标", enabled = !busy) {
+                        val nextStarred = !target.note.starred
+                        val id = target.note.id
+                        menuNote = null
+                        scope.launch {
+                            repository.setStarred(id, nextStarred)
+                            snackbar.showSnackbar(if (nextStarred) "已添加星标" else "已取消星标")
+                        }
+                    }
+                    HomeMenuAction("多选", enabled = !busy) {
+                        menuNote = null
+                        multiSelectMode = true
+                        selectedIds = setOf(target.note.id)
                     }
                     HomeMenuAction("生成标题", enabled = !busy) {
                         generateField(target, wantTitle = true)
@@ -334,6 +610,24 @@ fun HomeScreen(
                     }
                     HomeMenuAction("自动分配卡片盒", enabled = !busy) {
                         autoAssignBox(target)
+                    }
+                    HomeMenuAction("发送到flomo", enabled = !busy) {
+                        menuNote = null
+                        busy = true
+                        scope.launch {
+                            val result = ExternalReadingSyncService.sendNoteToFlomo(
+                                webhookUrl = settings.flomoWebhookUrl,
+                                note = target.note,
+                                tags = target.tags,
+                            )
+                            busy = false
+                            result.fold(
+                                onSuccess = { snackbar.showSnackbar("已发送到 Flomo") },
+                                onFailure = { error ->
+                                    snackbar.showSnackbar(error.message ?: "发送到 Flomo 失败")
+                                },
+                            )
+                        }
                     }
                     HomeMenuAction("发送到Dinox", enabled = !busy) {
                         menuNote = null
@@ -373,6 +667,113 @@ fun HomeScreen(
         )
     }
 
+    if (showBatchDinoxDialog) {
+        val targets = selectedNotes
+        SendToDinoxDialog(
+            noteTitle = "已选中的 ${targets.size} 篇笔记",
+            onSend = { boxName ->
+                showBatchDinoxDialog = false
+                runBatchSendDinox(targets, boxName)
+            },
+            onDismiss = { showBatchDinoxDialog = false },
+        )
+    }
+
+    if (showBatchBoxDialog) {
+        val targets = selectedNotes
+        BoxPickerDialog(
+            boxes = boxes,
+            currentBoxId = null,
+            onPick = { box ->
+                showBatchBoxDialog = false
+                scope.launch {
+                    targets.forEach { repository.assignNoteToBox(it.note.id, box.id) }
+                    snackbar.showSnackbar("已将 ${targets.size} 篇笔记归入「${box.name}」")
+                    exitMultiSelect()
+                }
+            },
+            onCreate = { name ->
+                val trimmed = name.trim()
+                if (trimmed.isEmpty()) {
+                    BoxCreateResult.EmptyName
+                } else {
+                    val created = repository.createBox(trimmed)
+                    if (created == null) {
+                        BoxCreateResult.DuplicateName
+                    } else {
+                        targets.forEach { repository.assignNoteToBox(it.note.id, created.id) }
+                        snackbar.showSnackbar("已新建「${created.name}」并归入 ${targets.size} 篇笔记")
+                        exitMultiSelect()
+                        BoxCreateResult.Created(created)
+                    }
+                }
+            },
+            onDismiss = { showBatchBoxDialog = false },
+        )
+    }
+
+    if (showBatchTagDialog) {
+        val targets = selectedNotes
+        val commonTagIds = remember(targets) {
+            if (targets.isEmpty()) emptySet()
+            else targets.map { item -> item.tags.map { it.id }.toSet() }.reduce { acc, set -> acc intersect set }
+        }
+        TagAddDialog(
+            allTags = allTags,
+            selectedIds = commonTagIds,
+            onToggle = { tag ->
+                scope.launch {
+                    if (tag.id in commonTagIds) {
+                        targets.forEach { repository.removeTagFromNote(it.note.id, tag.id) }
+                        snackbar.showSnackbar("已从 ${targets.size} 篇笔记移除 #${tag.path}")
+                    } else {
+                        targets.forEach { repository.attachTag(it.note.id, tag.id) }
+                        snackbar.showSnackbar("已为 ${targets.size} 篇笔记添加 #${tag.path}")
+                    }
+                }
+            },
+            onCreate = { path, color ->
+                scope.launch {
+                    val created = repository.upsertTag(path, color)
+                    if (created != null) {
+                        targets.forEach { repository.attachTag(it.note.id, created.id) }
+                        snackbar.showSnackbar("已为 ${targets.size} 篇笔记添加 #${created.path}")
+                    }
+                }
+            },
+            onDismiss = { showBatchTagDialog = false },
+        )
+    }
+
+    if (showBatchDeleteDialog) {
+        val targets = selectedNotes
+        WantAlertDialog(
+            onDismissRequest = { showBatchDeleteDialog = false },
+            title = { Text("删除选中的 ${targets.size} 篇笔记？") },
+            text = {
+                Text("选中的 ${targets.size} 篇笔记及其内容、标签关联和双链都会被永久删除，无法撤销。")
+            },
+            confirmButton = {
+                WantTextButton(
+                    onClick = {
+                        showBatchDeleteDialog = false
+                        scope.launch {
+                            var count = 0
+                            targets.forEach {
+                                if (repository.deleteNote(it.note.id)) count++
+                            }
+                            exitMultiSelect()
+                            snackbar.showSnackbar("已删除 $count 篇笔记")
+                        }
+                    },
+                ) { Text("永久删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                WantTextButton(onClick = { showBatchDeleteDialog = false }) { Text("取消") }
+            },
+        )
+    }
+
     deleteTarget?.let { target ->
         WantAlertDialog(
             onDismissRequest = { deleteTarget = null },
@@ -395,6 +796,114 @@ fun HomeScreen(
             dismissButton = {
                 WantTextButton(onClick = { deleteTarget = null }) { Text("取消") }
             },
+        )
+    }
+}
+
+/** 0.19.0：多选底部悬浮操作胶囊。 */
+@Composable
+private fun MultiSelectBottomCapsule(
+    enabled: Boolean,
+    allPinned: Boolean,
+    allStarred: Boolean,
+    onPin: () -> Unit,
+    onStar: () -> Unit,
+    onDelete: () -> Unit,
+    onSetBox: () -> Unit,
+    onSetTags: () -> Unit,
+    onSendFlomo: () -> Unit,
+    onSendDinox: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .liquidGlassSurface(
+                shape = RoundedCornerShape(999.dp),
+                role = LiquidGlassSurfaceRole.BAR,
+                baseColor = MaterialTheme.colorScheme.surface,
+                elevationOverride = 14.dp,
+                borderWidth = 1.2.dp,
+            )
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CapsuleActionItem(
+            icon = Icons.Outlined.PushPin,
+            label = if (allPinned) "取消置顶" else "置顶",
+            enabled = enabled,
+            onClick = onPin,
+        )
+        CapsuleActionItem(
+            icon = if (allStarred) Icons.Rounded.Star else Icons.Outlined.StarBorder,
+            label = if (allStarred) "取消星标" else "星标",
+            enabled = enabled,
+            onClick = onStar,
+        )
+        CapsuleActionItem(
+            icon = Icons.Outlined.Folder,
+            label = "设置卡片盒",
+            enabled = enabled,
+            onClick = onSetBox,
+        )
+        CapsuleActionItem(
+            icon = Icons.Outlined.Label,
+            label = "设置标签",
+            enabled = enabled,
+            onClick = onSetTags,
+        )
+        CapsuleActionItem(
+            icon = Icons.Outlined.Send,
+            label = "发送到flomo",
+            enabled = enabled,
+            onClick = onSendFlomo,
+        )
+        CapsuleActionItem(
+            icon = Icons.Outlined.Send,
+            label = "发送到Dinox",
+            enabled = enabled,
+            onClick = onSendDinox,
+        )
+        CapsuleActionItem(
+            icon = Icons.Outlined.DeleteOutline,
+            label = "删除",
+            enabled = enabled,
+            tint = MaterialTheme.colorScheme.error,
+            onClick = onDelete,
+        )
+    }
+}
+
+@Composable
+private fun CapsuleActionItem(
+    icon: ImageVector,
+    label: String,
+    enabled: Boolean,
+    tint: Color = MaterialTheme.colorScheme.onSurface,
+    onClick: () -> Unit,
+) {
+    val effectiveTint = if (enabled) tint else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f)
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = effectiveTint,
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = effectiveTint,
+            maxLines = 1,
         )
     }
 }
@@ -427,14 +936,14 @@ private fun DropdownTrigger(label: String, onClick: () -> Unit) {
     }
 }
 
-/** 0.10.0：视图模式下拉框（卡片/瀑布流/极简/时间戳）。 */
+/** 0.10.0：视图模式下拉框（卡片/瀑布流/极简/时间戳/朋友圈）。 */
 @Composable
 private fun ViewModeDropdown(
     selected: HomeViewMode,
     onSelect: (HomeViewMode) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    androidx.compose.foundation.layout.Box {
+    Box {
         DropdownTrigger(label = selected.label) { expanded = true }
         WantDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             HomeViewMode.entries.forEach { mode ->
@@ -465,7 +974,7 @@ private fun FilterDropdown(
         is HomeFilter.ByBox -> "卡片盒：${boxes.firstOrNull { it.id == filter.boxId }?.name ?: "…"}"
         is HomeFilter.ByTag -> "#${tags.firstOrNull { it.id == filter.tagId }?.path ?: "…"}"
     }
-    androidx.compose.foundation.layout.Box {
+    Box {
         DropdownTrigger(label = label) { expanded = true }
         WantDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             WantDropdownMenuItem(
@@ -576,7 +1085,7 @@ private fun SendToDinoxDialog(
                         }
                     }
                     else -> {
-                        androidx.compose.foundation.layout.Box {
+                        Box {
                             WantTextButton(onClick = { menuOpen = true }, modifier = Modifier.fillMaxWidth()) {
                                 Text(
                                     when {

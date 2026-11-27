@@ -25,6 +25,14 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
+enum class ImportSourceMode(val label: String) {
+    GENERAL("通用导入"),
+    FLOMO_ZIP("flomo压缩包导入"),
+    DEDAO_ZIP("得到大脑压缩包导入"),
+    MIAOJIDUO_ZIP("喵记多压缩包导入"),
+    SEEDS_ZIP("Seeds压缩包导入"),
+}
+
 data class ImportFailure(val fileName: String, val reason: String)
 
 data class ImportResult(
@@ -65,6 +73,8 @@ class ImportExportService(
 ) {
     suspend fun importUris(
         uris: List<Uri>,
+        targetBoxId: String = "",
+        mode: ImportSourceMode = ImportSourceMode.GENERAL,
         onProgress: (done: Int, total: Int, label: String) -> Unit = { _, _, _ -> },
     ): ImportResult = withContext(Dispatchers.IO) {
         val tasks = ArrayList<ImportTask>()
@@ -84,7 +94,7 @@ class ImportExportService(
                             java.util.Collections.list(zip.entries())
                                 .filter { !it.isDirectory }
                                 .map { it.name }
-                                .filter { isSupportedName(it) && !it.startsWith("__MACOSX/") && !it.contains("/.") }
+                                .filter { isAllowedForMode(it, mode) && !it.startsWith("__MACOSX/") && !it.contains("/.") }
                         }
                         if (entryNames.isEmpty()) {
                             failures += ImportFailure(display, "zip 里没有 .md / .markdown / .html / .htm 文件")
@@ -134,24 +144,38 @@ class ImportExportService(
                     val isHtml = extension == "html" || extension == "htm" ||
                         MarkdownCodec.looksLikeHtml(text)
                     val mediaCache = HashMap<String, String?>()
-                    val parsed = MarkdownCodec.parseDocument(
-                        text = text,
-                        fallbackTitle = fileTitle(task.displayName),
-                        isHtml = isHtml,
-                        resolveMedia = { ref ->
-                            if (task.zipFile == null) {
-                                null
-                            } else {
-                                mediaCache.getOrPut(ref) { copyZipMedia(task, ref) }
-                            }
-                        },
-                    )
-                    if (parsed.blocks.isEmpty() && parsed.title.isBlank()) {
-                        throw TransferException("没有可导入的文本内容")
+                    val docsToImport: List<Pair<String, Boolean>> = if (
+                        (mode == ImportSourceMode.FLOMO_ZIP || mode == ImportSourceMode.DEDAO_ZIP) && isHtml
+                    ) {
+                        val memos = splitFlomoHtmlMemos(text)
+                        if (memos.isNotEmpty()) memos.map { it to true } else listOf(text to true)
+                    } else {
+                        listOf(text to isHtml)
                     }
-                    createNote(parsed)
-                    missingMedia += parsed.missingMedia.size
-                    success += 1
+                    docsToImport.forEachIndexed { idx, (docText, docIsHtml) ->
+                        val fallback = if (docsToImport.size > 1) {
+                            "${fileTitle(task.displayName)} #${idx + 1}"
+                        } else {
+                            fileTitle(task.displayName)
+                        }
+                        val parsed = MarkdownCodec.parseDocument(
+                            text = docText,
+                            fallbackTitle = fallback,
+                            isHtml = docIsHtml,
+                            resolveMedia = { ref ->
+                                if (task.zipFile == null) {
+                                    null
+                                } else {
+                                    mediaCache.getOrPut(ref) { copyZipMedia(task, ref) }
+                                }
+                            },
+                        )
+                        if (parsed.blocks.isNotEmpty() || parsed.title.isNotBlank()) {
+                            createNote(parsed, targetBoxId = targetBoxId)
+                            missingMedia += parsed.missingMedia.size
+                            success += 1
+                        }
+                    }
                 } catch (error: Exception) {
                     failures += ImportFailure(task.sourceLabel, messageOf(error, "导入失败"))
                 }
@@ -245,12 +269,10 @@ class ImportExportService(
         }
     }
 
-    private suspend fun createNote(parsed: MarkdownNote) {
+    private suspend fun createNote(parsed: MarkdownNote, targetBoxId: String = "") {
         val now = System.currentTimeMillis()
         val noteId = UUID.randomUUID().toString()
         val noteTitle = parsed.title.ifBlank { "导入的笔记" }.take(200)
-        // 内容 Markdown（不含标题 H1）：块模型渲染回纯文本 Markdown。
-        // 引用不到的媒体保留为原始引用行，等附件同步到位后自然恢复。
         val markdownBlocks = parsed.blocks.ifEmpty {
             listOf(MarkdownBlock(BlockType.PARAGRAPH, text = ""))
         }
@@ -261,8 +283,26 @@ class ImportExportService(
             body = "",
             createdAt = now,
             updatedAt = now,
+            boxId = targetBoxId,
         )
         notes.insertImportedMarkdown(note, content)
+    }
+
+    private fun isAllowedForMode(name: String, mode: ImportSourceMode): Boolean {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        return when (mode) {
+            ImportSourceMode.FLOMO_ZIP, ImportSourceMode.DEDAO_ZIP -> ext == "html" || ext == "htm"
+            ImportSourceMode.SEEDS_ZIP -> ext == "md" || ext == "markdown"
+            ImportSourceMode.MIAOJIDUO_ZIP, ImportSourceMode.GENERAL ->
+                ext == "md" || ext == "markdown" || ext == "html" || ext == "htm"
+        }
+    }
+
+    /** 拆分 Flomo 导出 HTML 中独立的 `<div class="memo">...</div>` 条目，每条转为独立笔记。 */
+    private fun splitFlomoHtmlMemos(html: String): List<String> {
+        val regex = Regex("""(?is)<div[^>]*class\s*=\s*["'][^"']*\bmemo\b[^"']*["'][^>]*>(.*?)</div>\s*(?=<div[^>]*class\s*=\s*["'][^"']*\bmemo\b|</div|</body|$)""")
+        val matches = regex.findAll(html).map { it.value.trim() }.filter { it.isNotEmpty() }.toList()
+        return if (matches.size >= 2) matches else emptyList()
     }
 
     private fun readTaskText(task: ImportTask): String {

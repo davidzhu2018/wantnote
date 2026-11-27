@@ -533,6 +533,14 @@ class NoteRepository(
     }
 
     /** 把笔记分配到卡片盒；boxId 必须已存在（空串 = 取消分配）。 */
+    suspend fun setPinned(noteId: String, pinned: Boolean) {
+        notes.setPinned(noteId, pinned)
+    }
+
+    suspend fun setStarred(noteId: String, starred: Boolean) {
+        notes.setStarred(noteId, starred)
+    }
+
     suspend fun updateLocation(
         noteId: String,
         locationName: String,
@@ -745,9 +753,11 @@ class NoteRepository(
             startMs: Long? = null,
             endMs: Long? = null,
             boxId: String? = null,
+            starredOnly: Boolean = false,
         ): List<NoteWithDetails> {
             val q = keyword.trim()
             return items.filter { item ->
+                if (starredOnly && !item.note.starred) return@filter false
                 val keywordOk = q.isEmpty() ||
                     item.note.title.contains(q, ignoreCase = true) ||
                     item.note.body.contains(q, ignoreCase = true) ||

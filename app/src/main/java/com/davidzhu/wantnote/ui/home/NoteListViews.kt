@@ -24,6 +24,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import com.davidzhu.wantnote.ui.components.WantCheckbox
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -96,6 +101,9 @@ private fun NoteCard(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     elevation: Int = 11,
+    multiSelectMode: Boolean = false,
+    selected: Boolean = false,
+    onToggleSelect: () -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -114,7 +122,12 @@ private fun NoteCard(
         lerp(MaterialTheme.colorScheme.surfaceVariant, Color.White, 0.80f)
     }
     val cardElevation = maxOf(elevation, 13)
-    Column(
+    val selectedBorder = if (multiSelectMode && selected) {
+        Modifier.border(2.dp, MaterialTheme.colorScheme.primary, shape)
+    } else {
+        Modifier
+    }
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .liquidGlassSurface(
@@ -124,9 +137,60 @@ private fun NoteCard(
                 elevationOverride = cardElevation.dp,
                 borderWidth = 1.3.dp,
             )
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-        content = content,
-    )
+            .then(selectedBorder)
+            .combinedClickable(
+                onClick = { if (multiSelectMode) onToggleSelect() else onClick() },
+                onLongClick = { if (multiSelectMode) onToggleSelect() else onLongClick() },
+            ),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth(), content = content)
+        if (multiSelectMode) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
+                    .padding(2.dp),
+            ) {
+                WantCheckbox(
+                    checked = selected,
+                    onCheckedChange = { onToggleSelect() },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NoteStatusBadges(
+    pinned: Boolean,
+    starred: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    if (!pinned && !starred) return
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        if (pinned) {
+            Icon(
+                imageVector = Icons.Outlined.PushPin,
+                contentDescription = "已置顶",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+        if (starred) {
+            Icon(
+                imageVector = Icons.Rounded.Star,
+                contentDescription = "已星标",
+                tint = Color(0xFFF59E0B),
+                modifier = Modifier.size(15.dp),
+            )
+        }
+    }
 }
 
 @Composable
@@ -140,6 +204,9 @@ fun NoteCollection(
     links: List<NoteLink> = emptyList(),
     profileNickname: String = "",
     profileAvatarPath: String = "",
+    multiSelectMode: Boolean = false,
+    selectedIds: Set<String> = emptySet(),
+    onToggleSelect: (String) -> Unit = {},
 ) {
     if (items.isEmpty()) {
         if (emptyText != null) {
@@ -151,18 +218,24 @@ fun NoteCollection(
         }
         return
     }
+    val ordered = remember(items) {
+        items.sortedWith(compareByDescending<NoteWithDetails> { it.note.pinned }.thenByDescending { it.note.updatedAt })
+    }
     when (viewMode) {
-        HomeViewMode.CARD -> CardView(items, onOpenNote, onLongPressNote, links, modifier)
-        HomeViewMode.WATERFALL -> WaterfallView(items, onOpenNote, onLongPressNote, links, modifier)
-        HomeViewMode.MINIMAL -> MinimalView(items, onOpenNote, onLongPressNote, links, modifier)
-        HomeViewMode.TIMESTAMP -> TimestampView(items, onOpenNote, onLongPressNote, links, modifier)
+        HomeViewMode.CARD -> CardView(ordered, onOpenNote, onLongPressNote, links, multiSelectMode, selectedIds, onToggleSelect, modifier)
+        HomeViewMode.WATERFALL -> WaterfallView(ordered, onOpenNote, onLongPressNote, links, multiSelectMode, selectedIds, onToggleSelect, modifier)
+        HomeViewMode.MINIMAL -> MinimalView(ordered, onOpenNote, onLongPressNote, links, multiSelectMode, selectedIds, onToggleSelect, modifier)
+        HomeViewMode.TIMESTAMP -> TimestampView(ordered, onOpenNote, onLongPressNote, links, multiSelectMode, selectedIds, onToggleSelect, modifier)
         HomeViewMode.MOMENTS -> MomentsView(
-            items = items,
+            items = ordered,
             onOpenNote = onOpenNote,
             onLongPressNote = onLongPressNote,
             links = links,
             profileNickname = profileNickname,
             profileAvatarPath = profileAvatarPath,
+            multiSelectMode = multiSelectMode,
+            selectedIds = selectedIds,
+            onToggleSelect = onToggleSelect,
             modifier = modifier,
         )
     }
@@ -236,17 +309,17 @@ private fun PreviewText(
 }
 
 @Composable
-private fun CardView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, modifier: Modifier = Modifier) {
+private fun CardView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, multiSelectMode: Boolean = false, selectedIds: Set<String> = emptySet(), onToggleSelect: (String) -> Unit = {}, modifier: Modifier = Modifier) {
     val linkTitles = items.associate { it.note.id to SearchText.displayTitle(it.note) }
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 28.dp),
+        contentPadding = PaddingValues(start = 14.dp, top = 10.dp, end = 14.dp, bottom = if (multiSelectMode) 104.dp else 28.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(items, key = { it.note.id }) { item ->
-            NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 8) {
+            NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 8, multiSelectMode = multiSelectMode, selected = item.note.id in selectedIds, onToggleSelect = { onToggleSelect(item.note.id) }) {
                 val media = item.firstMedia
                 if (media != null) {
                     NoteMediaThumb(
@@ -258,12 +331,20 @@ private fun CardView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit,
                     )
                 }
                 Column(modifier = Modifier.padding(14.dp)) {
-                    Text(
-                        text = SearchText.displayTitle(item.note),
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = SearchText.displayTitle(item.note),
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        NoteStatusBadges(pinned = item.note.pinned, starred = item.note.starred)
+                    }
                     val preview = SearchText.previewMarkdown(item.note)
                     PreviewText(
                         text = preview,
@@ -291,12 +372,12 @@ private fun CardView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit,
 }
 
 @Composable
-private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, modifier: Modifier = Modifier) {
+private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, multiSelectMode: Boolean = false, selectedIds: Set<String> = emptySet(), onToggleSelect: (String) -> Unit = {}, modifier: Modifier = Modifier) {
     val linkTitles = items.associate { it.note.id to SearchText.displayTitle(it.note) }
     LazyVerticalStaggeredGrid(
         columns = StaggeredGridCells.Fixed(2),
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 28.dp),
+        contentPadding = PaddingValues(start = 14.dp, top = 10.dp, end = 14.dp, bottom = if (multiSelectMode) 104.dp else 28.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalItemSpacing = 12.dp,
     ) {
@@ -308,7 +389,7 @@ private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
                 preview.length > 20 -> 3
                 else -> 2
             }
-            NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 8) {
+            NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 8, multiSelectMode = multiSelectMode, selected = item.note.id in selectedIds, onToggleSelect = { onToggleSelect(item.note.id) }) {
                 val media = item.firstMedia
                 if (media != null) {
                     val ratio = if (media.blockType.name == "VIDEO") 16f / 9f else 1f
@@ -321,13 +402,21 @@ private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
                     )
                 }
                 Column(modifier = Modifier.padding(14.dp)) {
-                    Text(
-                        text = SearchText.displayTitle(item.note),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = SearchText.displayTitle(item.note),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        NoteStatusBadges(pinned = item.note.pinned, starred = item.note.starred)
+                    }
                     PreviewText(
                         text = preview,
                         linkTitles = linkTitles,
@@ -354,15 +443,15 @@ private fun WaterfallView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
 }
 
 @Composable
-private fun MinimalView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, modifier: Modifier = Modifier) {
+private fun MinimalView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, multiSelectMode: Boolean = false, selectedIds: Set<String> = emptySet(), onToggleSelect: (String) -> Unit = {}, modifier: Modifier = Modifier) {
     val linkTitles = items.associate { it.note.id to SearchText.displayTitle(it.note) }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = 28.dp),
+        contentPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = if (multiSelectMode) 104.dp else 28.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         items(items, key = { it.note.id }) { item ->
-            NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 5) {
+            NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 5, multiSelectMode = multiSelectMode, selected = item.note.id in selectedIds, onToggleSelect = { onToggleSelect(item.note.id) }) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -380,12 +469,19 @@ private fun MinimalView(items: List<NoteWithDetails>, onOpenNote: (String) -> Un
                         )
                     }
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = SearchText.displayTitle(item.note),
-                            style = MaterialTheme.typography.bodyLarge,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                text = SearchText.displayTitle(item.note),
+                                style = MaterialTheme.typography.bodyLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            NoteStatusBadges(pinned = item.note.pinned, starred = item.note.starred)
+                        }
                         TagChipRow(tags = item.tags, max = 2)
                         NoteLinkFooter(
                             noteId = item.note.id,
@@ -407,15 +503,39 @@ private fun MinimalView(items: List<NoteWithDetails>, onOpenNote: (String) -> Un
 }
 
 @Composable
-private fun TimestampView(items: List<NoteWithDetails>, onOpenNote: (String) -> Unit, onLongPressNote: (String) -> Unit, links: List<NoteLink>, modifier: Modifier = Modifier) {
+private fun TimestampView(
+    items: List<NoteWithDetails>,
+    onOpenNote: (String) -> Unit,
+    onLongPressNote: (String) -> Unit,
+    links: List<NoteLink>,
+    multiSelectMode: Boolean = false,
+    selectedIds: Set<String> = emptySet(),
+    onToggleSelect: (String) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     val linkTitles = items.associate { it.note.id to SearchText.displayTitle(it.note) }
-    val grouped = items.groupBy { Dates.dayKey(it.note.updatedAt) }
+    val pinnedNotes = items.filter { it.note.pinned }
+    val normalNotes = items.filter { !it.note.pinned }
+    val grouped = normalNotes.groupBy { Dates.dayKey(it.note.updatedAt) }
     val keys = grouped.keys.toList()
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = 28.dp),
+        contentPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = if (multiSelectMode) 104.dp else 28.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        if (pinnedNotes.isNotEmpty()) {
+            item(key = "header-pinned") {
+                Text(
+                    text = "置顶",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+                )
+            }
+            items(pinnedNotes, key = { it.note.id }) { item ->
+                TimestampNoteRow(item, linkTitles, links, onOpenNote, onLongPressNote, multiSelectMode, item.note.id in selectedIds) { onToggleSelect(item.note.id) }
+            }
+        }
         keys.forEach { key ->
             val dayNotes = grouped.getValue(key)
             val dayLabel = Dates.formatDay(dayNotes.first().note.updatedAt)
@@ -428,53 +548,80 @@ private fun TimestampView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
                 )
             }
             items(dayNotes, key = { it.note.id }) { item ->
-                NoteCard(onClick = { onOpenNote(item.note.id) }, onLongClick = { onLongPressNote(item.note.id) }, elevation = 5) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        val media = item.firstMedia
-                        if (media != null) {
-                            NoteMediaThumb(
-                                media = media,
-                                modifier = Modifier
-                                    .padding(end = 12.dp, top = 4.dp)
-                                    .size(56.dp),
-                                corner = 6.dp,
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = Dates.formatTimestamp(item.note.updatedAt),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                            Text(
-                                text = SearchText.displayTitle(item.note),
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(top = 2.dp),
-                            )
-                            val preview = SearchText.previewMarkdown(item.note)
-                            PreviewText(
-                                text = preview,
-                                linkTitles = linkTitles,
-                                maxLines = 2,
-                            )
-                            TagChipRow(tags = item.tags, modifier = Modifier.padding(top = 6.dp), max = 3)
-                            NoteLinkFooter(
-                                noteId = item.note.id,
-                                links = links,
-                                linkTitles = linkTitles,
-                                onOpenNote = onOpenNote,
-                            )
-                        }
-                    }
+                TimestampNoteRow(item, linkTitles, links, onOpenNote, onLongPressNote, multiSelectMode, item.note.id in selectedIds) { onToggleSelect(item.note.id) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimestampNoteRow(
+    item: NoteWithDetails,
+    linkTitles: Map<String, String>,
+    links: List<NoteLink>,
+    onOpenNote: (String) -> Unit,
+    onLongPressNote: (String) -> Unit,
+    multiSelectMode: Boolean,
+    selected: Boolean,
+    onToggleSelect: () -> Unit,
+) {
+    NoteCard(
+        onClick = { onOpenNote(item.note.id) },
+        onLongClick = { onLongPressNote(item.note.id) },
+        elevation = 5,
+        multiSelectMode = multiSelectMode,
+        selected = selected,
+        onToggleSelect = onToggleSelect,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            val media = item.firstMedia
+            if (media != null) {
+                NoteMediaThumb(
+                    media = media,
+                    modifier = Modifier
+                        .padding(end = 12.dp, top = 4.dp)
+                        .size(56.dp),
+                    corner = 6.dp,
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = Dates.formatTimestamp(item.note.updatedAt),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    NoteStatusBadges(pinned = item.note.pinned, starred = item.note.starred)
                 }
+                Text(
+                    text = SearchText.displayTitle(item.note),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+                val preview = SearchText.previewMarkdown(item.note)
+                PreviewText(
+                    text = preview,
+                    linkTitles = linkTitles,
+                    maxLines = 2,
+                )
+                TagChipRow(tags = item.tags, modifier = Modifier.padding(top = 6.dp), max = 3)
+                NoteLinkFooter(
+                    noteId = item.note.id,
+                    links = links,
+                    linkTitles = linkTitles,
+                    onOpenNote = onOpenNote,
+                )
             }
         }
     }
@@ -493,6 +640,9 @@ private fun MomentsView(
     links: List<NoteLink>,
     profileNickname: String,
     profileAvatarPath: String,
+    multiSelectMode: Boolean = false,
+    selectedIds: Set<String> = emptySet(),
+    onToggleSelect: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val media = LocalMedia.current
@@ -510,7 +660,7 @@ private fun MomentsView(
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 14.dp, top = 8.dp, end = 14.dp, bottom = 28.dp),
+        contentPadding = PaddingValues(start = 14.dp, top = 8.dp, end = 14.dp, bottom = if (multiSelectMode) 104.dp else 28.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(items, key = { it.note.id }) { item ->
@@ -524,6 +674,9 @@ private fun MomentsView(
                 onClick = { onOpenNote(item.note.id) },
                 onLongClick = { onLongPressNote(item.note.id) },
                 elevation = 7,
+                multiSelectMode = multiSelectMode,
+                selected = item.note.id in selectedIds,
+                onToggleSelect = { onToggleSelect(item.note.id) },
             ) {
                 Row(
                     modifier = Modifier
@@ -558,14 +711,22 @@ private fun MomentsView(
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = displayName,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = nicknameColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                text = displayName,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = nicknameColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            NoteStatusBadges(pinned = item.note.pinned, starred = item.note.starred)
+                        }
                         if (item.note.title.isNotBlank()) {
                             Text(
                                 text = item.note.title.trim(),

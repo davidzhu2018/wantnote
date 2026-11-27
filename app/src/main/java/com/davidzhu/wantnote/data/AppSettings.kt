@@ -172,6 +172,16 @@ data class AppSettings(
     val dedaoMcpUrl: String = "",
     val dedaoMcpToken: String = "",
     val dedaoLastSyncAt: Long = 0L,
+    /** 0.19.0：Readwise 单向同步配置（Token、类别→卡片盒映射 JSON、自动同步分钟数、上次同步时间）。 */
+    val readwiseToken: String = "",
+    val readwiseCategoryBoxesJson: String = "{}",
+    val readwiseAutoSyncMinutes: Int = 0,
+    val readwiseLastSyncAt: Long = 0L,
+    /** 0.19.0：微信读书单向同步配置（API Key、目标卡片盒、自动同步分钟数、上次同步时间）。 */
+    val wereadApiKey: String = "",
+    val wereadBoxId: String = "",
+    val wereadAutoSyncMinutes: Int = 0,
+    val wereadLastSyncAt: Long = 0L,
 ) {
     val palette: ThemePalette get() = ThemePalette.fromStorage(themeName)
     val fontScaleOption: FontScaleOption get() = FontScaleOption.fromStorage(fontScale)

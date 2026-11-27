@@ -9,6 +9,7 @@ import com.davidzhu.wantnote.data.NoteDatabase
 import com.davidzhu.wantnote.data.NoteRepository
 import com.davidzhu.wantnote.data.SettingsRepository
 import com.davidzhu.wantnote.sync.CloudSyncService
+import com.davidzhu.wantnote.sync.ExternalReadingAutoSyncWorker
 import com.davidzhu.wantnote.sync.dinox.DinoxAutoSyncWorker
 import com.davidzhu.wantnote.sync.dinox.DinoxBoxSyncWorker
 import com.davidzhu.wantnote.sync.dinox.DinoxSyncService
@@ -94,6 +95,9 @@ class WantNoteApplication : Application() {
                 DinoxAutoSyncWorker.cancelLegacy(this@WantNoteApplication)
                 val rules = dinoxSync.getSyncRules()
                 DinoxBoxSyncWorker.syncAllSchedules(this@WantNoteApplication, rules)
+                val cur = settingsRepository.get()
+                ExternalReadingAutoSyncWorker.schedule(this@WantNoteApplication, ExternalReadingAutoSyncWorker.TARGET_READWISE, cur.readwiseAutoSyncMinutes)
+                ExternalReadingAutoSyncWorker.schedule(this@WantNoteApplication, ExternalReadingAutoSyncWorker.TARGET_WEREAD, cur.wereadAutoSyncMinutes)
             }
         }
         applicationScope.launch {

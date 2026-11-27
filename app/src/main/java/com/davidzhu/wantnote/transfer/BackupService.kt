@@ -376,6 +376,8 @@ class BackupService(
                         .put("locationAddress", note.locationAddress)
                         .put("locationLat", note.locationLat)
                         .put("locationLng", note.locationLng)
+                        .put("pinned", note.pinned)
+                        .put("starred", note.starred)
                         .put("createdAt", note.createdAt)
                         .put("updatedAt", note.updatedAt),
                 )
@@ -547,6 +549,14 @@ class BackupService(
         .put("dedaoMcpUrl", settings.dedaoMcpUrl)
         .put("dedaoMcpToken", settings.dedaoMcpToken)
         .put("dedaoLastSyncAt", settings.dedaoLastSyncAt)
+        .put("readwiseToken", settings.readwiseToken)
+        .put("readwiseCategoryBoxesJson", settings.readwiseCategoryBoxesJson)
+        .put("readwiseAutoSyncMinutes", settings.readwiseAutoSyncMinutes)
+        .put("readwiseLastSyncAt", settings.readwiseLastSyncAt)
+        .put("wereadApiKey", settings.wereadApiKey)
+        .put("wereadBoxId", settings.wereadBoxId)
+        .put("wereadAutoSyncMinutes", settings.wereadAutoSyncMinutes)
+        .put("wereadLastSyncAt", settings.wereadLastSyncAt)
         .toString()
 
     // ---- JSON 反序列化（缺字段用当前默认值，兼容未来/旧版备份） -------------
@@ -571,6 +581,8 @@ class BackupService(
                     locationAddress = obj.optString("locationAddress"),
                     locationLat = obj.optDouble("locationLat", 0.0),
                     locationLng = obj.optDouble("locationLng", 0.0),
+                    pinned = obj.optBoolean("pinned", false),
+                    starred = obj.optBoolean("starred", false),
                 ),
                 boxName = obj.optString("boxName"),
             )
@@ -735,6 +747,14 @@ class BackupService(
             dedaoMcpUrl = obj.optString("dedaoMcpUrl", default.dedaoMcpUrl),
             dedaoMcpToken = obj.optString("dedaoMcpToken", default.dedaoMcpToken),
             dedaoLastSyncAt = obj.optLong("dedaoLastSyncAt", default.dedaoLastSyncAt),
+            readwiseToken = obj.optString("readwiseToken", default.readwiseToken),
+            readwiseCategoryBoxesJson = obj.optString("readwiseCategoryBoxesJson", default.readwiseCategoryBoxesJson),
+            readwiseAutoSyncMinutes = obj.optInt("readwiseAutoSyncMinutes", default.readwiseAutoSyncMinutes),
+            readwiseLastSyncAt = obj.optLong("readwiseLastSyncAt", default.readwiseLastSyncAt),
+            wereadApiKey = obj.optString("wereadApiKey", default.wereadApiKey),
+            wereadBoxId = obj.optString("wereadBoxId", default.wereadBoxId),
+            wereadAutoSyncMinutes = obj.optInt("wereadAutoSyncMinutes", default.wereadAutoSyncMinutes),
+            wereadLastSyncAt = obj.optLong("wereadLastSyncAt", default.wereadLastSyncAt),
         )
     }
 

@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -42,12 +43,12 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.davidzhu.wantnote.data.AppSettings
 import com.davidzhu.wantnote.data.Dates
-import com.davidzhu.wantnote.sync.McpConfig
-import com.davidzhu.wantnote.sync.McpPlatform
-import com.davidzhu.wantnote.sync.McpSyncService
+import com.davidzhu.wantnote.sync.ExternalReadingAutoSyncWorker
+import com.davidzhu.wantnote.sync.ExternalReadingSyncService
 import com.davidzhu.wantnote.ui.LocalNotes
 import com.davidzhu.wantnote.ui.LocalSettings
 import com.davidzhu.wantnote.ui.components.WantButton
+import com.davidzhu.wantnote.ui.components.WantFilterChip
 import com.davidzhu.wantnote.ui.components.WantListItem
 import com.davidzhu.wantnote.ui.components.WantTextButton
 import com.davidzhu.wantnote.ui.components.WantTextField
@@ -62,13 +63,25 @@ private enum class EcosystemPage(val title: String) {
     MENU("生态互联"),
     DINOX("Dinox"),
     FLOMO("Flomo"),
-    DEDAO("得到大脑"),
+    READWISE("Readwise"),
+    WEREAD("微信读书"),
 }
 
+private val AUTO_SYNC_INTERVALS = listOf(
+    0 to "仅手动",
+    15 to "每15分钟",
+    30 to "每30分钟",
+    60 to "每1小时",
+    360 to "每6小时",
+    1440 to "每天",
+)
+
 /**
- * 0.18.2：生态互联两级子菜单。
- * 一级菜单：Dinox / Flomo / 得到大脑；
- * 二级菜单：Dinox 保留原全部同步功能，Flomo 与得到大脑提供 MCP 配置与双向同步。
+ * 0.19.0：生态互联两级子菜单：
+ * - Dinox（原样保留）
+ * - Flomo（去掉 MCP，仅保留 API URL 配置，配合主页卡片「发送到 Flomo」）
+ * - Readwise（单向同步，按类别映射到不同卡片盒，支持全量/增量与自动/手动同步）
+ * - 微信读书（单向同步，API Key + 目标卡片盒，支持全量/增量与自动/手动同步）
  */
 @Composable
 fun EcosystemHubTab(snackbar: SnackbarHostState) {
@@ -84,9 +97,6 @@ fun EcosystemHubTab(snackbar: SnackbarHostState) {
         EcosystemPage.MENU -> {
             val titleStyle = MiuixTheme.textStyles.body1
             val descSizeSp = (titleStyle.fontSize.value - 2f).coerceAtLeast(11f).sp
-            val flomoConfigured = settings.flomoMcpUrl.isNotBlank() || settings.flomoWebhookUrl.isNotBlank()
-            val dedaoConfigured = settings.dedaoMcpUrl.isNotBlank()
-
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -94,7 +104,7 @@ fun EcosystemHubTab(snackbar: SnackbarHostState) {
                     .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
                 Text(
-                    text = "选择要连接的第三方笔记生态，支持多平台同步与 MCP 协议双向互通。",
+                    text = "连接第三方笔记与阅读生态，支持单向拉取与快捷发送。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 12.dp),
@@ -113,35 +123,41 @@ fun EcosystemHubTab(snackbar: SnackbarHostState) {
                         descSizeSp = descSizeSp,
                         onClick = { page = EcosystemPage.DINOX },
                     )
-                    HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
-                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
                     EcosystemMenuRow(
                         title = "Flomo",
-                        subtitle = if (flomoConfigured) {
-                            "已配置 MCP / Webhook，支持双向同步"
+                        subtitle = if (settings.flomoWebhookUrl.isNotBlank()) {
+                            "已配置 Flomo API URL，可在主页长按或批量发送到 Flomo"
                         } else {
-                            "配置 Flomo MCP 与 Webhook，支持双向同步"
+                            "配置 Flomo API URL，支持将笔记发送到 Flomo"
                         },
                         titleStyle = titleStyle,
                         descSizeSp = descSizeSp,
                         onClick = { page = EcosystemPage.FLOMO },
                     )
-                    HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
-                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
                     EcosystemMenuRow(
-                        title = "得到大脑",
-                        subtitle = if (dedaoConfigured) {
-                            "已配置得到大脑（Get笔记）MCP，支持双向同步"
+                        title = "Readwise",
+                        subtitle = if (settings.readwiseToken.isNotBlank()) {
+                            "已配置 Token · 支持按类别同步到不同卡片盒（单向）"
                         } else {
-                            "配置得到大脑（Get笔记）MCP，支持双向同步"
+                            "单向同步 Readwise 高亮与摘录，支持按类别归入不同卡片盒"
                         },
                         titleStyle = titleStyle,
                         descSizeSp = descSizeSp,
-                        onClick = { page = EcosystemPage.DEDAO },
+                        onClick = { page = EcosystemPage.READWISE },
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+                    EcosystemMenuRow(
+                        title = "微信读书",
+                        subtitle = if (settings.wereadApiKey.isNotBlank()) {
+                            "已配置 API Key · 支持同步划线与高亮到指定卡片盒（单向）"
+                        } else {
+                            "输入微信读书 API Key，单向同步划线与高亮到指定卡片盒"
+                        },
+                        titleStyle = titleStyle,
+                        descSizeSp = descSizeSp,
+                        onClick = { page = EcosystemPage.WEREAD },
                     )
                 }
             }
@@ -156,15 +172,22 @@ fun EcosystemHubTab(snackbar: SnackbarHostState) {
 
         EcosystemPage.FLOMO -> {
             Column(modifier = Modifier.fillMaxSize()) {
-                SubPageBackBar(title = "Flomo MCP", onBack = { page = EcosystemPage.MENU })
-                McpSyncSubPage(platform = McpPlatform.FLOMO, snackbar = snackbar)
+                SubPageBackBar(title = "Flomo", onBack = { page = EcosystemPage.MENU })
+                FlomoApiSubPage(snackbar = snackbar)
             }
         }
 
-        EcosystemPage.DEDAO -> {
+        EcosystemPage.READWISE -> {
             Column(modifier = Modifier.fillMaxSize()) {
-                SubPageBackBar(title = "得到大脑 MCP", onBack = { page = EcosystemPage.MENU })
-                McpSyncSubPage(platform = McpPlatform.DEDAO, snackbar = snackbar)
+                SubPageBackBar(title = "Readwise", onBack = { page = EcosystemPage.MENU })
+                ReadwiseSyncSubPage(snackbar = snackbar)
+            }
+        }
+
+        EcosystemPage.WEREAD -> {
+            Column(modifier = Modifier.fillMaxSize()) {
+                SubPageBackBar(title = "微信读书", onBack = { page = EcosystemPage.MENU })
+                WeReadSyncSubPage(snackbar = snackbar)
             }
         }
     }
@@ -225,83 +248,119 @@ private fun SubPageBackBar(title: String, onBack: () -> Unit) {
     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
 }
 
+/** Flomo 仅支持官方 URL API 输入，供卡片长按与多选队列「发送到 Flomo」使用。 */
 @Composable
-private fun McpSyncSubPage(
-    platform: McpPlatform,
-    snackbar: SnackbarHostState,
-) {
+private fun FlomoApiSubPage(snackbar: SnackbarHostState) {
     val settingsRepo = LocalSettings.current
-    val notesRepo = LocalNotes.current
-    val settings by settingsRepo.observe().collectAsStateWithLifecycle(initialValue = AppSettings.DEFAULT)
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    var endpoint by remember(platform) { mutableStateOf("") }
-    var token by remember(platform) { mutableStateOf("") }
-    var webhook by remember(platform) { mutableStateOf("") }
-    var dirty by remember(platform) { mutableStateOf(false) }
-    var busy by remember(platform) { mutableStateOf(false) }
-    var statusText by remember(platform) { mutableStateOf("") }
+    var webhookUrl by remember { mutableStateOf("") }
+    var dirty by remember { mutableStateOf(false) }
 
-    LaunchedEffect(platform) {
-        val s = runCatching { settingsRepo.get() }.getOrNull() ?: return@LaunchedEffect
-        if (!dirty) {
-            if (platform == McpPlatform.FLOMO) {
-                endpoint = s.flomoMcpUrl
-                token = s.flomoMcpToken
-                webhook = s.flomoWebhookUrl
-            } else {
-                endpoint = s.dedaoMcpUrl
-                token = s.dedaoMcpToken
-            }
-        }
+    LaunchedEffect(Unit) {
+        val stored = runCatching { settingsRepo.get().flomoWebhookUrl }.getOrNull().orEmpty()
+        if (!dirty) webhookUrl = stored
     }
 
-    val lastSyncAt = if (platform == McpPlatform.FLOMO) settings.flomoLastSyncAt else settings.dedaoLastSyncAt
-
-    fun currentConfig(): McpConfig = McpConfig(
-        platform = platform,
-        endpointUrl = endpoint.trim(),
-        token = token.trim(),
-        webhookUrl = webhook.trim(),
-        lastSyncAt = lastSyncAt,
-    )
-
-    suspend fun persistConfig() {
-        val e = endpoint.trim()
-        val t = token.trim()
-        val w = webhook.trim()
-        settingsRepo.update {
-            if (platform == McpPlatform.FLOMO) {
-                it.copy(flomoMcpUrl = e, flomoMcpToken = t, flomoWebhookUrl = w)
-            } else {
-                it.copy(dedaoMcpUrl = e, dedaoMcpToken = t)
-            }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = "输入你的 Flomo 专属 API URL 后，即可在主页长按卡片或多选菜单中将笔记发送到 Flomo（自动附带笔记标签）。URL 仅保存在本机。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        WantTextField(
+            value = webhookUrl,
+            onValueChange = {
+                webhookUrl = it
+                dirty = true
+            },
+            label = "Flomo API URL",
+            placeholder = "https://flomoapp.com/iwh/...",
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            WantButton(
+                onClick = {
+                    val clean = webhookUrl.trim()
+                    scope.launch {
+                        settingsRepo.update { it.copy(flomoWebhookUrl = clean) }
+                        webhookUrl = clean
+                        dirty = false
+                        snackbar.showSnackbar("Flomo API URL 已保存")
+                    }
+                },
+                modifier = Modifier.weight(1f),
+            ) { Text("保存配置") }
+            WantTextButton(
+                onClick = {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse("https://flomoapp.com/mine?source=incoming_webhook")),
+                        )
+                    }
+                },
+                modifier = Modifier.weight(1f),
+            ) { Text("获取 API URL") }
         }
-        dirty = false
+    }
+}
+
+/** Readwise 单向同步子菜单（按类别映射到不同卡片盒，支持全量/增量与自动/手动同步）。 */
+@Composable
+private fun ReadwiseSyncSubPage(snackbar: SnackbarHostState) {
+    val settingsRepo = LocalSettings.current
+    val notesRepo = LocalNotes.current
+    val settings by settingsRepo.observe().collectAsStateWithLifecycle(initialValue = AppSettings.DEFAULT)
+    val boxes by notesRepo.observeBoxes().collectAsStateWithLifecycle(initialValue = emptyList())
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    var token by remember { mutableStateOf("") }
+    var dirty by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var statusText by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        val stored = runCatching { settingsRepo.get().readwiseToken }.getOrNull().orEmpty()
+        if (!dirty) token = stored
     }
 
-    fun runSync(pull: Boolean, push: Boolean) {
+    val categoryBoxMap = remember(settings.readwiseCategoryBoxesJson) {
+        ExternalReadingSyncService.parseCategoryBoxMap(settings.readwiseCategoryBoxesJson)
+    }
+
+    fun runReadwiseSync(fullSync: Boolean) {
         if (busy) return
         busy = true
         scope.launch {
-            persistConfig()
-            val result = McpSyncService.sync(currentConfig(), notesRepo, pull = pull, push = push)
-            result.onSuccess { summary ->
-                val now = System.currentTimeMillis()
-                settingsRepo.update {
-                    if (platform == McpPlatform.FLOMO) {
-                        it.copy(flomoLastSyncAt = now)
-                    } else {
-                        it.copy(dedaoLastSyncAt = now)
-                    }
-                }
+            val cleanToken = token.trim()
+            settingsRepo.update { it.copy(readwiseToken = cleanToken) }
+            dirty = false
+            val res = ExternalReadingSyncService.syncReadwise(
+                token = cleanToken,
+                categoryBoxesJson = settingsRepo.get().readwiseCategoryBoxesJson,
+                lastSyncAt = settingsRepo.get().readwiseLastSyncAt,
+                fullSync = fullSync,
+                repository = notesRepo,
+            )
+            res.onSuccess { summary ->
+                settingsRepo.update { it.copy(readwiseLastSyncAt = System.currentTimeMillis()) }
                 statusText = summary.message
                 snackbar.showSnackbar(summary.message)
             }.onFailure { err ->
-                val msg = err.message ?: "同步失败"
-                statusText = msg
-                snackbar.showSnackbar(msg)
+                statusText = err.message ?: "Readwise 同步失败"
+                snackbar.showSnackbar(statusText)
             }
             busy = false
         }
@@ -315,25 +374,9 @@ private fun McpSyncSubPage(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            text = if (platform == McpPlatform.FLOMO) {
-                "支持接入 Flomo Max MCP（Streamable HTTP）实现双向同步；也可同时填写 Flomo API Webhook 地址用于快捷推送。密钥仅保存在本机。"
-            } else {
-                "支持接入得到大脑（原 Get笔记）MCP 服务（Streamable HTTP / 开放平台或自建 getnote-mcp 网关），连接后可自动发现读写工具并实现双向同步。"
-            },
+            text = "单向同步 Readwise 高亮与笔记到想记，可按 Readwise 类别（书籍/文章/推文/播客/补充）分别归入不同卡片盒。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        WantTextField(
-            value = endpoint,
-            onValueChange = {
-                endpoint = it
-                dirty = true
-            },
-            label = "${platform.label} MCP 地址（Streamable HTTP URL）",
-            placeholder = platform.defaultEndpointHint,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
         )
         WantTextField(
             value = token,
@@ -341,105 +384,267 @@ private fun McpSyncSubPage(
                 token = it
                 dirty = true
             },
-            label = "MCP Token / API Key（选填）",
+            label = "Readwise Access Token",
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth(),
         )
-        if (platform == McpPlatform.FLOMO) {
-            WantTextField(
-                value = webhook,
-                onValueChange = {
-                    webhook = it
-                    dirty = true
-                },
-                label = "Flomo API / Webhook URL（可选，支持直接推送）",
-                placeholder = "https://flomoapp.com/iwh/...",
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             WantButton(
                 onClick = {
+                    val clean = token.trim()
                     scope.launch {
-                        persistConfig()
-                        snackbar.showSnackbar("${platform.label} MCP 配置已保存")
+                        settingsRepo.update { it.copy(readwiseToken = clean) }
+                        dirty = false
+                        snackbar.showSnackbar("Readwise Token 已保存")
                     }
                 },
                 enabled = !busy,
                 modifier = Modifier.weight(1f),
-            ) { Text("保存配置") }
+            ) { Text("保存 Token") }
             WantTextButton(
                 onClick = {
                     if (busy) return@WantTextButton
                     busy = true
                     scope.launch {
-                        persistConfig()
-                        val res = McpSyncService.testConnection(currentConfig())
-                        statusText = res.message
-                        snackbar.showSnackbar(res.message)
+                        val res = ExternalReadingSyncService.testReadwiseToken(token)
+                        val msg = res.getOrElse { it.message ?: "验证失败" }
+                        statusText = msg
+                        snackbar.showSnackbar(msg)
                         busy = false
                     }
                 },
                 enabled = !busy,
                 modifier = Modifier.weight(1f),
-            ) { Text(if (busy) "检测中…" else "测试连接") }
+            ) { Text("验证连接") }
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
-        SectionTitle("双向同步")
-        WantButton(
-            onClick = { runSync(pull = true, push = true) },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (busy) "正在同步…" else "一键双向同步（拉取 + 推送）") }
+        SectionTitle("按 Readwise 类别分配卡片盒")
+        ExternalReadingSyncService.READWISE_CATEGORIES.forEach { (catKey, catLabel) ->
+            BoxTargetDropdown(
+                label = catLabel,
+                boxes = boxes,
+                selectedBoxId = categoryBoxMap[catKey].orEmpty(),
+                onSelect = { boxId ->
+                    val next = categoryBoxMap.toMutableMap()
+                    if (boxId.isBlank()) next.remove(catKey) else next[catKey] = boxId
+                    val serialized = ExternalReadingSyncService.serializeCategoryBoxMap(next)
+                    scope.launch { settingsRepo.update { it.copy(readwiseCategoryBoxesJson = serialized) } }
+                },
+            )
+        }
 
+        SectionTitle("自动同步频率")
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            AUTO_SYNC_INTERVALS.forEach { (mins, label) ->
+                WantFilterChip(
+                    selected = settings.readwiseAutoSyncMinutes == mins,
+                    onClick = {
+                        scope.launch {
+                            settingsRepo.update { it.copy(readwiseAutoSyncMinutes = mins) }
+                            ExternalReadingAutoSyncWorker.schedule(
+                                context,
+                                ExternalReadingAutoSyncWorker.TARGET_READWISE,
+                                mins,
+                            )
+                            snackbar.showSnackbar(if (mins == 0) "Readwise 已设为仅手动同步" else "Readwise 已开启自动同步（$label）")
+                        }
+                    },
+                    label = { Text(label) },
+                )
+            }
+        }
+
+        SectionTitle("手动同步")
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            WantTextButton(
-                onClick = { runSync(pull = true, push = false) },
+            WantButton(
+                onClick = { runReadwiseSync(fullSync = false) },
                 enabled = !busy,
                 modifier = Modifier.weight(1f),
-            ) { Text("仅拉取") }
-            WantTextButton(
-                onClick = { runSync(pull = false, push = true) },
+            ) { Text(if (busy) "同步中…" else "增量同步") }
+            WantButton(
+                onClick = { runReadwiseSync(fullSync = true) },
                 enabled = !busy,
                 modifier = Modifier.weight(1f),
-            ) { Text("仅推送") }
+            ) { Text(if (busy) "同步中…" else "全量同步") }
         }
 
-        if (lastSyncAt > 0L) {
+        if (settings.readwiseLastSyncAt > 0L) {
             Text(
-                text = "上次同步：${Dates.formatTimestamp(lastSyncAt)}",
+                text = "上次同步：${Dates.formatTimestamp(settings.readwiseLastSyncAt)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         if (statusText.isNotBlank()) {
-            Text(
-                text = statusText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            Text(text = statusText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
         }
-
         WantTextButton(
             onClick = {
-                runCatching {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(platform.docUrl)))
-                }
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://readwise.io/access_token"))) }
             },
             modifier = Modifier.fillMaxWidth(),
+        ) { Text("获取 Readwise Access Token") }
+        Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+/** 微信读书单向同步子菜单（API Key + 目标卡片盒 + 全量/增量 + 自动/手动同步）。 */
+@Composable
+private fun WeReadSyncSubPage(snackbar: SnackbarHostState) {
+    val settingsRepo = LocalSettings.current
+    val notesRepo = LocalNotes.current
+    val settings by settingsRepo.observe().collectAsStateWithLifecycle(initialValue = AppSettings.DEFAULT)
+    val boxes by notesRepo.observeBoxes().collectAsStateWithLifecycle(initialValue = emptyList())
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    var apiKey by remember { mutableStateOf("") }
+    var dirty by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var statusText by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        val stored = runCatching { settingsRepo.get().wereadApiKey }.getOrNull().orEmpty()
+        if (!dirty) apiKey = stored
+    }
+
+    fun runWeReadSync(fullSync: Boolean) {
+        if (busy) return
+        busy = true
+        scope.launch {
+            val cleanKey = apiKey.trim()
+            settingsRepo.update { it.copy(wereadApiKey = cleanKey) }
+            dirty = false
+            val res = ExternalReadingSyncService.syncWeRead(
+                apiKey = cleanKey,
+                targetBoxId = settingsRepo.get().wereadBoxId,
+                lastSyncAt = settingsRepo.get().wereadLastSyncAt,
+                fullSync = fullSync,
+                repository = notesRepo,
+            )
+            res.onSuccess { summary ->
+                settingsRepo.update { it.copy(wereadLastSyncAt = System.currentTimeMillis()) }
+                statusText = summary.message
+                snackbar.showSnackbar(summary.message)
+            }.onFailure { err ->
+                statusText = err.message ?: "微信读书同步失败"
+                snackbar.showSnackbar(statusText)
+            }
+            busy = false
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = "输入微信读书 API Key，单向同步微信读书里的划线与高亮到指定卡片盒（支持自动定时同步与手动全量/增量同步）。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        WantTextField(
+            value = apiKey,
+            onValueChange = {
+                apiKey = it
+                dirty = true
+            },
+            label = "微信读书 API Key",
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        WantButton(
+            onClick = {
+                val clean = apiKey.trim()
+                scope.launch {
+                    settingsRepo.update { it.copy(wereadApiKey = clean) }
+                    dirty = false
+                    snackbar.showSnackbar("微信读书 API Key 已保存")
+                }
+            },
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("保存 API Key") }
+
+        BoxTargetDropdown(
+            label = "同步目标卡片盒",
+            boxes = boxes,
+            selectedBoxId = settings.wereadBoxId,
+            onSelect = { boxId ->
+                scope.launch { settingsRepo.update { it.copy(wereadBoxId = boxId) } }
+            },
+        )
+
+        SectionTitle("自动同步频率")
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("查看 ${platform.label} MCP / API 官方文档")
+            AUTO_SYNC_INTERVALS.forEach { (mins, label) ->
+                WantFilterChip(
+                    selected = settings.wereadAutoSyncMinutes == mins,
+                    onClick = {
+                        scope.launch {
+                            settingsRepo.update { it.copy(wereadAutoSyncMinutes = mins) }
+                            ExternalReadingAutoSyncWorker.schedule(
+                                context,
+                                ExternalReadingAutoSyncWorker.TARGET_WEREAD,
+                                mins,
+                            )
+                            snackbar.showSnackbar(if (mins == 0) "微信读书已设为仅手动同步" else "微信读书已开启自动同步（$label）")
+                        }
+                    },
+                    label = { Text(label) },
+                )
+            }
+        }
+
+        SectionTitle("手动同步")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            WantButton(
+                onClick = { runWeReadSync(fullSync = false) },
+                enabled = !busy,
+                modifier = Modifier.weight(1f),
+            ) { Text(if (busy) "同步中…" else "增量同步") }
+            WantButton(
+                onClick = { runWeReadSync(fullSync = true) },
+                enabled = !busy,
+                modifier = Modifier.weight(1f),
+            ) { Text(if (busy) "同步中…" else "全量同步") }
+        }
+
+        if (settings.wereadLastSyncAt > 0L) {
+            Text(
+                text = "上次同步：${Dates.formatTimestamp(settings.wereadLastSyncAt)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (statusText.isNotBlank()) {
+            Text(text = statusText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
         }
         Spacer(modifier = Modifier.height(24.dp))
     }

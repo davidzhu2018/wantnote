@@ -438,6 +438,14 @@ internal data class SyncUserSettings(
     val dedaoMcpUrl: String = AppSettings.DEFAULT.dedaoMcpUrl,
     val dedaoMcpToken: String = AppSettings.DEFAULT.dedaoMcpToken,
     val dedaoLastSyncAt: Long = AppSettings.DEFAULT.dedaoLastSyncAt,
+    val readwiseToken: String = AppSettings.DEFAULT.readwiseToken,
+    val readwiseCategoryBoxesJson: String = AppSettings.DEFAULT.readwiseCategoryBoxesJson,
+    val readwiseAutoSyncMinutes: Int = AppSettings.DEFAULT.readwiseAutoSyncMinutes,
+    val readwiseLastSyncAt: Long = AppSettings.DEFAULT.readwiseLastSyncAt,
+    val wereadApiKey: String = AppSettings.DEFAULT.wereadApiKey,
+    val wereadBoxId: String = AppSettings.DEFAULT.wereadBoxId,
+    val wereadAutoSyncMinutes: Int = AppSettings.DEFAULT.wereadAutoSyncMinutes,
+    val wereadLastSyncAt: Long = AppSettings.DEFAULT.wereadLastSyncAt,
 ) {
     fun applyOnto(local: AppSettings): AppSettings = local.copy(
         themeName = themeName,
@@ -480,6 +488,14 @@ internal data class SyncUserSettings(
         dedaoMcpUrl = dedaoMcpUrl,
         dedaoMcpToken = dedaoMcpToken,
         dedaoLastSyncAt = dedaoLastSyncAt,
+        readwiseToken = readwiseToken,
+        readwiseCategoryBoxesJson = readwiseCategoryBoxesJson,
+        readwiseAutoSyncMinutes = readwiseAutoSyncMinutes,
+        readwiseLastSyncAt = readwiseLastSyncAt,
+        wereadApiKey = wereadApiKey,
+        wereadBoxId = wereadBoxId,
+        wereadAutoSyncMinutes = wereadAutoSyncMinutes,
+        wereadLastSyncAt = wereadLastSyncAt,
     )
 
     fun toJsonObject(): JSONObject = JSONObject()
@@ -523,6 +539,14 @@ internal data class SyncUserSettings(
         .put("dedaoMcpUrl", dedaoMcpUrl)
         .put("dedaoMcpToken", dedaoMcpToken)
         .put("dedaoLastSyncAt", dedaoLastSyncAt)
+        .put("readwiseToken", readwiseToken)
+        .put("readwiseCategoryBoxesJson", readwiseCategoryBoxesJson)
+        .put("readwiseAutoSyncMinutes", readwiseAutoSyncMinutes)
+        .put("readwiseLastSyncAt", readwiseLastSyncAt)
+        .put("wereadApiKey", wereadApiKey)
+        .put("wereadBoxId", wereadBoxId)
+        .put("wereadAutoSyncMinutes", wereadAutoSyncMinutes)
+        .put("wereadLastSyncAt", wereadLastSyncAt)
 
     companion object {
         fun from(settings: AppSettings): SyncUserSettings = SyncUserSettings(
@@ -566,6 +590,14 @@ internal data class SyncUserSettings(
             dedaoMcpUrl = settings.dedaoMcpUrl,
             dedaoMcpToken = settings.dedaoMcpToken,
             dedaoLastSyncAt = settings.dedaoLastSyncAt,
+            readwiseToken = settings.readwiseToken,
+            readwiseCategoryBoxesJson = settings.readwiseCategoryBoxesJson,
+            readwiseAutoSyncMinutes = settings.readwiseAutoSyncMinutes,
+            readwiseLastSyncAt = settings.readwiseLastSyncAt,
+            wereadApiKey = settings.wereadApiKey,
+            wereadBoxId = settings.wereadBoxId,
+            wereadAutoSyncMinutes = settings.wereadAutoSyncMinutes,
+            wereadLastSyncAt = settings.wereadLastSyncAt,
         )
 
         fun fromJsonObject(obj: JSONObject): SyncUserSettings {
@@ -611,6 +643,14 @@ internal data class SyncUserSettings(
                 dedaoMcpUrl = obj.optString("dedaoMcpUrl", d.dedaoMcpUrl),
                 dedaoMcpToken = obj.optString("dedaoMcpToken", d.dedaoMcpToken),
                 dedaoLastSyncAt = obj.optLong("dedaoLastSyncAt", d.dedaoLastSyncAt),
+                readwiseToken = obj.optString("readwiseToken", d.readwiseToken),
+                readwiseCategoryBoxesJson = obj.optString("readwiseCategoryBoxesJson", d.readwiseCategoryBoxesJson),
+                readwiseAutoSyncMinutes = obj.optInt("readwiseAutoSyncMinutes", d.readwiseAutoSyncMinutes),
+                readwiseLastSyncAt = obj.optLong("readwiseLastSyncAt", d.readwiseLastSyncAt),
+                wereadApiKey = obj.optString("wereadApiKey", d.wereadApiKey),
+                wereadBoxId = obj.optString("wereadBoxId", d.wereadBoxId),
+                wereadAutoSyncMinutes = obj.optInt("wereadAutoSyncMinutes", d.wereadAutoSyncMinutes),
+                wereadLastSyncAt = obj.optLong("wereadLastSyncAt", d.wereadLastSyncAt),
             )
         }
     }
@@ -664,6 +704,8 @@ internal data class SyncSnapshot(
                             .put("locationAddress", note.locationAddress)
                             .put("locationLat", note.locationLat)
                             .put("locationLng", note.locationLng)
+                            .put("pinned", note.pinned)
+                            .put("starred", note.starred)
                             .put("boxName", boxName)
                             .put("createdAt", note.createdAt)
                             .put("updatedAt", note.updatedAt),
@@ -832,6 +874,8 @@ internal data class SyncSnapshot(
                     locationAddress = obj.optString("locationAddress"),
                     locationLat = obj.optDouble("locationLat", 0.0),
                     locationLng = obj.optDouble("locationLng", 0.0),
+                    pinned = obj.optBoolean("pinned", false),
+                    starred = obj.optBoolean("starred", false),
                 )
             }
             val blocks = root.optJSONArray("blocks").orEmpty().mapObjects { obj ->

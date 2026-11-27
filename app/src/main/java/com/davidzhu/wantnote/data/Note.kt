@@ -29,4 +29,7 @@ data class Note(
     val locationAddress: String = "",
     val locationLat: Double = 0.0,
     val locationLng: Double = 0.0,
+    /** 0.19.0：置顶（任意视图始终排在最前面）与星标（搜索页支持星标筛选）。 */
+    val pinned: Boolean = false,
+    val starred: Boolean = false,
 )

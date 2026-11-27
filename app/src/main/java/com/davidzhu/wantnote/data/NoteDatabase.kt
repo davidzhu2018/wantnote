@@ -21,7 +21,7 @@ import java.util.UUID
         DinoxCachedBox::class,
         DinoxSyncRule::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = false,
 )
 abstract class NoteDatabase : RoomDatabase() {
@@ -358,6 +358,21 @@ abstract class NoteDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE notes ADD COLUMN starred INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE settings ADD COLUMN readwiseToken TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE settings ADD COLUMN readwiseCategoryBoxesJson TEXT NOT NULL DEFAULT '{}'")
+                db.execSQL("ALTER TABLE settings ADD COLUMN readwiseAutoSyncMinutes INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE settings ADD COLUMN readwiseLastSyncAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE settings ADD COLUMN wereadApiKey TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE settings ADD COLUMN wereadBoxId TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE settings ADD COLUMN wereadAutoSyncMinutes INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE settings ADD COLUMN wereadLastSyncAt INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun create(context: Context): NoteDatabase {
             // 0.6.0：数据库优先放在 Documents/WantNote（卸载后可找回），
             // 未授权时回退到旧私有位置；首次启动由 AppStorage.prepare 迁移旧数据。
@@ -377,6 +392,7 @@ abstract class NoteDatabase : RoomDatabase() {
                     MIGRATION_13_14,
                     MIGRATION_14_15,
                     MIGRATION_15_16,
+                    MIGRATION_16_17,
                 )
                 .build()
         }
