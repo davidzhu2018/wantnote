@@ -60,4 +60,24 @@ class LocationPoiAndCouiTest {
         assertEquals("北京市 · 朝阳公园", first.displayLabel())
         assertTrue(first.formattedDistance().endsWith("km"))
     }
+
+    @Test
+    fun azureThemeExistsAndIsNamedWeiLan() {
+        assertEquals(com.davidzhu.wantnote.data.ThemePalette.AZURE, com.davidzhu.wantnote.data.ThemePalette.fromStorage("AZURE"))
+        assertEquals("蔚蓝", com.davidzhu.wantnote.data.ThemePalette.AZURE.label)
+    }
+
+    @Test
+    fun amapRectangleCenterAndErrorHintsAndGcj02Work() {
+        val center = LocationPoiService.parseAmapRectangleCenter("116.0119343,39.66127144;116.7829835,40.2164962")
+        assertTrue(center != null)
+        assertEquals(39.9388, center!!.first, 0.01)
+        assertEquals(116.3974, center.second, 0.01)
+
+        val err = LocationPoiService.formatAmapError("USERKEY_PLAT_NOMATCH", "10009")
+        assertTrue(err.contains("Web服务"))
+
+        val (gLat, gLng) = LocationPoiService.wgs84ToGcj02(31.2304, 121.4737)
+        assertTrue(gLat != 31.2304 && gLng != 121.4737)
+    }
 }

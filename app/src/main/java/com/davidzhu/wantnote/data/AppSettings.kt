@@ -8,6 +8,7 @@ enum class ThemePalette(val label: String) {
     INK("墨色"),
     SAGE("青松"),
     ROSE("暮粉"),
+    AZURE("蔚蓝"),
     ;
 
     companion object {

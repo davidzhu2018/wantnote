@@ -13,14 +13,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.LocationOn
@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -47,6 +48,7 @@ import com.davidzhu.wantnote.location.LocationPoiService
 import com.davidzhu.wantnote.location.MapProvider
 import com.davidzhu.wantnote.location.PoiItem
 import com.davidzhu.wantnote.ui.LocalSettings
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
@@ -54,7 +56,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 0.18.0：编辑器位置选择弹窗（支持高德地图 / 腾讯地图 POI 检索 + 系统定位兜底 + 自定义位置）。
+ * 0.18.1：编辑器位置选择弹窗（支持高德地图 / 腾讯地图 POI 检索 + GPS/IP 自动定位 + 自定义位置）。
  */
 @Composable
 fun LocationPickerDialog(
@@ -68,14 +70,17 @@ fun LocationPickerDialog(
     val settingsRepo = LocalSettings.current
     val scope = rememberCoroutineScope()
 
-    var provider by remember(settings.mapProvider) { mutableStateOf(MapProvider.fromStorage(settings.mapProvider)) }
-    var apiKeyDraft by remember(settings.mapApiKey) { mutableStateOf(settings.mapApiKey) }
+    var provider by remember { mutableStateOf(MapProvider.fromStorage(settings.mapProvider)) }
+    var apiKeyDraft by remember { mutableStateOf(settings.mapApiKey) }
+    var keyDirty by remember { mutableStateOf(false) }
     var showMapConfig by remember { mutableStateOf(false) }
 
     var keyword by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
+    var searchJob by remember { mutableStateOf<Job?>(null) }
     var coords by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var pois by remember { mutableStateOf<List<PoiItem>>(emptyList()) }
+    var currentAddress by remember { mutableStateOf("") }
     var sourceLabel by remember { mutableStateOf("") }
     var hint by remember { mutableStateOf<String?>(null) }
 
@@ -85,30 +90,42 @@ fun LocationPickerDialog(
         return fine == PackageManager.PERMISSION_GRANTED || coarse == PackageManager.PERMISSION_GRANTED
     }
 
-    fun loadPois(query: String = keyword, refreshCoords: Boolean = false) {
-        if (loading) return
+    fun loadPois(
+        query: String = keyword,
+        refreshCoords: Boolean = false,
+        activeProvider: MapProvider = provider,
+        activeKey: String = apiKeyDraft,
+    ) {
+        // 取消正在进行的旧定位/搜索任务，确保输入 Key 或点搜索时立刻响应、不被旧请求阻塞。
+        searchJob?.cancel()
         loading = true
-        scope.launch {
-            val activeCoords = if (refreshCoords || coords == null) {
-                if (hasLocationPermission()) {
-                    LocationPoiService.getCurrentCoordinates(context).also { coords = it }
+        searchJob = scope.launch {
+            try {
+                val activeCoords = if (refreshCoords || coords == null) {
+                    if (hasLocationPermission()) {
+                        LocationPoiService.getCurrentCoordinates(context).also { if (it != null) coords = it }
+                    } else {
+                        coords
+                    }
                 } else {
                     coords
                 }
-            } else {
-                coords
+                val result = LocationPoiService.searchPois(
+                    context = context,
+                    provider = activeProvider,
+                    apiKey = activeKey,
+                    keyword = query,
+                    coords = activeCoords,
+                )
+                pois = result.items
+                sourceLabel = result.sourceLabel
+                if (result.currentAddress.isNotBlank()) {
+                    currentAddress = result.currentAddress
+                }
+                hint = result.hint
+            } finally {
+                loading = false
             }
-            val result = LocationPoiService.searchPois(
-                context = context,
-                provider = provider,
-                apiKey = apiKeyDraft,
-                keyword = query,
-                coords = activeCoords,
-            )
-            pois = result.items
-            sourceLabel = result.sourceLabel
-            hint = result.hint
-            loading = false
         }
     }
 
@@ -118,14 +135,19 @@ fun LocationPickerDialog(
         if (granted.values.any { it }) {
             loadPois(refreshCoords = true)
         } else {
-            hint = "未授予系统定位权限，仍可直接搜索地点名称或手动输入位置。"
+            // 即使未授予系统定位权限，仍可通过高德/腾讯 IP 定位或关键词搜索获取地址
             loadPois(refreshCoords = false)
         }
     }
 
     LaunchedEffect(Unit) {
+        val stored = runCatching { settingsRepo.get() }.getOrNull()
+        val initProvider = MapProvider.fromStorage(stored?.mapProvider ?: settings.mapProvider)
+        val initKey = stored?.mapApiKey ?: settings.mapApiKey
+        provider = initProvider
+        if (!keyDirty) apiKeyDraft = initKey
         if (hasLocationPermission()) {
-            loadPois(refreshCoords = true)
+            loadPois(refreshCoords = true, activeProvider = initProvider, activeKey = initKey)
         } else {
             permLauncher.launch(
                 arrayOf(
@@ -157,7 +179,7 @@ fun LocationPickerDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 430.dp),
+                    .heightIn(max = 440.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (showMapConfig) {
@@ -184,8 +206,11 @@ fun LocationPickerDialog(
                         }
                         WantTextField(
                             value = apiKeyDraft,
-                            onValueChange = { apiKeyDraft = it },
-                            label = "${provider.label} Web服务 Key（选填）",
+                            onValueChange = {
+                                apiKeyDraft = it
+                                keyDirty = true
+                            },
+                            label = "${provider.label}「Web服务」Key",
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -196,17 +221,24 @@ fun LocationPickerDialog(
                             WantButton(
                                 onClick = {
                                     val cleanKey = apiKeyDraft.trim()
+                                    apiKeyDraft = cleanKey
+                                    keyDirty = false
+                                    showMapConfig = false
                                     scope.launch {
                                         settingsRepo.update {
                                             it.copy(mapProvider = provider.name, mapApiKey = cleanKey)
                                         }
-                                        showMapConfig = false
-                                        loadPois(refreshCoords = false)
+                                        loadPois(
+                                            query = keyword,
+                                            refreshCoords = true,
+                                            activeProvider = provider,
+                                            activeKey = cleanKey,
+                                        )
                                     }
                                 },
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                             ) {
-                                Text("保存并刷新")
+                                Text("保存并定位")
                             }
                             WantTextButton(
                                 onClick = {
@@ -222,7 +254,7 @@ fun LocationPickerDialog(
                     }
                 }
 
-                // 搜索框 + 定位刷新
+                // 搜索框 + 定位刷新（支持键盘搜索键）
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -233,11 +265,14 @@ fun LocationPickerDialog(
                         onValueChange = { keyword = it },
                         placeholder = "搜索附近地点或输入位置名",
                         singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(
+                            onSearch = { loadPois(query = keyword, refreshCoords = false) },
+                        ),
                         modifier = Modifier.weight(1f),
                     )
                     WantButton(
                         onClick = { loadPois(query = keyword, refreshCoords = false) },
-                        enabled = !loading,
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                     ) {
                         Icon(Icons.Outlined.Search, contentDescription = "搜索", modifier = Modifier.size(18.dp))
@@ -256,11 +291,20 @@ fun LocationPickerDialog(
                                 )
                             }
                         },
-                        enabled = !loading,
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                     ) {
                         Icon(Icons.Outlined.MyLocation, contentDescription = "重新定位", modifier = Modifier.size(18.dp))
                     }
+                }
+
+                if (currentAddress.isNotBlank()) {
+                    Text(
+                        text = "当前定位：$currentAddress",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
 
                 if (!hint.isNullOrBlank()) {
@@ -332,7 +376,7 @@ fun LocationPickerDialog(
 
                     if (loading) {
                         Text(
-                            text = "正在获取附近 POI…",
+                            text = "正在定位并检索附近 POI…",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(vertical = 14.dp),
