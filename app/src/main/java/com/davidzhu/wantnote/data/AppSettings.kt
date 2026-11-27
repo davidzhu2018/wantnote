@@ -132,6 +132,12 @@ data class AppSettings(
     val markdownMigrationDone: Boolean = false,
     /** 0.11.0：上次成功拉取 Dinox 卡片盒列表的时间（epoch ms，0 = 从未成功）。 */
     val dinoxBoxesFetchedAt: Long = 0L,
+    /** 0.16.5：AI 能力选择开关（默认全部开启）。 */
+    val aiEnableTitle: Boolean = true,
+    val aiEnableTag: Boolean = true,
+    val aiEnableBox: Boolean = true,
+    val aiEnableSummary: Boolean = true,
+    val aiEnableInsight: Boolean = true,
 ) {
     val palette: ThemePalette get() = ThemePalette.fromStorage(themeName)
     val fontScaleOption: FontScaleOption get() = FontScaleOption.fromStorage(fontScale)

@@ -524,6 +524,11 @@ class BackupService(
         .put("dinoxAutoSyncMinutes", settings.dinoxAutoSyncMinutes)
         .put("markdownMigrationDone", settings.markdownMigrationDone)
         .put("dinoxBoxesFetchedAt", settings.dinoxBoxesFetchedAt)
+        .put("aiEnableTitle", settings.aiEnableTitle)
+        .put("aiEnableTag", settings.aiEnableTag)
+        .put("aiEnableBox", settings.aiEnableBox)
+        .put("aiEnableSummary", settings.aiEnableSummary)
+        .put("aiEnableInsight", settings.aiEnableInsight)
         .toString()
 
     // ---- JSON 反序列化（缺字段用当前默认值，兼容未来/旧版备份） -------------
@@ -689,6 +694,11 @@ class BackupService(
             dinoxAutoSyncMinutes = obj.optInt("dinoxAutoSyncMinutes", default.dinoxAutoSyncMinutes),
             markdownMigrationDone = obj.optBoolean("markdownMigrationDone", default.markdownMigrationDone),
             dinoxBoxesFetchedAt = obj.optLong("dinoxBoxesFetchedAt", default.dinoxBoxesFetchedAt),
+            aiEnableTitle = obj.optBoolean("aiEnableTitle", default.aiEnableTitle),
+            aiEnableTag = obj.optBoolean("aiEnableTag", default.aiEnableTag),
+            aiEnableBox = obj.optBoolean("aiEnableBox", default.aiEnableBox),
+            aiEnableSummary = obj.optBoolean("aiEnableSummary", default.aiEnableSummary),
+            aiEnableInsight = obj.optBoolean("aiEnableInsight", default.aiEnableInsight),
         )
     }
 

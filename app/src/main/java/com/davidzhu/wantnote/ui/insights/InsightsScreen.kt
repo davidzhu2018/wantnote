@@ -457,6 +457,10 @@ private fun SummaryTab(
         ) {
             WantButton(
                 onClick = {
+                    if (!settings.aiEnableSummary) {
+                        scope.launch { snackbar.showSnackbar("AI提炼能力已关闭") }
+                        return@WantButton
+                    }
                     if (settings.aiSummaryProviderId.isBlank() || settings.aiSummaryModelId.isBlank()) {
                         onOpenAiSettings()
                         return@WantButton
@@ -475,7 +479,7 @@ private fun SummaryTab(
                                 it.copy(
                                     aiSummaryText = text,
                                     aiSummaryUpdatedAt = System.currentTimeMillis(),
-                                    aiSummaryScope = scopeLabel,
+                                    aiSummaryScope = "$scopeLabel · AI 提炼",
                                 )
                             }
                         }.onFailure { error ->
@@ -488,11 +492,48 @@ private fun SummaryTab(
             ) {
                 Text(
                     when {
-                        running -> "正在提炼…"
+                        running -> "正在生成…"
                         settings.aiSummaryModelId.isBlank() -> "去配置 AI"
-                        else -> "用 AI 提炼"
+                        else -> "AI 提炼"
                     },
                 )
+            }
+            WantButton(
+                onClick = {
+                    if (!settings.aiEnableInsight) {
+                        scope.launch { snackbar.showSnackbar("AI洞察能力已关闭") }
+                        return@WantButton
+                    }
+                    if (settings.aiSummaryProviderId.isBlank() || settings.aiSummaryModelId.isBlank()) {
+                        onOpenAiSettings()
+                        return@WantButton
+                    }
+                    if (running) return@WantButton
+                    running = true
+                    scope.launch {
+                        val corpus = scopedItems.take(40).joinToString("\n\n") { item ->
+                            val title = SearchText.displayTitle(item.note)
+                            val body = item.note.body.take(800)
+                            "《$title》\n$body"
+                        }
+                        val result = ai.generateInsight(corpus)
+                        result.onSuccess { text ->
+                            settingsRepo.update {
+                                it.copy(
+                                    aiSummaryText = text,
+                                    aiSummaryUpdatedAt = System.currentTimeMillis(),
+                                    aiSummaryScope = "$scopeLabel · AI 洞察",
+                                )
+                            }
+                        }.onFailure { error ->
+                            snackbar.showSnackbar(error.message ?: "洞察失败，已保留本机统计")
+                        }
+                        running = false
+                    }
+                },
+                enabled = !running && scopedItems.isNotEmpty(),
+            ) {
+                Text(if (running) "正在生成…" else "AI 洞察")
             }
             if (settings.aiSummaryText.isNotBlank()) {
                 WantTextButton(

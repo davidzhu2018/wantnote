@@ -21,7 +21,7 @@ import java.util.UUID
         DinoxCachedBox::class,
         DinoxSyncRule::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 abstract class NoteDatabase : RoomDatabase() {
@@ -301,6 +301,20 @@ abstract class NoteDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 0.16.5: additive migration adding 5 AI capability switches to `settings`
+         * (all enabled by default).
+         */
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE settings ADD COLUMN aiEnableTitle INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE settings ADD COLUMN aiEnableTag INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE settings ADD COLUMN aiEnableBox INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE settings ADD COLUMN aiEnableSummary INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE settings ADD COLUMN aiEnableInsight INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
         fun create(context: Context): NoteDatabase {
             // 0.6.0：数据库优先放在 Documents/WantNote（卸载后可找回），
             // 未授权时回退到旧私有位置；首次启动由 AppStorage.prepare 迁移旧数据。
@@ -314,7 +328,7 @@ abstract class NoteDatabase : RoomDatabase() {
                 .addMigrations(
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
                     MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
-                    MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
+                    MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
                 )
                 .build()
         }

@@ -175,6 +175,14 @@ fun HomeScreen(
     fun generateField(target: NoteWithDetails, wantTitle: Boolean) {
         val id = target.note.id
         menuNote = null
+        if (wantTitle && !settings.aiEnableTitle) {
+            scope.launch { snackbar.showSnackbar("AI生成标题能力已关闭") }
+            return
+        }
+        if (!wantTitle && !settings.aiEnableTag) {
+            scope.launch { snackbar.showSnackbar("AI生成标签能力已关闭") }
+            return
+        }
         busy = true
         scope.launch {
             val message = if (wantTitle && target.note.title.isNotBlank()) {
@@ -213,6 +221,10 @@ fun HomeScreen(
     fun autoAssignBox(target: NoteWithDetails) {
         val id = target.note.id
         menuNote = null
+        if (!settings.aiEnableBox) {
+            scope.launch { snackbar.showSnackbar("AI分配卡片盒能力已关闭") }
+            return
+        }
         busy = true
         scope.launch {
             val message = ai.suggestExistingBox(id).fold(

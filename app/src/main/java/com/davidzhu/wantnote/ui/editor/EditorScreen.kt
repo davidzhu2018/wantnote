@@ -7,7 +7,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -97,6 +101,8 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
@@ -137,8 +143,10 @@ import com.davidzhu.wantnote.ui.components.TagChip
 import com.davidzhu.wantnote.ui.components.TagColorPicker
 import com.davidzhu.wantnote.ui.theme.LocalEditorFontFamily
 import com.davidzhu.wantnote.ui.theme.LocalFontScale
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -149,11 +157,13 @@ import com.davidzhu.wantnote.ui.components.TagAddDialog
 import com.davidzhu.wantnote.data.NoteBoxActions
 import com.davidzhu.wantnote.data.BoxCreateResult
 
+private val editorCleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
 @Composable
 fun EditorScreen(
     noteId: String,
     initialMode: EditorMode = EditorMode.WYSIWYG,
-    onBack: () -> Unit,
+    onBack: (deletedBlank: Boolean) -> Unit,
 ) {
     val repository = LocalNotes.current
     val settingsRepo = LocalSettings.current
@@ -165,6 +175,8 @@ fun EditorScreen(
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
 
     var ready by remember { mutableStateOf(false) }
     var title by remember { mutableStateOf("") }
@@ -357,23 +369,44 @@ fun EditorScreen(
         }
     }
 
-    /** 标题按钮：聚焦块在 正文 → H1..H6 → 正文 之间循环。 */
-    fun cycleHeadingLevel() {
-        if (blocks.isEmpty()) return
+    /** 0.16.5：多级标题设置（0=正文，1..6=H1..H6），同时支持所见即所得与源码模式。 */
+    fun setHeadingLevel(level: Int) {
+        val target = level.coerceIn(0, 6)
+        if (modeState.value == EditorMode.SOURCE) {
+            val value = sourceText
+            val text = value.text
+            val caret = value.selection.min.coerceIn(0, text.length)
+            val lineStart = text.lastIndexOf('\n', (caret - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+            val lineEnd = text.indexOf('\n', caret).let { if (it < 0) text.length else it }
+            val currentLine = text.substring(lineStart, lineEnd)
+            val stripped = currentLine.replace(Regex("""^ {0,3}#{1,6}[ \t]+"""), "")
+            val prefix = if (target == 0) "" else "#".repeat(target) + " "
+            val replacedLine = prefix + stripped
+            val next = text.substring(0, lineStart) + replacedLine + text.substring(lineEnd)
+            val newCaret = (lineStart + replacedLine.length).coerceIn(0, next.length)
+            sourceText = TextFieldValue(next, TextRange(newCaret))
+            return
+        }
+        if (blocks.isEmpty()) {
+            val created = if (target == 0) {
+                newBlock(BlockType.PARAGRAPH)
+            } else {
+                newBlock(BlockType.HEADING, headingLevel = target)
+            }
+            updateBlocks(listOf(created))
+            fields[created.id] = TextFieldValue("")
+            focusedId = created.id
+            return
+        }
         val index = focusedIndex()
         val current = blocks[index]
-        val next = when {
-            current.blockType != BlockType.HEADING -> 1
-            current.headingLevel < 6 -> current.headingLevel + 1
-            else -> 0
-        }
         updateBlocks(
             blocks.mapIndexed { i, block ->
                 if (i == index) {
-                    if (next == 0) {
+                    if (target == 0) {
                         block.copy(type = BlockType.PARAGRAPH.name, headingLevel = 0)
                     } else {
-                        block.copy(type = BlockType.HEADING.name, headingLevel = next)
+                        block.copy(type = BlockType.HEADING.name, headingLevel = target)
                     }
                 } else {
                     block
@@ -382,6 +415,39 @@ fun EditorScreen(
         )
         fields[current.id] = TextFieldValue(fields[current.id]?.text.orEmpty(), fields[current.id]?.selection ?: TextRange.Zero)
         focusedId = current.id
+    }
+
+    /** 0.16.5：引用工具（对应 Markdown `> ` 语法），同时支持所见即所得与源码模式。 */
+    fun insertQuote() {
+        if (modeState.value == EditorMode.SOURCE) {
+            val value = sourceText
+            val text = value.text
+            val caret = value.selection.min.coerceIn(0, text.length)
+            val lineStart = text.lastIndexOf('\n', (caret - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+            val lineEnd = text.indexOf('\n', caret).let { if (it < 0) text.length else it }
+            val currentLine = text.substring(lineStart, lineEnd)
+            val replacedLine = if (currentLine.trimStart().startsWith(">")) {
+                currentLine.replaceFirst(Regex("""^([ \t]*)>[ \t]?"""), "$1")
+            } else {
+                "> $currentLine"
+            }
+            val next = text.substring(0, lineStart) + replacedLine + text.substring(lineEnd)
+            val newCaret = (lineStart + replacedLine.length).coerceIn(0, next.length)
+            sourceText = TextFieldValue(next, TextRange(newCaret))
+            return
+        }
+        val index = focusedIndex()
+        val current = blocks.getOrNull(index)
+        if (current != null && current.blockType == BlockType.QUOTE) {
+            updateBlocks(
+                blocks.mapIndexed { i, block ->
+                    if (i == index) block.copy(type = BlockType.PARAGRAPH.name) else block
+                },
+            )
+            focusedId = current.id
+        } else {
+            addTypedBlock(BlockType.QUOTE)
+        }
     }
 
     /**
@@ -730,22 +796,24 @@ fun EditorScreen(
     fun leave() {
         if (leaving) return
         leaving = true
+        keyboardController?.hide()
+        focusManager.clearFocus(force = true)
         if (!ready) {
-            onBack()
+            onBack(false)
             return
         }
         val titleNow = titleState.value
         val contentNow = currentContentMarkdown()
-        scope.launch {
-            try {
-                withContext(NonCancellable + Dispatchers.IO) {
-                    runCatching { repository.saveMarkdown(noteId, titleNow, contentNow) }
-                    runCatching { repository.deleteIfBlank(noteId) }
-                }
-            } finally {
-                withContext(NonCancellable + Dispatchers.Main.immediate) {
-                    onBack()
-                }
+        val isBlankNow = titleNow.isBlank() && contentNow.isBlank()
+        // 先在主线程同步返回目标页面（空笔记直接回主页），再在独立 IO 作用域落盘/清理空笔记，
+        // 避免在编辑器仍在栈顶时删库或跨协程恢复触发返回栈异常退出应用。
+        onBack(isBlankNow)
+        editorCleanupScope.launch {
+            if (isBlankNow) {
+                runCatching { repository.deleteIfBlank(noteId) }
+            } else {
+                runCatching { repository.saveMarkdown(noteId, titleNow, contentNow) }
+                runCatching { repository.deleteIfBlank(noteId) }
             }
         }
     }
@@ -755,15 +823,28 @@ fun EditorScreen(
      * dialog's 「只补充空位」 choice: applies the suggestion ONLY to fields
      * that are still empty at apply time and reports what was filled.
      */
-    suspend fun runFillOnlyPass(extraMessage: String? = null) {
-        val suffix = extraMessage?.takeIf { it.isNotBlank() }?.let { "；$it" } ?: ""
+    suspend fun runFillOnlyPass(extraMessages: List<String> = emptyList()) {
+        val currentSettings = settingsRepo.get()
+        val notices = ArrayList<String>()
+        notices.addAll(extraMessages.filter { it.isNotBlank() })
+        if (!currentSettings.aiEnableTitle) notices += "AI生成标题能力已关闭"
+        if (!currentSettings.aiEnableTag) notices += "AI生成标签能力已关闭"
+        val suffix = if (notices.isEmpty()) "" else "；${notices.joinToString("，")}"
+
+        if (!currentSettings.aiEnableTitle && !currentSettings.aiEnableTag) {
+            snackbar.showSnackbar("已保存$suffix")
+            return
+        }
+
         val result = ai.suggestFillTitleTags(noteId)
         if (result.isSuccess) {
             val suggestion = result.getOrNull()
             if (suggestion != null) {
-                val fill = repository.fillEmptyTitleAndTags(noteId, suggestion.title, suggestion.tags)
+                val nextTitle = if (currentSettings.aiEnableTitle) suggestion.title else ""
+                val nextTags = if (currentSettings.aiEnableTag) suggestion.tags else emptyList()
+                val fill = repository.fillEmptyTitleAndTags(noteId, nextTitle, nextTags)
                 val latest = repository.getById(noteId)
-                if (title.isBlank() && fill.titleFilled && latest != null) {
+                if (currentSettings.aiEnableTitle && title.isBlank() && fill.titleFilled && latest != null) {
                     title = latest.title
                 }
                 noteTags = repository.getTagsForNote(noteId)
@@ -793,10 +874,11 @@ fun EditorScreen(
 
     /**
      * 0.10.0 保存时的卡片盒自动分配：仅当这篇笔记还没有任何卡片盒时触发；
-     * AI 只能从「已存在的卡片盒」里选（见 [AiService.suggestExistingBox]），
-     * 绝不新建。AI 未配置或没有合适盒时静默跳过（不阻塞保存）。
+     * 0.16.5：若「AI分配卡片盒」能力关闭，则跳过并返回「AI分配卡片盒能力已关闭」。
      */
     suspend fun autoAssignBoxIfNeeded(force: Boolean = false): String? {
+        val currentSettings = settingsRepo.get()
+        if (!currentSettings.aiEnableBox) return "AI分配卡片盒能力已关闭"
         val stored = repository.getById(noteId) ?: return null
         if (!force && stored.boxId.isNotBlank()) return null
         return ai.suggestExistingBox(noteId).fold(
@@ -806,7 +888,7 @@ fun EditorScreen(
             },
             onFailure = { error ->
                 val msg = error.message.orEmpty()
-                if (msg.contains("没有找到合适的卡片盒")) "自动分配卡片盒未完成：$msg" else null
+                if (msg.contains("没有找到合适的卡片盒") || msg.contains("能力已关闭")) msg else null
             },
         )
     }
@@ -818,11 +900,7 @@ fun EditorScreen(
         scope.launch {
             repository.saveMarkdown(noteId, titleState.value, currentContentMarkdown())
             val boxMessage = autoAssignBoxIfNeeded()
-            // AI runs as a fill-only pass: each field is filled ONLY if it is
-            // still empty at apply time (checked inside one transaction), so
-            // user-written titles/tags — including changes made while the AI
-            // request was in flight — are never overwritten or clobbered.
-            runFillOnlyPass(extraMessage = boxMessage)
+            runFillOnlyPass(extraMessages = listOfNotNull(boxMessage))
             saving = false
         }
     }
@@ -838,24 +916,54 @@ fun EditorScreen(
                 return@launch
             }
             repository.saveMarkdown(noteId, titleState.value, contentNow)
+            val currentSettings = settingsRepo.get()
             val boxMessage = autoAssignBoxIfNeeded(force = overwrite)
             if (overwrite) {
-                // 覆盖模式：重新生成标题、标签并重新分配卡片盒。
-                ai.runOverwriteTitleTags(noteId)
+                val notices = ArrayList<String>()
+                boxMessage?.let { notices += it }
+                if (!currentSettings.aiEnableTitle) notices += "AI生成标题能力已关闭"
+                if (!currentSettings.aiEnableTag) notices += "AI生成标签能力已关闭"
+                if (!currentSettings.aiEnableTitle && !currentSettings.aiEnableTag) {
+                    snackbar.showSnackbar(notices.joinToString("；"))
+                    generating = false
+                    return@launch
+                }
+                ai.generateTitleAndTags(titleState.value, contentNow)
                     .onSuccess { suggestion ->
-                        if (suggestion.title.isNotBlank()) {
-                            title = suggestion.title.take(40)
+                        var didTitle = false
+                        var didTag = false
+                        if (currentSettings.aiEnableTitle && suggestion.title.isNotBlank()) {
+                            val nextTitle = suggestion.title.take(40)
+                            repository.updateTitle(noteId, nextTitle)
+                            title = nextTitle
+                            didTitle = true
+                        }
+                        if (currentSettings.aiEnableTag) {
+                            val tags = suggestion.tags
+                                .map { Tag.normalizePath(it) }
+                                .filter { it.isNotEmpty() }
+                                .distinct()
+                            if (tags.isNotEmpty()) {
+                                repository.setNoteTagPaths(noteId, tags)
+                                didTag = true
+                            }
                         }
                         noteTags = repository.getTagsForNote(noteId)
-                        val suffix = boxMessage?.let { "；$it" } ?: ""
-                        snackbar.showSnackbar("AI 已生成标题与标签$suffix")
+                        val head = when {
+                            didTitle && didTag -> "AI 已生成标题与标签"
+                            didTitle -> "AI 已生成标题"
+                            didTag -> "AI 已生成标签"
+                            else -> "AI 生成完成"
+                        }
+                        val suffix = if (notices.isEmpty()) "" else "；${notices.joinToString("，")}"
+                        snackbar.showSnackbar("$head$suffix")
                     }
                     .onFailure { error ->
-                        val suffix = boxMessage?.let { "；$it" } ?: ""
+                        val suffix = if (notices.isEmpty()) "" else "；${notices.joinToString("，")}"
                         snackbar.showSnackbar((error.message ?: "生成失败，已保留当前内容") + suffix)
                     }
             } else {
-                runFillOnlyPass(extraMessage = boxMessage)
+                runFillOnlyPass(extraMessages = listOfNotNull(boxMessage))
             }
             generating = false
         }
@@ -1052,12 +1160,15 @@ fun EditorScreen(
             OutlineToolbar(
                 fontLabel = currentFontLabel,
                 sourceMode = mode == EditorMode.SOURCE,
-                onTags = { showTagPicker = true },
+                currentHeadingLevel = blocks.getOrNull(focusedIndex())
+                    ?.takeIf { it.blockType == BlockType.HEADING }
+                    ?.headingLevel ?: 0,
                 onAt = { showLinkPicker = true },
+                onQuote = { insertQuote() },
                 onAddTask = { addTypedBlock(BlockType.TASK) },
                 onOrdered = { addTypedBlock(BlockType.ORDERED) },
                 onUnordered = { addTypedBlock(BlockType.UNORDERED) },
-                onHeading = { cycleHeadingLevel() },
+                onSelectHeading = { level -> setHeadingLevel(level) },
                 onTable = { addTypedBlock(BlockType.TABLE) },
                 onDivider = { addTypedBlock(BlockType.DIVIDER) },
                 onFontSize = { cycleFontSize() },
@@ -1396,6 +1507,15 @@ private fun OutlineBlockRow(
                     style = MaterialTheme.typography.bodyLarge,
                 )
             }
+            BlockType.QUOTE -> {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 8.dp, end = 10.dp)
+                        .width(3.dp)
+                        .height(22.dp)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
+                )
+            }
             else -> Unit
         }
 
@@ -1529,12 +1649,13 @@ private fun LocalVideoBlock(path: String, onOpen: () -> Unit) {
 private fun OutlineToolbar(
     fontLabel: String,
     sourceMode: Boolean,
-    onTags: () -> Unit,
+    currentHeadingLevel: Int,
     onAt: () -> Unit,
+    onQuote: () -> Unit,
     onAddTask: () -> Unit,
     onOrdered: () -> Unit,
     onUnordered: () -> Unit,
-    onHeading: () -> Unit,
+    onSelectHeading: (Int) -> Unit,
     onTable: () -> Unit,
     onDivider: () -> Unit,
     onFontSize: () -> Unit,
@@ -1548,6 +1669,7 @@ private fun OutlineToolbar(
     onVideo: () -> Unit,
     onFile: () -> Unit,
 ) {
+    var showHeadingMenu by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1555,10 +1677,53 @@ private fun OutlineToolbar(
             .padding(horizontal = 4.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ToolButton("标签", Icons.Outlined.Tag, onTags)
         ToolButton("@", Icons.Outlined.AlternateEmail, onAt)
+        Box {
+            ToolButton(
+                label = if (!sourceMode && currentHeadingLevel in 1..6) "H$currentHeadingLevel" else "标题",
+                icon = Icons.Outlined.Title,
+                onClick = { showHeadingMenu = true },
+            )
+            WantDropdownMenu(
+                expanded = showHeadingMenu,
+                onDismissRequest = { showHeadingMenu = false },
+            ) {
+                val levels = listOf(
+                    0 to "正文",
+                    1 to "一级标题 (H1)",
+                    2 to "二级标题 (H2)",
+                    3 to "三级标题 (H3)",
+                    4 to "四级标题 (H4)",
+                    5 to "五级标题 (H5)",
+                    6 to "六级标题 (H6)",
+                )
+                levels.forEach { (lvl, label) ->
+                    WantDropdownMenuItem(
+                        text = {
+                            Text(
+                                text = if (!sourceMode && currentHeadingLevel == lvl) "✓ $label" else label,
+                                fontWeight = if (lvl in 1..6) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                        },
+                        onClick = {
+                            showHeadingMenu = false
+                            onSelectHeading(lvl)
+                        },
+                    )
+                }
+            }
+        }
+        WantTextButton(onClick = onQuote, modifier = Modifier.padding(horizontal = 0.dp)) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = ">",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text("引用", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+            }
+        }
         if (!sourceMode) {
-            ToolButton("标题", Icons.Outlined.Title, onHeading)
             ToolButton("表格", Icons.Outlined.TableChart, onTable)
             ToolButton("任务", Icons.Outlined.CheckBox, onAddTask)
             ToolButton("有序", Icons.Outlined.FormatListNumbered, onOrdered)

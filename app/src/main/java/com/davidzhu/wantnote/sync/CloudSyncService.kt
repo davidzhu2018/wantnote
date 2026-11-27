@@ -419,6 +419,11 @@ internal data class SyncUserSettings(
     val dinoxSyncBox: String = AppSettings.DEFAULT.dinoxSyncBox,
     val dinoxAutoSyncMinutes: Int = AppSettings.DEFAULT.dinoxAutoSyncMinutes,
     val dinoxBoxesFetchedAt: Long = AppSettings.DEFAULT.dinoxBoxesFetchedAt,
+    val aiEnableTitle: Boolean = AppSettings.DEFAULT.aiEnableTitle,
+    val aiEnableTag: Boolean = AppSettings.DEFAULT.aiEnableTag,
+    val aiEnableBox: Boolean = AppSettings.DEFAULT.aiEnableBox,
+    val aiEnableSummary: Boolean = AppSettings.DEFAULT.aiEnableSummary,
+    val aiEnableInsight: Boolean = AppSettings.DEFAULT.aiEnableInsight,
 ) {
     fun applyOnto(local: AppSettings): AppSettings = local.copy(
         themeName = themeName,
@@ -442,6 +447,11 @@ internal data class SyncUserSettings(
         dinoxSyncBox = dinoxSyncBox,
         dinoxAutoSyncMinutes = dinoxAutoSyncMinutes,
         dinoxBoxesFetchedAt = maxOf(local.dinoxBoxesFetchedAt, dinoxBoxesFetchedAt),
+        aiEnableTitle = aiEnableTitle,
+        aiEnableTag = aiEnableTag,
+        aiEnableBox = aiEnableBox,
+        aiEnableSummary = aiEnableSummary,
+        aiEnableInsight = aiEnableInsight,
     )
 
     fun toJsonObject(): JSONObject = JSONObject()
@@ -466,6 +476,11 @@ internal data class SyncUserSettings(
         .put("dinoxSyncBox", dinoxSyncBox)
         .put("dinoxAutoSyncMinutes", dinoxAutoSyncMinutes)
         .put("dinoxBoxesFetchedAt", dinoxBoxesFetchedAt)
+        .put("aiEnableTitle", aiEnableTitle)
+        .put("aiEnableTag", aiEnableTag)
+        .put("aiEnableBox", aiEnableBox)
+        .put("aiEnableSummary", aiEnableSummary)
+        .put("aiEnableInsight", aiEnableInsight)
 
     companion object {
         fun from(settings: AppSettings): SyncUserSettings = SyncUserSettings(
@@ -490,6 +505,11 @@ internal data class SyncUserSettings(
             dinoxSyncBox = settings.dinoxSyncBox,
             dinoxAutoSyncMinutes = settings.dinoxAutoSyncMinutes,
             dinoxBoxesFetchedAt = settings.dinoxBoxesFetchedAt,
+            aiEnableTitle = settings.aiEnableTitle,
+            aiEnableTag = settings.aiEnableTag,
+            aiEnableBox = settings.aiEnableBox,
+            aiEnableSummary = settings.aiEnableSummary,
+            aiEnableInsight = settings.aiEnableInsight,
         )
 
         fun fromJsonObject(obj: JSONObject): SyncUserSettings {
@@ -516,6 +536,11 @@ internal data class SyncUserSettings(
                 dinoxSyncBox = obj.optString("dinoxSyncBox", d.dinoxSyncBox),
                 dinoxAutoSyncMinutes = obj.optInt("dinoxAutoSyncMinutes", d.dinoxAutoSyncMinutes),
                 dinoxBoxesFetchedAt = obj.optLong("dinoxBoxesFetchedAt", d.dinoxBoxesFetchedAt),
+                aiEnableTitle = obj.optBoolean("aiEnableTitle", d.aiEnableTitle),
+                aiEnableTag = obj.optBoolean("aiEnableTag", d.aiEnableTag),
+                aiEnableBox = obj.optBoolean("aiEnableBox", d.aiEnableBox),
+                aiEnableSummary = obj.optBoolean("aiEnableSummary", d.aiEnableSummary),
+                aiEnableInsight = obj.optBoolean("aiEnableInsight", d.aiEnableInsight),
             )
         }
     }

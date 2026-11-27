@@ -41,6 +41,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.davidzhu.wantnote.data.NoteLinkCodec
+import com.davidzhu.wantnote.transfer.LatexMath
+import com.davidzhu.wantnote.transfer.MarkdownCodec
 import com.davidzhu.wantnote.ui.LocalMedia
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -56,8 +58,10 @@ object MarkdownVisual {
     private val token = Regex(
         """\[\[note:([A-Za-z0-9._-]+)]]""" +
             """|!\[([^\]]*)]\(([^)]*)\)""" +
+            """|<[iI][mM][gG]\b([^>]*)>""" +
             """|\[([^\]]*)]\(([^)]*)\)""" +
             """|`([^`\n]*)`""" +
+            """|(?<!\$)\$(?!\$|\s)([^$\n]+?)(?<!\s)\$(?!\$)""" +
             """|\*\*(.+?)\*\*""" +
             """|(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)""" +
             """|==(.+?)==""" +
@@ -97,12 +101,14 @@ object MarkdownVisual {
             val range = match.range
             val noteId = match.groups[1]?.value
             val imageAlt = match.groups[2]?.value
-            val linkLabel = match.groups[4]?.value
-            val code = match.groups[6]?.value
-            val bold = match.groups[7]?.value
-            val italic = match.groups[8]?.value
-            val highlight = match.groups[9]?.value
-            val strike = match.groups[10]?.value
+            val htmlImgAttrs = match.groups[4]?.value
+            val linkLabel = match.groups[5]?.value
+            val code = match.groups[7]?.value
+            val latexInline = match.groups[8]?.value
+            val bold = match.groups[9]?.value
+            val italic = match.groups[10]?.value
+            val highlight = match.groups[11]?.value
+            val strike = match.groups[12]?.value
             when {
                 noteId != null -> {
                     val title = linkTitles[noteId]?.takeIf { it.isNotBlank() } ?: "已删除的笔记"
@@ -119,13 +125,28 @@ object MarkdownVisual {
                     range.first, range.last + 1, if (imageAlt.isBlank()) "[图片]" else "[图片] $imageAlt",
                     SpanStyle(color = linkColor),
                 )
+                htmlImgAttrs != null -> {
+                    val alt = MarkdownCodec.extractHtmlAttr(htmlImgAttrs, "alt").orEmpty()
+                    segments += Segment(
+                        range.first, range.last + 1, if (alt.isBlank()) "[图片]" else "[图片] $alt",
+                        SpanStyle(color = linkColor),
+                    )
+                }
                 linkLabel != null -> segments += Segment(
-                    range.first, range.last + 1, linkLabel.ifBlank { match.groups[5]?.value.orEmpty() },
+                    range.first, range.last + 1, linkLabel.ifBlank { match.groups[6]?.value.orEmpty() },
                     SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline),
                 )
                 code != null -> segments += Segment(
                     range.first, range.last + 1, code,
                     SpanStyle(fontFamily = FontFamily.Monospace, background = highlightColor.copy(alpha = 0.25f)),
+                )
+                latexInline != null -> segments += Segment(
+                    range.first, range.last + 1, LatexMath.format(latexInline),
+                    SpanStyle(
+                        fontFamily = FontFamily.Serif,
+                        fontStyle = FontStyle.Italic,
+                        background = highlightColor.copy(alpha = 0.16f),
+                    ),
                 )
                 bold != null -> segments += Segment(
                     range.first, range.last + 1, bold,
@@ -243,12 +264,14 @@ object MarkdownVisual {
                 val range = match.range
                 val noteId = match.groups[1]?.value
                 val imageAlt = match.groups[2]?.value
-                val linkLabel = match.groups[4]?.value
-                val code = match.groups[6]?.value
-                val bold = match.groups[7]?.value
-                val italic = match.groups[8]?.value
-                val highlight = match.groups[9]?.value
-                val strike = match.groups[10]?.value
+                val htmlImgAttrs = match.groups[4]?.value
+                val linkLabel = match.groups[5]?.value
+                val code = match.groups[7]?.value
+                val latexInline = match.groups[8]?.value
+                val bold = match.groups[9]?.value
+                val italic = match.groups[10]?.value
+                val highlight = match.groups[11]?.value
+                val strike = match.groups[12]?.value
                 when {
                     noteId != null -> {
                         val title = linkTitles[noteId]?.takeIf { it.isNotBlank() } ?: "已删除的笔记"
@@ -285,8 +308,21 @@ object MarkdownVisual {
                             }
                         }
                     }
+                    htmlImgAttrs != null -> {
+                        if (renderInlineImages) {
+                            val url = MarkdownCodec.extractHtmlAttr(htmlImgAttrs, "src").orEmpty().trim()
+                            val alt = MarkdownCodec.extractHtmlAttr(htmlImgAttrs, "alt").orEmpty().trim()
+                            if (url.isNotEmpty()) {
+                                val id = "img${imageIndex++}"
+                                inlineImages[id] = url
+                                appendInlineContent(id, if (alt.isBlank()) "[图片]" else "[图片] $alt")
+                            } else {
+                                append(source.substring(range))
+                            }
+                        }
+                    }
                     linkLabel != null -> {
-                        val url = match.groups[5]?.value.orEmpty().trim()
+                        val url = match.groups[6]?.value.orEmpty().trim()
                         val label = linkLabel.ifBlank { url }
                         if (url.startsWith("http://") || url.startsWith("https://")) {
                             withLink(
@@ -308,6 +344,13 @@ object MarkdownVisual {
                     code != null -> withStyle(
                         SpanStyle(fontFamily = FontFamily.Monospace, background = highlightColor.copy(alpha = 0.25f)),
                     ) { append(code) }
+                    latexInline != null -> withStyle(
+                        SpanStyle(
+                            fontFamily = FontFamily.Serif,
+                            fontStyle = FontStyle.Italic,
+                            background = highlightColor.copy(alpha = 0.16f),
+                        ),
+                    ) { append(LatexMath.format(latexInline)) }
                     bold != null -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(bold) }
                     italic != null -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(italic) }
                     highlight != null -> withStyle(SpanStyle(background = highlightColor)) { append(highlight) }

@@ -98,10 +98,18 @@ fun WantNoteApp() {
         nav.navigate("editor/$id?mode=${mode.name}")
     }
 
+    var creatingNote by remember { mutableStateOf(false) }
+
     fun createAndOpen() {
+        if (creatingNote) return
+        creatingNote = true
         scope.launch {
-            val note = notes.createBlank()
-            openEditor(note.id, EditorMode.WYSIWYG)
+            try {
+                val note = notes.createBlank()
+                openEditor(note.id, EditorMode.WYSIWYG)
+            } finally {
+                creatingNote = false
+            }
         }
     }
 
@@ -208,12 +216,22 @@ fun WantNoteApp() {
                 EditorScreen(
                     noteId = noteId,
                     initialMode = initialMode,
-                    onBack = {
-                        val popped = nav.popBackStack()
-                        if (!popped || nav.currentBackStackEntry == null) {
-                            nav.navigate(MainTab.Home.route) {
-                                popUpTo(nav.graph.findStartDestination().id) { inclusive = false }
-                                launchSingleTop = true
+                    onBack = { deletedBlank ->
+                        if (deletedBlank) {
+                            // 空笔记返回时直接安全回到主页，避免回退到已删除详情页或退出应用。
+                            if (!nav.popBackStack(MainTab.Home.route, inclusive = false)) {
+                                nav.navigate(MainTab.Home.route) {
+                                    popUpTo(nav.graph.findStartDestination().id) { inclusive = false }
+                                    launchSingleTop = true
+                                }
+                            }
+                        } else {
+                            val hasPrev = nav.previousBackStackEntry != null
+                            if (!hasPrev || !nav.popBackStack()) {
+                                nav.navigate(MainTab.Home.route) {
+                                    popUpTo(nav.graph.findStartDestination().id) { inclusive = false }
+                                    launchSingleTop = true
+                                }
                             }
                         }
                     },
