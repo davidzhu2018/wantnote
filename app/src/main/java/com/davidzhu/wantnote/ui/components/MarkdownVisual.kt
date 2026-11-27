@@ -135,10 +135,12 @@ object MarkdownVisual {
                 linkLabel != null -> segments += Segment(
                     range.first, range.last + 1, linkLabel.ifBlank { match.groups[6]?.value.orEmpty() },
                     SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline),
+                    visibleOffsetInSource = if (linkLabel.isNotBlank()) 1 else -1,
                 )
                 code != null -> segments += Segment(
                     range.first, range.last + 1, code,
                     SpanStyle(fontFamily = FontFamily.Monospace, background = highlightColor.copy(alpha = 0.25f)),
+                    visibleOffsetInSource = 1,
                 )
                 latexInline != null -> segments += Segment(
                     range.first, range.last + 1, LatexMath.format(latexInline),
@@ -151,18 +153,22 @@ object MarkdownVisual {
                 bold != null -> segments += Segment(
                     range.first, range.last + 1, bold,
                     SpanStyle(fontWeight = FontWeight.Bold),
+                    visibleOffsetInSource = 2,
                 )
                 italic != null -> segments += Segment(
                     range.first, range.last + 1, italic,
                     SpanStyle(fontStyle = FontStyle.Italic),
+                    visibleOffsetInSource = 1,
                 )
                 highlight != null -> segments += Segment(
                     range.first, range.last + 1, highlight,
                     SpanStyle(background = highlightColor),
+                    visibleOffsetInSource = 2,
                 )
                 strike != null -> segments += Segment(
                     range.first, range.last + 1, strike,
                     SpanStyle(textDecoration = TextDecoration.LineThrough),
+                    visibleOffsetInSource = 2,
                 )
             }
             cursor = range.last + 1
@@ -199,6 +205,21 @@ object MarkdownVisual {
                 for (offset in 1..segment.visible.length) {
                     originalTo[segment.start + offset] = outputIndex + offset
                 }
+            } else if (segment.visibleOffsetInSource >= 0 &&
+                segment.start + segment.visibleOffsetInSource + segment.visible.length <= segment.end
+            ) {
+                val prefixLen = segment.visibleOffsetInSource
+                val visLen = segment.visible.length
+                val totalLen = segment.end - segment.start
+                for (offset in 1..prefixLen) {
+                    originalTo[segment.start + offset] = outputIndex
+                }
+                for (offset in 1..visLen) {
+                    originalTo[segment.start + prefixLen + offset] = outputIndex + offset
+                }
+                for (offset in (prefixLen + visLen + 1)..totalLen) {
+                    originalTo[segment.start + offset] = outputIndex + visLen
+                }
             } else {
                 for (offset in 1 until segment.end - segment.start) {
                     originalTo[segment.start + offset] = outputIndex
@@ -213,14 +234,16 @@ object MarkdownVisual {
             sourceIndex += 1
         }
         val transformedLength = emittedLength(segments)
-        val reverse = IntArray(transformedLength + 1) { n }
+        val reverse = IntArray(transformedLength + 1) { -1 }
+        // 反向映射优先取最右侧的原文偏移（例如 `**abc**` 结尾映射到闭合 `**` 之后，
+        // 这样点在格式化文字末尾或拖到末尾后可以继续输入正文，不会卡在语法符号前面）。
         for (i in 0..n) {
             val t = originalTo[i].coerceIn(0, transformedLength)
-            if (reverse[t] == n || i < reverse[t]) reverse[t] = i
+            reverse[t] = i
         }
         var last = 0
         for (i in 0..transformedLength) {
-            if (reverse[i] == n && i > 0) reverse[i] = last else last = reverse[i]
+            if (reverse[i] < 0) reverse[i] = last else last = reverse[i]
         }
 
         return Rendered(
@@ -376,6 +399,8 @@ object MarkdownVisual {
         val end: Int,
         val visible: String,
         val style: SpanStyle?,
+        /** When >= 0, visible characters map 1-to-1 starting at `start + visibleOffsetInSource`. */
+        val visibleOffsetInSource: Int = -1,
     )
 }
 

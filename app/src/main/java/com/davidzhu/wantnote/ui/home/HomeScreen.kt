@@ -16,7 +16,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowDropDown
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import com.davidzhu.wantnote.BuildConfig
+import com.davidzhu.wantnote.update.UpdateInfo
 import com.davidzhu.wantnote.ui.components.WantAlertDialog
 import com.davidzhu.wantnote.ui.components.WantCircularProgressIndicator
 import com.davidzhu.wantnote.ui.components.WantDropdownMenu
@@ -67,6 +76,7 @@ fun HomeScreen(
     onEditNote: (String) -> Unit = onOpenNote,
     onSearch: () -> Unit,
     onCreate: () -> Unit,
+    availableUpdate: UpdateInfo? = null,
 ) {
     val repository = LocalNotes.current
     val settingsRepo = LocalSettings.current
@@ -83,6 +93,8 @@ fun HomeScreen(
     var menuNote by remember { mutableStateOf<NoteWithDetails?>(null) }
     var deleteTarget by remember { mutableStateOf<NoteWithDetails?>(null) }
     var sendTarget by remember { mutableStateOf<NoteWithDetails?>(null) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     var busy by remember { mutableStateOf(false) }
     // 0.10.0：卡片盒 / 标签筛选（会话级，不持久化）。
     var filter by remember { mutableStateOf<HomeFilter>(HomeFilter.All) }
@@ -103,6 +115,28 @@ fun HomeScreen(
         topBar = {
             WantTopBar(
                 title = "想记",
+                navigationIcon = if (availableUpdate != null) {
+                    {
+                        IconButton(onClick = { showUpdateDialog = true }) {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF1A73E8)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.ArrowUpward,
+                                    contentDescription = "发现新版本 ${availableUpdate.versionName}",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    null
+                },
                 actions = {
                     IconButton(onClick = onSearch) {
                         Icon(Icons.Outlined.Search, contentDescription = "搜索")
@@ -241,6 +275,31 @@ fun HomeScreen(
             busy = false
             snackbar.showSnackbar(message)
         }
+    }
+
+    if (showUpdateDialog && availableUpdate != null) {
+        WantAlertDialog(
+            onDismissRequest = { showUpdateDialog = false },
+            title = { Text("发现新版本 ${availableUpdate.versionName}") },
+            text = {
+                Text("GitHub 上的 ${availableUpdate.releaseName} 新于当前的 ${BuildConfig.VERSION_NAME}。要立即下载更新吗？")
+            },
+            confirmButton = {
+                WantTextButton(
+                    onClick = {
+                        runCatching {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(availableUpdate.apkUrl ?: availableUpdate.htmlUrl)),
+                            )
+                        }
+                        showUpdateDialog = false
+                    },
+                ) { Text("下载") }
+            },
+            dismissButton = {
+                WantTextButton(onClick = { showUpdateDialog = false }) { Text("稍后") }
+            },
+        )
     }
 
     menuNote?.let { target ->

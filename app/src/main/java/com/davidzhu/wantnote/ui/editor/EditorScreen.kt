@@ -34,6 +34,9 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.FormatIndentDecrease
@@ -689,11 +692,10 @@ fun EditorScreen(
             focusedId = created.id
         } else {
             fields[block.id] = incoming
-            updateBlocks(blocks.map { if (it.id == block.id) it.copy(text = incoming.text) else it })
-            // Typing or moving the caret right after an `@` re-derives the
-            // live mention; moving out of the query (or deleting the `@`)
-            // closes the search popup. This also fires on selection-only
-            // changes, which is exactly what we want.
+            // 仅光标拖拽或选区变化时绝不重建 blocks 列表，避免 LazyColumn 重组打断拖拽光标手势。
+            if (incoming.text != block.text) {
+                updateBlocks(blocks.map { if (it.id == block.id) it.copy(text = incoming.text) else it })
+            }
             val active = NoteMentionParser.activeMention(incoming.text, incoming.selection.min)
             mention = active?.let { EditorMention(block.id, it) }
         }
@@ -1190,6 +1192,11 @@ fun EditorScreen(
             )
         },
     ) { padding ->
+        val selectionColors = TextSelectionColors(
+            handleColor = MaterialTheme.colorScheme.primary,
+            backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.30f),
+        )
+        CompositionLocalProvider(LocalTextSelectionColors provides selectionColors) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1295,6 +1302,7 @@ fun EditorScreen(
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
             }
+        }
         }
     }
 

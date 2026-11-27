@@ -26,6 +26,10 @@ import com.davidzhu.wantnote.ui.components.WantNavigationBarItem
 import com.davidzhu.wantnote.ui.components.WantScaffold
 import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import com.davidzhu.wantnote.update.UpdateCheck
+import com.davidzhu.wantnote.update.UpdateCheckResult
+import com.davidzhu.wantnote.update.UpdateInfo
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,7 +82,10 @@ private enum class MainTab(
 fun WantNoteApp() {
     val nav = rememberNavController()
     val notes = LocalNotes.current
+    val settingsRepo = LocalSettings.current
     val scope = rememberCoroutineScope()
+    var availableUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
+    var coldStartChecked by remember { mutableStateOf(false) }
     val backStack by nav.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
     val showBar = currentRoute in setOf("home", "calendar", "insights", "settings")
@@ -88,6 +95,21 @@ fun WantNoteApp() {
     if (migrationGate) {
         MigrationGate(onDone = { migrationGate = false })
         return
+    }
+
+    // 0.17.0：每次冷启动自动检查一次更新（仅当「自动检查更新」勾选开启时），
+    // 有新版本时不弹窗，仅在主页左上角显示蓝色向上箭头圆圈图标。
+    LaunchedEffect(Unit) {
+        if (!coldStartChecked) {
+            coldStartChecked = true
+            val currentSettings = runCatching { settingsRepo.get() }.getOrNull()
+            if (currentSettings == null || currentSettings.autoCheckUpdate) {
+                val res = runCatching { UpdateCheck.check() }.getOrNull()
+                if (res is UpdateCheckResult.Available) {
+                    availableUpdate = res.info
+                }
+            }
+        }
     }
 
     fun openDetail(id: String) {
@@ -145,6 +167,7 @@ fun WantNoteApp() {
                     onEditNote = { openEditor(it, EditorMode.WYSIWYG) },
                     onSearch = { nav.navigate("search") },
                     onCreate = { createAndOpen() },
+                    availableUpdate = availableUpdate,
                 )
             }
             composable("calendar") {
@@ -187,7 +210,10 @@ fun WantNoteApp() {
                 AiSettingsScreen(onBack = { nav.popBackStack() })
             }
             composable("settings/about") {
-                AboutScreen(onBack = { nav.popBackStack() })
+                AboutScreen(
+                    onBack = { nav.popBackStack() },
+                    onUpdateStatus = { info -> availableUpdate = info },
+                )
             }
             composable(
                 route = "note/{noteId}",

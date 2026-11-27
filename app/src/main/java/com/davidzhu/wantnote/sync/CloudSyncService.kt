@@ -424,6 +424,7 @@ internal data class SyncUserSettings(
     val aiEnableBox: Boolean = AppSettings.DEFAULT.aiEnableBox,
     val aiEnableSummary: Boolean = AppSettings.DEFAULT.aiEnableSummary,
     val aiEnableInsight: Boolean = AppSettings.DEFAULT.aiEnableInsight,
+    val autoCheckUpdate: Boolean = AppSettings.DEFAULT.autoCheckUpdate,
 ) {
     fun applyOnto(local: AppSettings): AppSettings = local.copy(
         themeName = themeName,
@@ -452,6 +453,7 @@ internal data class SyncUserSettings(
         aiEnableBox = aiEnableBox,
         aiEnableSummary = aiEnableSummary,
         aiEnableInsight = aiEnableInsight,
+        autoCheckUpdate = autoCheckUpdate,
     )
 
     fun toJsonObject(): JSONObject = JSONObject()
@@ -481,6 +483,7 @@ internal data class SyncUserSettings(
         .put("aiEnableBox", aiEnableBox)
         .put("aiEnableSummary", aiEnableSummary)
         .put("aiEnableInsight", aiEnableInsight)
+        .put("autoCheckUpdate", autoCheckUpdate)
 
     companion object {
         fun from(settings: AppSettings): SyncUserSettings = SyncUserSettings(
@@ -510,6 +513,7 @@ internal data class SyncUserSettings(
             aiEnableBox = settings.aiEnableBox,
             aiEnableSummary = settings.aiEnableSummary,
             aiEnableInsight = settings.aiEnableInsight,
+            autoCheckUpdate = settings.autoCheckUpdate,
         )
 
         fun fromJsonObject(obj: JSONObject): SyncUserSettings {
@@ -541,6 +545,7 @@ internal data class SyncUserSettings(
                 aiEnableBox = obj.optBoolean("aiEnableBox", d.aiEnableBox),
                 aiEnableSummary = obj.optBoolean("aiEnableSummary", d.aiEnableSummary),
                 aiEnableInsight = obj.optBoolean("aiEnableInsight", d.aiEnableInsight),
+                autoCheckUpdate = obj.optBoolean("autoCheckUpdate", d.autoCheckUpdate),
             )
         }
     }

@@ -51,6 +51,7 @@ object Markup {
             return Triple(next, caret, caret)
         }
         val next = text.substring(0, lo) + marker + text.substring(lo, hi) + marker + text.substring(hi)
-        return Triple(next, lo + marker.length, hi + marker.length)
+        val afterClosing = hi + marker.length * 2
+        return Triple(next, afterClosing, afterClosing)
     }
 }

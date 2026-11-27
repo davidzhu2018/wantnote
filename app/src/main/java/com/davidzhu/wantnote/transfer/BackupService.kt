@@ -529,6 +529,7 @@ class BackupService(
         .put("aiEnableBox", settings.aiEnableBox)
         .put("aiEnableSummary", settings.aiEnableSummary)
         .put("aiEnableInsight", settings.aiEnableInsight)
+        .put("autoCheckUpdate", settings.autoCheckUpdate)
         .toString()
 
     // ---- JSON 反序列化（缺字段用当前默认值，兼容未来/旧版备份） -------------
@@ -699,6 +700,7 @@ class BackupService(
             aiEnableBox = obj.optBoolean("aiEnableBox", default.aiEnableBox),
             aiEnableSummary = obj.optBoolean("aiEnableSummary", default.aiEnableSummary),
             aiEnableInsight = obj.optBoolean("aiEnableInsight", default.aiEnableInsight),
+            autoCheckUpdate = obj.optBoolean("autoCheckUpdate", default.autoCheckUpdate),
         )
     }
 

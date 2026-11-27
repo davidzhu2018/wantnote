@@ -138,6 +138,8 @@ data class AppSettings(
     val aiEnableBox: Boolean = true,
     val aiEnableSummary: Boolean = true,
     val aiEnableInsight: Boolean = true,
+    /** 0.17.0：是否自动检查更新（默认开启：冷启动与进入关于菜单时自动检查）。 */
+    val autoCheckUpdate: Boolean = true,
 ) {
     val palette: ThemePalette get() = ThemePalette.fromStorage(themeName)
     val fontScaleOption: FontScaleOption get() = FontScaleOption.fromStorage(fontScale)
