@@ -31,6 +31,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -189,6 +192,15 @@ fun EditorScreen(
     var showAdvancedMenu by remember { mutableStateOf(false) }
     var sourceText by remember { mutableStateOf(TextFieldValue("")) }
     var focusedId by remember { mutableStateOf<String?>(null) }
+    var pendingFocusId by remember { mutableStateOf<String?>(null) }
+    var focusRequestToken by remember { mutableIntStateOf(0) }
+    val listState = rememberLazyListState()
+
+    fun requestFocusForBlock(id: String) {
+        focusedId = id
+        pendingFocusId = id
+        focusRequestToken += 1
+    }
     var noteTags by remember { mutableStateOf(listOf<Tag>()) }
     var showTagPicker by remember { mutableStateOf(false) }
     // 0.10.0 卡片盒：本会话选择的卡片盒 ID（"" = 未分配）。手动选择后立即
@@ -303,7 +315,7 @@ fun EditorScreen(
         next.add(at, block)
         updateBlocks(next)
         fields[block.id] = TextFieldValue(block.text, TextRange(block.text.length))
-        if (focus) focusedId = block.id
+        if (focus) requestFocusForBlock(block.id)
     }
 
     fun newBlock(
@@ -471,6 +483,7 @@ fun EditorScreen(
         val (next, lo, hi) = Markup.wrap(value.text, value.selection.min, value.selection.max, marker)
         fields[id] = TextFieldValue(next, TextRange(lo, hi))
         updateBlocks(blocks.map { if (it.id == id) it.copy(text = next) else it })
+        requestFocusForBlock(id)
     }
 
     /**
@@ -689,7 +702,7 @@ fun EditorScreen(
                 },
             )
             fields[created.id] = TextFieldValue(right, TextRange(right.length))
-            focusedId = created.id
+            requestFocusForBlock(created.id)
         } else {
             fields[block.id] = incoming
             // 仅光标拖拽或选区变化时绝不重建 blocks 列表，避免 LazyColumn 重组打断拖拽光标手势。
@@ -753,11 +766,19 @@ fun EditorScreen(
             }
     }
 
-    LaunchedEffect(focusedId) {
-        val id = focusedId ?: return@LaunchedEffect
-        kotlinx.coroutines.yield()
-        val requester = requesters[id] ?: return@LaunchedEffect
-        runCatching { requester.requestFocus() }
+    LaunchedEffect(pendingFocusId, focusRequestToken) {
+        val id = pendingFocusId ?: return@LaunchedEffect
+        val idx = blocks.indexOfFirst { it.id == id }
+        if (idx >= 0) {
+            runCatching { listState.animateScrollToItem(idx) }
+        }
+        withFrameNanos { }
+        val requester = requesters[id]
+        if (requester != null) {
+            if (runCatching { requester.requestFocus() }.isSuccess) {
+                pendingFocusId = null
+            }
+        }
     }
 
     val charCount = if (mode == EditorMode.SOURCE) {
@@ -1262,6 +1283,7 @@ fun EditorScreen(
                     )
                 } else {
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier
                             .fillMaxSize()
                             .weight(1f),
@@ -1273,6 +1295,11 @@ fun EditorScreen(
                                 number = orderedNumber(blocks, index),
                                 value = fieldOf(block),
                                 focusRequester = requesterOf(block.id),
+                                shouldRequestFocus = pendingFocusId == block.id,
+                                focusRequestToken = focusRequestToken,
+                                onFocusConsumed = { consumedId ->
+                                    if (pendingFocusId == consumedId) pendingFocusId = null
+                                },
                                 showPlaceholder = index == 0 && blocks.size == 1 && block.text.isEmpty() &&
                                     block.blockType == BlockType.PARAGRAPH,
                                 linkTitles = linkTitles,
@@ -1450,6 +1477,9 @@ private fun OutlineBlockRow(
     number: Int,
     value: TextFieldValue,
     focusRequester: FocusRequester,
+    shouldRequestFocus: Boolean,
+    focusRequestToken: Int,
+    onFocusConsumed: (String) -> Unit,
     showPlaceholder: Boolean,
     linkTitles: Map<String, String>,
     onFocus: () -> Unit,
@@ -1458,6 +1488,13 @@ private fun OutlineBlockRow(
     onBackspaceEmpty: () -> Unit,
     onOpenVideo: (String) -> Unit,
 ) {
+    LaunchedEffect(shouldRequestFocus, focusRequestToken) {
+        if (shouldRequestFocus) {
+            withFrameNanos { }
+            runCatching { focusRequester.requestFocus() }
+            onFocusConsumed(block.id)
+        }
+    }
     val scale = LocalFontScale.current
     val fontFamily = LocalEditorFontFamily.current
     // 标题块按级别放大加粗；其他块用块级字号设置。

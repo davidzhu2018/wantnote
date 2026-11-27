@@ -31,6 +31,8 @@ data class SettingsEntry(
 )
 
 val SettingsEntries = listOf(
+    SettingsEntry("账号管理", "设置用户名与头像", "settings/account"),
+    SettingsEntry("数据统计", "笔记与卡片盒统计、时段分布与创作热力图", "settings/stats"),
     SettingsEntry("通用设置", "主题、日夜切换", "settings/general"),
     SettingsEntry("主题定制", "自定义配色、自建主题与重置", "settings/themes"),
     SettingsEntry("编辑器设置", "界面字体、字号", "settings/editor"),

@@ -55,6 +55,8 @@ import com.davidzhu.wantnote.ui.insights.InsightsScreen
 import com.davidzhu.wantnote.ui.migration.MigrationGate
 import com.davidzhu.wantnote.ui.search.SearchScreen
 import com.davidzhu.wantnote.ui.settings.AboutScreen
+import com.davidzhu.wantnote.ui.settings.AccountSettingsScreen
+import com.davidzhu.wantnote.ui.settings.StatsScreen
 import com.davidzhu.wantnote.ui.settings.AiSettingsScreen
 import com.davidzhu.wantnote.ui.settings.AttachmentSettingsScreen
 import com.davidzhu.wantnote.ui.settings.BackupSyncScreen
@@ -181,6 +183,12 @@ fun WantNoteApp() {
             }
             composable("settings") {
                 SettingsScreen(onOpen = { nav.navigate(it) })
+            }
+            composable("settings/account") {
+                AccountSettingsScreen(onBack = { nav.popBackStack() })
+            }
+            composable("settings/stats") {
+                StatsScreen(onBack = { nav.popBackStack() })
             }
             composable("settings/general") {
                 GeneralSettingsScreen(onBack = { nav.popBackStack() })

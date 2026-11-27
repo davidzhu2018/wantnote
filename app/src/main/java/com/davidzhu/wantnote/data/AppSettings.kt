@@ -49,6 +49,7 @@ enum class HomeViewMode(val label: String) {
     WATERFALL("瀑布流"),
     MINIMAL("极简"),
     TIMESTAMP("时间戳"),
+    MOMENTS("朋友圈"),
     ;
 
     companion object {
@@ -140,6 +141,11 @@ data class AppSettings(
     val aiEnableInsight: Boolean = true,
     /** 0.17.0：是否自动检查更新（默认开启：冷启动与进入关于菜单时自动检查）。 */
     val autoCheckUpdate: Boolean = true,
+    /** 0.17.2：账号管理（用户名与头像本地相对路径，用于朋友圈视图与后续账户体系）。 */
+    val profileNickname: String = "",
+    val profileAvatarPath: String = "",
+    /** 0.17.2：数据统计创作热力图颜色（默认绿色）。 */
+    val heatmapColorHex: String = "#2EA043",
 ) {
     val palette: ThemePalette get() = ThemePalette.fromStorage(themeName)
     val fontScaleOption: FontScaleOption get() = FontScaleOption.fromStorage(fontScale)

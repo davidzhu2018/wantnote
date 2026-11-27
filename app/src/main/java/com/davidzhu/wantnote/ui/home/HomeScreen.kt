@@ -193,6 +193,8 @@ fun HomeScreen(
                     viewMode = viewMode,
                     onOpenNote = onOpenNote,
                     onLongPressNote = { id -> menuNote = items.firstOrNull { it.note.id == id } },
+                    profileNickname = settings.profileNickname,
+                    profileAvatarPath = settings.profileAvatarPath,
                 )
             }
         }

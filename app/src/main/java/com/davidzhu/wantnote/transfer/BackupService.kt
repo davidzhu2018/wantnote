@@ -530,6 +530,9 @@ class BackupService(
         .put("aiEnableSummary", settings.aiEnableSummary)
         .put("aiEnableInsight", settings.aiEnableInsight)
         .put("autoCheckUpdate", settings.autoCheckUpdate)
+        .put("profileNickname", settings.profileNickname)
+        .put("profileAvatarPath", settings.profileAvatarPath)
+        .put("heatmapColorHex", settings.heatmapColorHex)
         .toString()
 
     // ---- JSON 反序列化（缺字段用当前默认值，兼容未来/旧版备份） -------------
@@ -701,6 +704,9 @@ class BackupService(
             aiEnableSummary = obj.optBoolean("aiEnableSummary", default.aiEnableSummary),
             aiEnableInsight = obj.optBoolean("aiEnableInsight", default.aiEnableInsight),
             autoCheckUpdate = obj.optBoolean("autoCheckUpdate", default.autoCheckUpdate),
+            profileNickname = obj.optString("profileNickname", default.profileNickname),
+            profileAvatarPath = obj.optString("profileAvatarPath", default.profileAvatarPath),
+            heatmapColorHex = obj.optString("heatmapColorHex", default.heatmapColorHex),
         )
     }
 

@@ -13,7 +13,28 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import com.davidzhu.wantnote.data.BlockType
+import com.davidzhu.wantnote.transfer.MarkdownCodec
+import com.davidzhu.wantnote.ui.LocalMedia
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.basic.Icon
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -106,6 +127,8 @@ fun NoteCollection(
     modifier: Modifier = Modifier,
     emptyText: String? = null,
     links: List<NoteLink> = emptyList(),
+    profileNickname: String = "",
+    profileAvatarPath: String = "",
 ) {
     if (items.isEmpty()) {
         if (emptyText != null) {
@@ -122,6 +145,15 @@ fun NoteCollection(
         HomeViewMode.WATERFALL -> WaterfallView(items, onOpenNote, onLongPressNote, links, modifier)
         HomeViewMode.MINIMAL -> MinimalView(items, onOpenNote, onLongPressNote, links, modifier)
         HomeViewMode.TIMESTAMP -> TimestampView(items, onOpenNote, onLongPressNote, links, modifier)
+        HomeViewMode.MOMENTS -> MomentsView(
+            items = items,
+            onOpenNote = onOpenNote,
+            onLongPressNote = onLongPressNote,
+            links = links,
+            profileNickname = profileNickname,
+            profileAvatarPath = profileAvatarPath,
+            modifier = modifier,
+        )
     }
 }
 
@@ -433,6 +465,242 @@ private fun TimestampView(items: List<NoteWithDetails>, onOpenNote: (String) -> 
                     }
                 }
             }
+        }
+    }
+}
+
+
+/**
+ * 0.17.2：仿微信朋友圈视图。
+ * 展示用户头像、昵称、正文前 200 字、最多 9 张图片九宫格以及发布时间。
+ */
+@Composable
+private fun MomentsView(
+    items: List<NoteWithDetails>,
+    onOpenNote: (String) -> Unit,
+    onLongPressNote: (String) -> Unit,
+    links: List<NoteLink>,
+    profileNickname: String,
+    profileAvatarPath: String,
+    modifier: Modifier = Modifier,
+) {
+    val media = LocalMedia.current
+    val linkTitles = remember(items) { items.associate { it.note.id to SearchText.displayTitle(it.note) } }
+    val displayName = profileNickname.trim().ifBlank { "想记用户" }
+    val avatarBitmap by produceState<Bitmap?>(initialValue = null, profileAvatarPath) {
+        value = if (profileAvatarPath.isBlank()) {
+            null
+        } else {
+            withContext(Dispatchers.IO) { media.loadPreview(profileAvatarPath, maxSide = 256) }
+        }
+    }
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val nicknameColor = if (isDark) Color(0xFF7DA7D9) else Color(0xFF576B95)
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 14.dp, top = 8.dp, end = 14.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(items, key = { it.note.id }) { item ->
+            val images = remember(item.note.id, item.note.body, item.blocks) {
+                extractMomentImages(item)
+            }
+            val bodyExcerpt = remember(item.note.id, item.note.title, item.note.body) {
+                extractMomentsExcerpt(item.note.body, maxChars = 200)
+            }
+            NoteCard(
+                onClick = { onOpenNote(item.note.id) },
+                onLongClick = { onLongPressNote(item.note.id) },
+                elevation = 7,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    // 左侧用户头像（圆角方形，仿微信朋友圈）
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        val bmp = avatarBitmap
+                        if (bmp != null) {
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = displayName,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Outlined.Person,
+                                contentDescription = displayName,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(26.dp),
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = displayName,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = nicknameColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (item.note.title.isNotBlank()) {
+                            Text(
+                                text = item.note.title.trim(),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(top = 4.dp),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (bodyExcerpt.isNotBlank()) {
+                            MarkdownText(
+                                text = bodyExcerpt,
+                                linkTitles = linkTitles,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                renderInlineImages = false,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                        if (images.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            MomentsNineGrid(images = images)
+                        }
+                        TagChipRow(tags = item.tags, modifier = Modifier.padding(top = 8.dp), max = 3)
+                        Text(
+                            text = Dates.formatTimestamp(
+                                if (item.note.createdAt > 0L) item.note.createdAt else item.note.updatedAt,
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                        NoteLinkFooter(
+                            noteId = item.note.id,
+                            links = links,
+                            linkTitles = linkTitles,
+                            onOpenNote = onOpenNote,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 从块列表与正文 Markdown / HTML `<img>` 中提取最多 9 张图片路径或 URL。 */
+private fun extractMomentImages(item: NoteWithDetails): List<String> {
+    val result = LinkedHashSet<String>()
+    item.blocks
+        .filter { it.blockType == BlockType.IMAGE && it.mediaPath.isNotBlank() }
+        .forEach { result += it.mediaPath.trim() }
+    val mdImgRegex = Regex("""!\[[^\]]*]\(([^)\s]+)[^)]*\)""")
+    mdImgRegex.findAll(item.note.body).forEach { m ->
+        val url = m.groupValues[1].trim()
+        if (url.isNotEmpty()) result += url
+    }
+    val htmlImgRegex = Regex("""(?i)<img\b([^>]*)>""")
+    htmlImgRegex.findAll(item.note.body).forEach { m ->
+        val url = MarkdownCodec.extractHtmlAttr(m.groupValues[1], "src").orEmpty().trim()
+        if (url.isNotEmpty()) result += url
+    }
+    return result.take(9)
+}
+
+/** 提取正文前 200 字（剥离图片源码与块级前缀，保留可读文字）。 */
+private fun extractMomentsExcerpt(body: String, maxChars: Int = 200): String {
+    val cleaned = body.trim().lineSequence()
+        .map { line ->
+            var text = line.trim()
+            text = text.removePrefix("[x] ").removePrefix("[ ] ")
+            text = text.replace(Regex("""^#{1,6}\s+"""), "")
+            text = text.replace(Regex("""^>\s?"""), "")
+            text = text.replace(Regex("""^```.*$"""), "")
+            text = text.replace(Regex("""^~~~.*$"""), "")
+            text = text.replace(Regex("""^[-*+]\s+"""), "")
+            text = text.replace(Regex("""^\d+[.)]\s+"""), "")
+            text = text.replace(Regex("""^---+$"""), "")
+            SearchText.stripImagesForPreview(text)
+        }
+        .filter { it.isNotBlank() }
+        .joinToString("\n")
+    return if (cleaned.length > maxChars) cleaned.take(maxChars) + "…" else cleaned
+}
+
+@Composable
+private fun MomentsNineGrid(images: List<String>) {
+    if (images.size == 1) {
+        MomentImageTile(
+            path = images.first(),
+            modifier = Modifier
+                .fillMaxWidth(0.72f)
+                .aspectRatio(4f / 3f),
+        )
+        return
+    }
+    val cols = if (images.size == 4) 2 else 3
+    val rows = images.chunked(cols)
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        rows.forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                row.forEach { path ->
+                    MomentImageTile(
+                        path = path,
+                        modifier = Modifier
+                            .weight(1f)
+                            .aspectRatio(1f),
+                    )
+                }
+                repeat(cols - row.size) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MomentImageTile(path: String, modifier: Modifier = Modifier) {
+    val media = LocalMedia.current
+    val bitmap by produceState<Bitmap?>(initialValue = null, path) {
+        value = withContext(Dispatchers.IO) { media.loadPreview(path, maxSide = 720) }
+    }
+    val bmp = bitmap
+    if (bmp != null) {
+        Image(
+            bitmap = bmp.asImageBitmap(),
+            contentDescription = "笔记图片",
+            modifier = modifier.clip(RoundedCornerShape(6.dp)),
+            contentScale = ContentScale.Crop,
+        )
+    } else {
+        Box(
+            modifier = modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "图片",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

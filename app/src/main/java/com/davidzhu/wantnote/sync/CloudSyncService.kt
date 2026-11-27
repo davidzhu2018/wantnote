@@ -425,6 +425,9 @@ internal data class SyncUserSettings(
     val aiEnableSummary: Boolean = AppSettings.DEFAULT.aiEnableSummary,
     val aiEnableInsight: Boolean = AppSettings.DEFAULT.aiEnableInsight,
     val autoCheckUpdate: Boolean = AppSettings.DEFAULT.autoCheckUpdate,
+    val profileNickname: String = AppSettings.DEFAULT.profileNickname,
+    val profileAvatarPath: String = AppSettings.DEFAULT.profileAvatarPath,
+    val heatmapColorHex: String = AppSettings.DEFAULT.heatmapColorHex,
 ) {
     fun applyOnto(local: AppSettings): AppSettings = local.copy(
         themeName = themeName,
@@ -454,6 +457,9 @@ internal data class SyncUserSettings(
         aiEnableSummary = aiEnableSummary,
         aiEnableInsight = aiEnableInsight,
         autoCheckUpdate = autoCheckUpdate,
+        profileNickname = profileNickname,
+        profileAvatarPath = profileAvatarPath,
+        heatmapColorHex = heatmapColorHex,
     )
 
     fun toJsonObject(): JSONObject = JSONObject()
@@ -484,6 +490,9 @@ internal data class SyncUserSettings(
         .put("aiEnableSummary", aiEnableSummary)
         .put("aiEnableInsight", aiEnableInsight)
         .put("autoCheckUpdate", autoCheckUpdate)
+        .put("profileNickname", profileNickname)
+        .put("profileAvatarPath", profileAvatarPath)
+        .put("heatmapColorHex", heatmapColorHex)
 
     companion object {
         fun from(settings: AppSettings): SyncUserSettings = SyncUserSettings(
@@ -514,6 +523,9 @@ internal data class SyncUserSettings(
             aiEnableSummary = settings.aiEnableSummary,
             aiEnableInsight = settings.aiEnableInsight,
             autoCheckUpdate = settings.autoCheckUpdate,
+            profileNickname = settings.profileNickname,
+            profileAvatarPath = settings.profileAvatarPath,
+            heatmapColorHex = settings.heatmapColorHex,
         )
 
         fun fromJsonObject(obj: JSONObject): SyncUserSettings {
@@ -546,6 +558,9 @@ internal data class SyncUserSettings(
                 aiEnableSummary = obj.optBoolean("aiEnableSummary", d.aiEnableSummary),
                 aiEnableInsight = obj.optBoolean("aiEnableInsight", d.aiEnableInsight),
                 autoCheckUpdate = obj.optBoolean("autoCheckUpdate", d.autoCheckUpdate),
+                profileNickname = obj.optString("profileNickname", d.profileNickname),
+                profileAvatarPath = obj.optString("profileAvatarPath", d.profileAvatarPath),
+                heatmapColorHex = obj.optString("heatmapColorHex", d.heatmapColorHex),
             )
         }
     }
